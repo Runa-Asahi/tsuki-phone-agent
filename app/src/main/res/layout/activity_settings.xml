@@ -50,6 +50,8 @@
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_model" />
             <EditText android:id="@+id/cloudModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" />
+            <Button android:id="@+id/btnTestCloud" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="测试连接" />
+            <TextView android:id="@+id/cloudTestResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:textIsSelectable="true" />
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/label_max_steps" />
             <EditText android:id="@+id/maxSteps" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />

@@ -96,14 +96,10 @@ class AgentForegroundService : Service() {
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
         val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)
-        if (prefs.cloudProvider != AgentPreferences.PROVIDER_NONE) {
-            log("云端：${prefs.cloudProvider} ${prefs.cloudBaseUrl} model=${prefs.cloudModel} key=${prefs.cloudKeyMasked()}" +
-                if (cloud == null) "（未就绪：请在设置填写 API Key）" else "")
-        }
-        if ((prefs.routeMode == AgentPreferences.ROUTE_HYBRID || prefs.routeMode == AgentPreferences.ROUTE_CLOUD_ONLY) && cloud == null) {
-            log("路由=${prefs.routeMode} 但云端未就绪")
-        }
-        val router = LlmRouter(prefs, local, cloud)
+        val brain = com.runasakura.phoneagent.llm.CloudProviders.describe(prefs.routeMode, prefs.cloudProvider,
+            prefs.cloudBaseUrl, prefs.cloudModel, prefs.cloudApiKey, prefs.mnnModel)
+        log("大脑：$brain" + if (cloud == null && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY) "（云端未就绪）" else "")
+        val router = LlmRouter({ prefs.routeMode }, local, cloud).also { r -> r.log = { log(it) } }
         val loop = AgentLoop(
             prefs = prefs,
             router = router,
@@ -122,7 +118,9 @@ class AgentForegroundService : Service() {
             com.runasakura.phoneagent.ocr.OcrEngine.warmUp()
             (System.currentTimeMillis() - tw).let { if (it > 300) log("OCR 预热 ${it}ms") }
             broadcastStatus("running", "开始：$goal")
-            try {
+            if (!com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) {
+                log("仅云端：跳过本机 MNN 检测")
+            } else try {
                 val live = local.probe()
                 val m = live ?: local.resolveModel()
                 log(if (live != null) "MNN 当前模型：$live" else "MNN 未启动（发消息/打开应用等确定性任务不需要；复杂任务的模型兜底会不可用）")

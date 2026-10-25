@@ -131,22 +131,26 @@ class MainActivity : AppCompatActivity() {
         binding.goalInput.isEnabled = !running
     }
 
+    /** Home card shows the ACTIVE brain; never probes MNN in cloud_only. */
     private fun refreshMnnStatus() {
+        val p = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
+        val mode = p.routeMode
+        val cloudOk = com.runasakura.phoneagent.llm.CloudProviders.ready(p.cloudProvider, p.cloudBaseUrl, p.cloudApiKey)
+        if (!com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(mode)) {
+            binding.mnnStatus.text = if (cloudOk) "云端 ${p.cloudModel}" else "云端未配置"
+            binding.mnnStatus.setTextColor(ContextCompat.getColor(this, if (cloudOk) R.color.ok_green else R.color.err_red))
+            return
+        }
         binding.mnnStatus.text = "检测中…"
         lifecycleScope.launch {
-            val p = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
             val m = try {
                 kotlinx.coroutines.withTimeoutOrNull(4000) {
                     com.runasakura.phoneagent.llm.LocalMnnClient(p.mnnBaseUrl, p.mnnApiKey, p.mnnModel).probe()
                 }
             } catch (_: Exception) { null }
-            binding.mnnStatus.text = when {
-                m == null -> "未启动"
-                m.isBlank() -> "已连接"
-                else -> m
-            }
-            binding.mnnStatus.setTextColor(ContextCompat.getColor(this@MainActivity, if (m == null) R.color.warn_amber else R.color.ok_green))
-            if (m == null) binding.mnnStatus.contentDescription = "MNN 未启动：发消息、打开应用等任务不需要；复杂任务需在 MNN Chat 开启 API"
+            val local = when { m == null -> "本机未启动"; m.isBlank() -> "本机已连接"; else -> m }
+            binding.mnnStatus.text = if (cloudOk && mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY) "$local+云端" else local
+            binding.mnnStatus.setTextColor(ContextCompat.getColor(this@MainActivity, if (m == null && !cloudOk) R.color.warn_amber else R.color.ok_green))
         }
     }
 
@@ -234,8 +238,23 @@ class MainActivity : AppCompatActivity() {
                 .setTitle(if (fails == 0) "自检全部通过" else "自检：$fails 项失败")
                 .setMessage(res.joinToString("\n") { "${if (it.ok) "✅" else "❌"} ${it.name}\n    ${it.detail}" })
                 .setPositiveButton(android.R.string.ok, null)
+                .setNeutralButton("MNN 后台设置") { _, _ -> openMnnBackgroundSettings() }
                 .show()
         }
+    }
+
+    /**
+     * MNN Chat stalls when backgrounded (MagicOS throttles it; seen 170 s per request).
+     * Opens its app-info page → 电池 → 「允许后台活动」/ 应用启动管理 → 手动管理.
+     */
+    private fun openMnnBackgroundSettings() {
+        val pkg = listOf("com.alibaba.mnnllm.android.release", "com.alibaba.mnnllm.android").firstOrNull {
+            try { packageManager.getPackageInfo(it, 0); true } catch (_: Exception) { false }
+        }
+        Toast.makeText(this, "请在「电池/应用启动管理」里允许 MNN Chat 后台运行，并在最近任务里锁定它", Toast.LENGTH_LONG).show()
+        val i = if (pkg != null) Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$pkg"))
+        else Intent(android.provider.Settings.ACTION_SETTINGS)
+        try { startActivity(i) } catch (_: Exception) { startActivity(Intent(android.provider.Settings.ACTION_SETTINGS)) }
     }
 
     private fun exportDiagnostics() {

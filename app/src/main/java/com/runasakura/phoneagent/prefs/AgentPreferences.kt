@@ -22,6 +22,14 @@ class AgentPreferences(context: Context) {
         context.getSharedPreferences(PREFS_SECURE_FALLBACK, Context.MODE_PRIVATE)
     }
 
+    init {
+        // Pass R moved keys to the encrypted store; carry over a key saved in the plain file.
+        sp.getString(KEY_CLOUD_KEY, null)?.takeIf { it.isNotBlank() }?.let { old ->
+            if (secure.getString(KEY_CLOUD_KEY, "").isNullOrBlank()) secure.edit().putString(KEY_CLOUD_KEY, old).apply()
+            sp.edit().remove(KEY_CLOUD_KEY).apply()
+        }
+    }
+
     var mnnBaseUrl: String
         get() = sp.getString(KEY_MNN_URL, DEFAULT_MNN_URL) ?: DEFAULT_MNN_URL
         set(v) = sp.edit().putString(KEY_MNN_URL, v.trimEnd('/')).apply()
@@ -35,7 +43,8 @@ class AgentPreferences(context: Context) {
         set(v) = sp.edit().putString(KEY_MNN_MODEL, v).apply()
 
     var routeMode: String
-        get() = sp.getString(KEY_ROUTE, ROUTE_LOCAL_ONLY) ?: ROUTE_LOCAL_ONLY
+        get() = sp.getString(KEY_ROUTE, null)
+            ?: if (cloudApiKey.isNotBlank()) ROUTE_HYBRID else ROUTE_LOCAL_ONLY // recommended default with a key
         set(v) = sp.edit().putString(KEY_ROUTE, v).apply()
 
     /** none | deepseek | openai_compatible */

@@ -1,50 +1,61 @@
 package com.runasakura.phoneagent.llm
 
 import com.runasakura.phoneagent.prefs.AgentPreferences
+import kotlinx.coroutines.withTimeoutOrNull
 
+/**
+ * Routes each planning call. cloud_only NEVER touches the local MNN server.
+ * Local calls get a short stall budget when a cloud fallback exists (MNN Chat backgrounded
+ * on MagicOS can take 90–170 s), then the same step goes to the cloud.
+ */
 class LlmRouter(
-    private val prefs: AgentPreferences,
+    /** Read on EVERY call — never cached at service start. */
+    private val modeOf: () -> String,
     private val local: LlmClient,
-    private val cloud: LlmClient?
+    private val cloud: LlmClient?,
+    private val stallMs: Long = 15_000L,
+    private val fullMs: Long = 90_000L
 ) {
+    var log: (String) -> Unit = {}
+
+    val mode: String get() = modeOf()
+
     suspend fun plan(
         messages: List<ChatMessage>,
         forceCloud: Boolean = false,
         temperature: Double = 0.2
     ): LlmResponse {
-        val mode = prefs.routeMode
-        if (forceCloud && cloud != null && mode != AgentPreferences.ROUTE_LOCAL_ONLY) {
-            val r = cloud.chat(messages, temperature)
-            if (r.error == null) return r
-            if (mode == AgentPreferences.ROUTE_HYBRID) {
-                return local.chat(messages, temperature)
-            }
-            return r
-        }
-        return when (mode) {
-            AgentPreferences.ROUTE_LOCAL_ONLY -> local.chat(messages, temperature)
-            AgentPreferences.ROUTE_CLOUD_ONLY -> cloud?.chat(messages, temperature)
-                ?: LlmResponse("", "cloud", 0, "未配置云端（设置里选择 DeepSeek / OpenAI 兼容并填写 API Key）")
-            AgentPreferences.ROUTE_LOCAL_FIRST,
-            AgentPreferences.ROUTE_HYBRID -> {
-                val localResp = local.chat(messages, temperature)
-                if (localResp.error == null && localResp.content.isNotBlank()) {
-                    localResp
-                } else if (mode == AgentPreferences.ROUTE_HYBRID && cloud != null) {
-                    val cloudResp = cloud.chat(messages, temperature)
-                    if (cloudResp.error == null) {
-                        cloudResp
-                    } else {
-                        localResp.copy(
-                            error = listOfNotNull(localResp.error, cloudResp.error)
-                                .joinToString(" | ")
-                        )
+        val order = if (forceCloud && cloud != null && mode != AgentPreferences.ROUTE_LOCAL_ONLY)
+            listOf(RoutePolicy.Backend.CLOUD) else RoutePolicy.order(mode, cloud != null)
+        var last: LlmResponse? = null
+        for ((i, b) in order.withIndex()) {
+            val hasNext = i < order.lastIndex
+            when (b) {
+                RoutePolicy.Backend.CLOUD -> {
+                    val c = cloud ?: return LlmResponse("", "cloud", 0,
+                        "路由=仅云端，但云端未就绪（设置里选择提供商并填写 API Key）")
+                    val r = c.chat(messages, 0.0)
+                    log("云端 ${c.name} ${r.latencyMs}ms" + (r.error?.let { " 错误：$it" } ?: ""))
+                    if (r.error == null && r.content.isNotBlank()) return r
+                    last = r
+                }
+                RoutePolicy.Backend.LOCAL -> {
+                    val budget = if (hasNext) stallMs else fullMs
+                    val t0 = System.currentTimeMillis()
+                    val r = withTimeoutOrNull(budget) { local.chat(messages, temperature) }
+                    if (r == null) {
+                        val msg = "本机 MNN ${budget / 1000}s 无响应（MNN Chat 在后台常被 MagicOS 限速）"
+                        log(if (hasNext) "$msg，本步改用云端" else msg)
+                        last = LlmResponse("", local.name, System.currentTimeMillis() - t0, "local stall ${budget}ms")
+                        continue
                     }
-                } else {
-                    localResp
+                    log("本机 MNN ${r.latencyMs}ms" + (r.error?.let { " 错误：$it" } ?: ""))
+                    if (r.error == null && r.content.isNotBlank()) return r
+                    last = r
+                    if (hasNext) log("本机失败，本步改用云端")
                 }
             }
-            else -> local.chat(messages, temperature)
         }
+        return last ?: LlmResponse("", "none", 0, "no backend")
     }
 }

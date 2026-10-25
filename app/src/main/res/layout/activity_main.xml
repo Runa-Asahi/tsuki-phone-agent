@@ -39,7 +39,7 @@
             android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
             android:layout_marginStart="6dp" android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MNN 模型" />
+                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="大脑" />
                 <TextView android:id="@+id/mnnStatus" style="@style/StatusValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:text="检测中…" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

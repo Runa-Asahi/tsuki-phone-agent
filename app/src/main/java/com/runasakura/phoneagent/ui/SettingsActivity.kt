@@ -6,6 +6,8 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.runasakura.phoneagent.PhoneAgentApp
 import com.runasakura.phoneagent.R
 import com.runasakura.phoneagent.databinding.ActivitySettingsBinding
@@ -35,13 +37,24 @@ class SettingsActivity : AppCompatActivity() {
         binding.cloudShot.isChecked = prefs.allowCloudScreenshot
 
         val modes = listOf(
-            AgentPreferences.ROUTE_LOCAL_ONLY,
-            AgentPreferences.ROUTE_LOCAL_FIRST,
             AgentPreferences.ROUTE_HYBRID,
+            AgentPreferences.ROUTE_LOCAL_ONLY,
             AgentPreferences.ROUTE_CLOUD_ONLY
         )
-        binding.routeMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modes)
-        binding.routeMode.setSelection(modes.indexOf(prefs.routeMode).coerceAtLeast(0))
+        binding.routeMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            modes.map { com.runasakura.phoneagent.llm.RoutePolicy.label(it) + if (it == AgentPreferences.ROUTE_HYBRID) "（推荐）" else "" })
+        val cur = if (prefs.routeMode == AgentPreferences.ROUTE_LOCAL_FIRST) AgentPreferences.ROUTE_HYBRID else prefs.routeMode
+        binding.routeMode.setSelection(modes.indexOf(cur).coerceAtLeast(0))
+
+        binding.btnTestCloud.setOnClickListener {
+            val url = binding.cloudUrl.text.toString().trim(); val key = binding.cloudKey.text.toString().trim()
+            val model = binding.cloudModel.text.toString().trim().ifBlank { AgentPreferences.DEEPSEEK_MODEL }
+            binding.cloudTestResult.text = "测试中…"
+            lifecycleScope.launch {
+                val (ok, msg) = try { CloudProviders.test(url, key, model) } catch (e: Exception) { false to (e.message ?: "$e") }
+                binding.cloudTestResult.text = (if (ok) "✅ " else "❌ ") + msg
+            }
+        }
 
         val providers = CloudProviders.ALL
         binding.cloudProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers.map { it.label })
@@ -67,12 +80,13 @@ class SettingsActivity : AppCompatActivity() {
             prefs.mnnApiKey = binding.mnnKey.text.toString()
             prefs.mnnModel = binding.mnnModel.text.toString()
             prefs.cloudProvider = providers[binding.cloudProvider.selectedItemPosition].id
-            prefs.cloudBaseUrl = binding.cloudUrl.text.toString()
-            prefs.cloudApiKey = binding.cloudKey.text.toString()
-            prefs.cloudModel = binding.cloudModel.text.toString()
+            prefs.cloudBaseUrl = binding.cloudUrl.text.toString().trim()
+            prefs.cloudApiKey = binding.cloudKey.text.toString().trim()
+            prefs.cloudModel = binding.cloudModel.text.toString().trim()
+            prefs.cloudProvider = CloudProviders.effectiveProvider(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)
             prefs.maxSteps = binding.maxSteps.text.toString().toIntOrNull() ?: 25
             prefs.allowCloudScreenshot = binding.cloudShot.isChecked
-            prefs.routeMode = binding.routeMode.selectedItem as String
+            prefs.routeMode = modes[binding.routeMode.selectedItemPosition]
             Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
             finish()
         }

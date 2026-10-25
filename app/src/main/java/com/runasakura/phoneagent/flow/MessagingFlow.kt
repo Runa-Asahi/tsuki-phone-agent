@@ -56,10 +56,12 @@ class MessagingFlow(
         val SECTION_HEADERS = EXCLUDED_SECTIONS + setOf(
             "联系人", "群聊", "最常使用", "好友", "功能", "设备", "更多联系人", "企业微信联系人"
         )
+        val CONTACT_SECTIONS = setOf("联系人", "最常使用", "好友", "更多联系人")
         private const val SEND = "发送"
     }
 
     suspend fun run(contact: String, message: String): Outcome {
+        containsTitle = null; fuzzyTitle = null
         com.runasakura.phoneagent.agent.MessagingGoals.validate(contact, message)?.let { return fail(it) }
         log("消息流程：${app.label} → 「$contact」 内容「${message.take(40)}${if (message.length > 40) "…" else ""}」")
         val probe = d.screen()
@@ -159,7 +161,8 @@ class MessagingFlow(
 
         // 4) confirm
         if (!confirm("发送确认（${app.label}）\n收件人：$contact（" +
-                (fuzzyTitle?.let { "⚠ 屏幕标题识别为「$it」，请核对是否同一人" } ?: "已核对聊天标题") + "）\n内容：$message\n\n确认后将点击「发送」。")) {
+                (containsTitle?.let { "⚠ 包含匹配：完整名称「$it」，请核对是否同一人" }
+                    ?: fuzzyTitle?.let { "⚠ 屏幕标题识别为「$it」，请核对是否同一人" } ?: "已核对聊天标题") + "）\n内容：$message\n\n确认后将点击「发送」。")) {
             log("用户取消发送")
             return Outcome(false, "用户取消发送", cancelled = true)
         }
@@ -388,10 +391,34 @@ class MessagingFlow(
                 out += cands[i]
             }
         }
+        if (out.isEmpty()) {
+            containsMatch(cands, secMap, contact)?.let {
+                log("⚠ 未找到完全一致的「$contact」，联系人分区中唯一包含该名字的是「${it.label}」（包含匹配，发送前需确认完整名称）")
+                containsTitle = it.label.trim().trimStart('|', '｜', ' ')
+                out += it
+            }
+        }
         return out to secMap
     }
 
     private var pendingMessage: String? = null
+
+    /** Full displayed name chosen by a contains-match (e.g. remark 「12345678王小明」 for 王小明). */
+    private var containsTitle: String? = null
+
+    /**
+     * Exactly ONE row under 联系人/最常使用 whose name contains [contact] as a remark-prefixed suffix (≥2 chars). 「包含:xxx」 rows are
+     * group-chat / chat-record hits and never count.
+     */
+    fun containsMatch(cands: List<ScreenItem>, secMap: Map<ScreenItem, String?>, contact: String): ScreenItem? {
+        val key = Text.nameKey(contact)
+        if (key.length < 2) return null
+        val rows = cands.filter { c ->
+            secMap[c] in CONTACT_SECTIONS && !c.label.contains("包含") &&
+                Text.nameKey(c.label).let { it != key && it.endsWith(key) } // remark prefix (「12345678王小明」); 「王小明2」 stays a different person
+        }.distinctBy { it.cy / 20 }
+        return rows.singleOrNull()
+    }
 
     /** Set when the chat title only matched fuzzily; shown verbatim in the send confirmation. */
     private var fuzzyTitle: String? = null
@@ -402,6 +429,7 @@ class MessagingFlow(
         if (s.items.any { it.cy < s.h * 0.12 && (it.edit || Text.eq(it.label, "取消")) }) return false
         val titles = s.items.filter { it.cy < s.h * 0.14 && !it.edit }.map { it.label }
         if (TitleMatch.findMatching(titles, contact) != null) return true
+        containsTitle?.let { full -> TitleMatch.findMatching(titles, full)?.let { fuzzyTitle = full; return true } }
         TitleMatch.findFuzzy(titles, contact)?.let {
             log("⚠ 标题模糊匹配：看到「$it」≈「$contact」（OCR 误差，唯一候选）")
             fuzzyTitle = it; return true

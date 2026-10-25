@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -33,12 +34,27 @@ class LocalMnnClient(
     private val resolvedModel = AtomicReference(model)
 
     /** Resolve and return the model name the server reports (/v1/models). */
-    suspend fun resolveModel(): String = withContext(Dispatchers.IO) {
+    suspend fun resolveModel(): String {
         val current = resolvedModel.get().orEmpty()
         if (current.isBlank() || current == "mnn-local" || current == "auto") {
-            fetchFirstModel()?.let { resolvedModel.set(it) }
+            cachedModels()?.let { resolvedModel.set(it) }
         }
-        resolvedModel.get().orEmpty()
+        return resolvedModel.get().orEmpty()
+    }
+
+    /**
+     * /v1/models with ONE request in flight and a 30 s cache shared by every caller
+     * (home card, self-test, task start, each chat). PPG-AN00 22:34:47 showed 8 parallel GETs.
+     */
+    private suspend fun cachedModels(): String? {
+        val key = baseUrl
+        HEALTH[key]?.let { (at, v) -> if (System.currentTimeMillis() - at < HEALTH_TTL_MS) return v }
+        return HEALTH_LOCK.withLock {
+            HEALTH[key]?.let { (at, v) -> if (System.currentTimeMillis() - at < HEALTH_TTL_MS) return@withLock v }
+            val v = withContext(Dispatchers.IO) { fetchFirstModel() }
+            HEALTH[key] = System.currentTimeMillis() to v
+            v
+        }
     }
 
     override suspend fun chat(messages: List<ChatMessage>, temperature: Double): LlmResponse {
@@ -123,7 +139,7 @@ class LocalMnnClient(
     }
 
     /** Model id if the MNN API answers /models, else null (unlike [resolveModel], never echoes the configured name). */
-    suspend fun probe(): String? = withContext(Dispatchers.IO) { fetchFirstModel() }
+    suspend fun probe(): String? = cachedModels()
 
     private fun fetchFirstModel(): String? = try {
         val req = Request.Builder()
@@ -146,6 +162,10 @@ class LocalMnnClient(
         private const val TAG = "LocalMnnClient"
         const val DEFAULT_MAX_TOKENS = 192
         private val JSON_TYPE = "application/json; charset=utf-8".toMediaType()
+
+        private const val HEALTH_TTL_MS = 30_000L
+        private val HEALTH = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String?>>()
+        private val HEALTH_LOCK = kotlinx.coroutines.sync.Mutex()
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)

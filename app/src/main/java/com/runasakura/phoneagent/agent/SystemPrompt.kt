@@ -40,7 +40,7 @@ JSON schema:
 
 示例：点击「电池」
 {"thought":"点击电池入口","action":{"type":"tap","text":"电池"}}
-""".trimIndent()
+""".trimIndent() + "\n" + Injection.RULE
 
     /** Few-shot prompt for small local models (LFM2.5-1.2B etc.) using the [e#] screen list. */
     val SHORT = """
@@ -65,7 +65,7 @@ JSON schema:
 目标在屏幕上已达成：{"thought":"已完成","action":{"type":"done","summary":"已进入"}}
 示例4
 要看更多内容：{"thought":"向上滑","action":{"type":"swipe","x1":632,"y1":1960,"x2":632,"y2":840}}
-""".trimIndent()
+""".trimIndent() + "\n" + Injection.RULE
 
     val FOCUSED = SHORT
 }
