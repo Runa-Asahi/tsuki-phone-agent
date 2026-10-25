@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">荣耀手机 Agent</string>
+    <string name="a11y_service_label">荣耀手机 Agent</string>
+    <string name="a11y_service_description">允许 Agent 读取界面节点并执行点击、滑动、输入等操作。仅在你启动任务时行动，可用通知或悬浮钮急停。</string>
+    <string name="settings_title">设置</string>
+    <string name="channel_agent">Agent 运行中</string>
+    <string name="channel_agent_desc">前台保活与急停入口（MagicOS 建议保留通知）</string>
+    <string name="channel_alert">Agent 提醒</string>
+    <string name="notif_title">手机 Agent 运行中</string>
+    <string name="action_emergency_stop">急停</string>
+    <string name="fab_stop">急停</string>
+    <string name="goal_hint">输入目标，例如：打开设置并进入电池</string>
+    <string name="btn_start">开始</string>
+    <string name="btn_stop">急停</string>
+    <string name="btn_a11y">打开无障碍设置</string>
+    <string name="btn_overlay">悬浮窗权限</string>
+    <string name="status_idle">空闲</string>
+    <string name="status_running">运行中</string>
+    <string name="a11y_on">无障碍：已开启</string>
+    <string name="a11y_off">无障碍：未开启（必做）</string>
+    <string name="goal_empty">请先输入目标</string>
+    <string name="a11y_required_title">需要无障碍权限</string>
+    <string name="a11y_required_msg">请在「设置 → 辅助功能 → 无障碍」中开启「荣耀手机 Agent」。MagicOS 10 侧载若列表没有，请用 adb install 后再试。</string>
+    <string name="open_a11y">去开启</string>
+    <string name="confirm_title">敏感操作确认</string>
+    <string name="confirm_yes">允许继续</string>
+    <string name="confirm_no">取消</string>
+    <string name="overlay_ok">已有悬浮窗权限</string>
+    <string name="welcome_log">欢迎。请先：1) 开启无障碍 2) 启动 MNN Chat API (127.0.0.1:8080) 3) MagicOS 保活。详见 README。</string>
+    <string name="saved">已保存</string>
+    <string name="label_mnn_url">MNN Base URL</string>
+    <string name="label_mnn_key">MNN API Key</string>
+    <string name="label_mnn_model">MNN Model</string>
+    <string name="label_route">路由模式</string>
+    <string name="label_cloud_url">云端 Base URL（可选）</string>
+    <string name="label_cloud_key">云端 API Key</string>
+    <string name="label_cloud_model">云端 Model</string>
+    <string name="label_max_steps">最大步数</string>
+    <string name="label_cloud_shot">允许截图上云（金融包名仍禁止）</string>
+    <string name="btn_save">保存</string>
+</resources>

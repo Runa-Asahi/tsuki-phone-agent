@@ -1,0 +1,30 @@
+package com.runasakura.phoneagent.model
+
+/**
+ * Structured action the LLM must return as JSON.
+ * Schema documented in prompts/SYSTEM_PROMPT.md
+ */
+sealed class AgentAction {
+    data class Launch(val packageName: String? = null, val appName: String? = null) : AgentAction()
+    data class Tap(val x: Int? = null, val y: Int? = null, val nodeId: String? = null, val text: String? = null) : AgentAction()
+    data class LongPress(val x: Int? = null, val y: Int? = null, val nodeId: String? = null) : AgentAction()
+    data class DoubleTap(val x: Int, val y: Int) : AgentAction()
+    data class Swipe(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val durationMs: Long = 300) : AgentAction()
+    data class Type(val text: String, val nodeId: String? = null) : AgentAction()
+    data class Clear(val nodeId: String? = null) : AgentAction()
+    data object Back : AgentAction()
+    data object Home : AgentAction()
+    data object Recents : AgentAction()
+    data class Wait(val ms: Long = 800) : AgentAction()
+    data class Done(val summary: String = "") : AgentAction()
+    data class Fail(val reason: String) : AgentAction()
+    data class AskConfirm(val reason: String, val pendingAction: AgentAction? = null) : AgentAction()
+    data class HumanTakeover(val reason: String) : AgentAction()
+}
+
+data class PlanStep(
+    val thought: String = "",
+    val action: AgentAction,
+    val needScreenshot: Boolean = false,
+    val backendHint: String? = null
+)
