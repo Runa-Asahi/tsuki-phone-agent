@@ -46,6 +46,14 @@ class AgentLoop(
             onLog("目标含敏感语义，开始前请知悉：发送/支付等会二次确认")
         }
 
+        SettingsPages.match(goal)?.let { page ->
+            onLog("快路径：直接打开「${page.label}」设置页（只打开，不改任何开关）")
+            if (a11y.launchSettingsAction(page.action)) {
+                val fg = waitForeground(a11y, 2500) { a11y.isSettingsForeground(it) }
+                if (a11y.isSettingsForeground(fg)) return Result(true, 1, "已打开「${page.label}」设置 ($fg)")
+            }
+            onLog("直接打开失败，改走通用设置路径")
+        }
         // Fast-path: 打开设置 / 打开设置并进入X — no LLM unless deterministic path fails
         val subTarget = compoundSettingsTarget(goal)
         if (isOpenSettingsGoal(goal) || subTarget != null) {
@@ -207,7 +215,12 @@ class AgentLoop(
                     ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote), shot)
                 )
             }
-            var resp = planWithTimeout(msgs, forceCloud = false)
+            // Local↔cloud collaboration: simple steps stay local; escalate to cloud on no-progress
+            // or after the previous step's invalid/unparseable output.
+            val escalate = escalateNext || steps.stuckCount >= 2
+            if (escalate && router.canEscalate) onLog("升级到云端：" + if (escalateNext) "上一步模型输出无效" else "界面连续无变化")
+            escalateNext = false
+            var resp = planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
             logLlm(resp)
             // Local→cloud fallback (incl. slow-local stall) is handled inside LlmRouter.
             if (resp.error != null && resp.content.isBlank()) {
@@ -219,6 +232,7 @@ class AgentLoop(
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
             var err = validationError(plan, resp.content, sc)
+            if (err != null) escalateNext = true
             var tries = 0
             while (err != null && tries < 2) {
                 tries++
@@ -228,11 +242,11 @@ class AgentLoop(
                         ChatMessage("system", SystemPrompt.SHORT),
                         ChatMessage(
                             "user",
-                            "屏幕：\n${snap.compressedText}\n目标：$goal\n上次输出错误：$err\n" +
+                            "${Injection.wrap(snap.compressedText)}\n目标：$goal\n上次输出错误：$err\n" +
                                 "请只用上面列表中的 e 编号，只输出一行 JSON。"
                         )
                     ),
-                    forceCloud = false,
+                    forceCloud = router.canEscalate, // parse/validation failure → let the stronger model re-plan
                     temperature = 0.1
                 )
                 logLlm(resp)
@@ -530,6 +544,7 @@ class AgentLoop(
         return false
     }
 
+    private var escalateNext = false
     private var injectionBlocks = 0
     private var lastTyped: String? = null
 

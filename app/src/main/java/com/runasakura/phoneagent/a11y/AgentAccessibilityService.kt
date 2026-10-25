@@ -603,6 +603,11 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     /** Preferred way to open system Settings on Honor MagicOS / Android. */
+    /** Open a specific settings page by intent action (read-only navigation). */
+    fun launchSettingsAction(action: String): Boolean = try {
+        startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+    } catch (e: Exception) { Log.w(TAG, "settings action $action failed: ${e.message}"); false }
+
     fun launchSystemSettings(): Boolean {
         val attempts = listOf(
             Intent(Settings.ACTION_SETTINGS),

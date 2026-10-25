@@ -140,6 +140,7 @@ class AgentForegroundService : Service() {
                 Log.e(TAG, "loop error", e)
                 AgentLoop.Result(false, 0, if (e is OutOfMemoryError) "内存不足，已停止" else e.message ?: e.toString())
             }
+            log("模型统计：${router.summary()}")
             com.runasakura.phoneagent.util.Diagnostics.log("结果: success=${result.success} ${result.summary}")
             broadcastStatus(
                 if (result.success) "done" else "stopped",
