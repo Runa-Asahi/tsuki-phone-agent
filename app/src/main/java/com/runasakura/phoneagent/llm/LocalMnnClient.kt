@@ -122,6 +122,9 @@ class LocalMnnClient(
         }
     }
 
+    /** Model id if the MNN API answers /models, else null (unlike [resolveModel], never echoes the configured name). */
+    suspend fun probe(): String? = withContext(Dispatchers.IO) { fetchFirstModel() }
+
     private fun fetchFirstModel(): String? = try {
         val req = Request.Builder()
             .url(baseUrl.trimEnd('/') + "/models")

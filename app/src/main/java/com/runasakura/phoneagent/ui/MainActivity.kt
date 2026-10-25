@@ -136,15 +136,16 @@ class MainActivity : AppCompatActivity() {
             val p = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
             val m = try {
                 kotlinx.coroutines.withTimeoutOrNull(4000) {
-                    com.runasakura.phoneagent.llm.LocalMnnClient(p.mnnBaseUrl, p.mnnApiKey, p.mnnModel).resolveModel()
+                    com.runasakura.phoneagent.llm.LocalMnnClient(p.mnnBaseUrl, p.mnnApiKey, p.mnnModel).probe()
                 }
             } catch (_: Exception) { null }
             binding.mnnStatus.text = when {
-                m == null -> "未连接"
+                m == null -> "未启动"
                 m.isBlank() -> "已连接"
                 else -> m
             }
-            binding.mnnStatus.setTextColor(ContextCompat.getColor(this@MainActivity, if (m == null) R.color.err_red else R.color.ok_green))
+            binding.mnnStatus.setTextColor(ContextCompat.getColor(this@MainActivity, if (m == null) R.color.warn_amber else R.color.ok_green))
+            if (m == null) binding.mnnStatus.contentDescription = "MNN 未启动：发消息、打开应用等任务不需要；复杂任务需在 MNN Chat 开启 API"
         }
     }
 
@@ -219,7 +220,9 @@ class MainActivity : AppCompatActivity() {
         UiLog.clear(); binding.logView.text = ""
         appendLog("—— 自检开始 ——")
         lifecycleScope.launch {
-            val res = SelfTest(this@MainActivity) { line -> runOnUiThread { appendLog(line) } }.run(probe)
+            val res = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                SelfTest(this@MainActivity) { line -> runOnUiThread { appendLog(line) } }.run(probe)
+            }
             val fails = res.count { !it.ok }
             res.firstOrNull { it.name.contains("OCR") }?.let {
                 binding.ocrStatus.text = if (it.ok) "可用" else "失败"

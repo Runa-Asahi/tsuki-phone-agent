@@ -119,8 +119,9 @@ class AgentForegroundService : Service() {
             previous?.join()
             broadcastStatus("running", "开始：$goal")
             try {
-                val m = local.resolveModel()
-                log("MNN 当前模型：${m.ifBlank { "(未知)" }}")
+                val live = local.probe()
+                val m = live ?: local.resolveModel()
+                log(if (live != null) "MNN 当前模型：$live" else "MNN 未启动（发消息/打开应用等确定性任务不需要；复杂任务的模型兜底会不可用）")
                 com.runasakura.phoneagent.util.Diagnostics.model = m
                 if (m.contains("reason", true) || m.contains("think", true) || m.contains("distill", true)) {
                     log("提示：推理(Reasoning)模型会输出长思考，建议换 Qwen3 1.7B/4B 或 Qwen2.5 Instruct（MNN）")

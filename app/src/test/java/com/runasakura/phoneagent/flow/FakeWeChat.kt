@@ -26,7 +26,9 @@ class FakeWeChat(
     /** Chat-list rows shown after the first scroll (scroll-until-visible tests). */
     val moreListRows: List<String> = emptyList(),
     /** Number of observations after the first scroll that show only a 加载中 spinner. */
-    var loadingObservations: Int = 0
+    var loadingObservations: Int = 0,
+    /** Render the search page exactly as PPG-AN00 OCR saw it (no 取消, merged placeholder). */
+    val realOcrSearch: Boolean = false
 ) : Device {
     val W = 1264; val H = 2800
     val taps = mutableListOf<String>()
@@ -62,9 +64,16 @@ class FakeWeChat(
             }
             state == "moments" -> items += item("朋友圈", 632, 200)
             state.startsWith("menu:") -> { items += item("置顶该聊天", 632, 1300); items += item("删除该聊天", 632, 1500) }
+            state == "search" && realOcrSearch && searchText.isBlank() -> {
+                items += item("くQ搜索本地或网络结果", 560, 210)
+                listOf("最近在搜", "展开v 向", "|0小通", "0茉莉奶白", "0吉林大学图书馆", "|0打宇板", "0打字版", "|G卡码大模型", "急使")
+                    .forEachIndexed { i, l -> items += item(l, 400, 400 + i * 110) }
+                items += item("●按住说出你的问题", 632, 1600)
+                items += item("QwERTYuo P", 632, 2000)
+            }
             state == "search" -> {
-                items += item(searchText.ifBlank { "搜索" }, 560, 200, edit = source == "tree")
-                items += item("取消", 1180, 200)
+                items += item(if (realOcrSearch) "くQ$searchText" else searchText.ifBlank { "搜索" }, 560, 200, edit = source == "tree")
+                if (!realOcrSearch) items += item("取消", 1180, 200)
                 if (searchText.isNotBlank()) {
                     val rows = currentSearchRows()
                     rows.forEachIndexed { i, r -> items += item(r, 500, 380 + i * 200) }

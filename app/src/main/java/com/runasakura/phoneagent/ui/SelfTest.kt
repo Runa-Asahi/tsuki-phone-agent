@@ -29,7 +29,10 @@ class SelfTest(private val ctx: Context, private val progress: (String) -> Unit)
         if (a != null) {
             val ws = try { a.windows.size } catch (_: Exception) { 0 }
             add("读取窗口列表", ws > 0, "窗口数 $ws")
-            add("无障碍浮窗（确认框/急停）", a.overlayWorks(), "TYPE_ACCESSIBILITY_OVERLAY")
+            val (ovOk, ovDetail) = withContext(Dispatchers.Main) { a.overlayProbe() }
+            val canApp = android.provider.Settings.canDrawOverlays(ctx)
+            add("无障碍浮窗（确认框/急停）", ovOk || canApp,
+                if (ovOk) ovDetail else "$ovDetail；" + if (canApp) "将回退到应用悬浮窗" else "将回退到全屏确认页")
             add("无障碍输入法通道", a.imeChannelEnabled(), if (android.os.Build.VERSION.SDK_INT >= 33) "flagInputMethodEditor" else "需 Android 13+")
             val bmp = withContext(Dispatchers.IO) { a.takeScreenshotBitmap() }
             add("截图权限", bmp != null, bmp?.let { "${it.width}x${it.height}" } ?: "失败（重新开关无障碍服务）")
@@ -43,7 +46,7 @@ class SelfTest(private val ctx: Context, private val progress: (String) -> Unit)
             }
         }
         val (mnnOk, mnnDetail) = withContext(Dispatchers.IO) { probeMnn() }
-        add("MNN API", mnnOk, mnnDetail)
+        add("MNN API", mnnOk, if (mnnOk) mnnDetail else "$mnnDetail。提示：发微信/QQ 消息、打开应用、设置页等确定性任务不需要 MNN；只有复杂/未知任务的模型兜底才需要在 MNN Chat 里开启 API 服务")
         val pm = ctx.packageManager
         for ((label, pkg) in listOf("微信" to MessagingGoals.WECHAT, "QQ" to MessagingGoals.QQ)) {
             val i = pm.getLaunchIntentForPackage(pkg)

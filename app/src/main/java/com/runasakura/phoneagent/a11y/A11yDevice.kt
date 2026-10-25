@@ -69,8 +69,12 @@ class A11yDevice(
             .map { Rect().also { r -> it.getBoundsInScreen(r) }.top }.minOrNull()
     } catch (_: Exception) { null }
 
+    /** Wall-clock deadline for one tree walk: each getChild is an IPC; a stale/blocked window can cost ~25ms each. */
+    private var walkDeadline = 0L
+
     private fun toRaw(n: AccessibilityNodeInfo, depth: Int, budget: IntArray): RawNode {
         budget[0]--
+        if (System.currentTimeMillis() > walkDeadline) budget[0] = 0
         val r = Rect(); n.getBoundsInScreen(r)
         val kids = mutableListOf<RawNode>()
         if (depth < 45) for (i in 0 until n.childCount) {
@@ -94,12 +98,17 @@ class A11yDevice(
         val preferred = ws.firstOrNull { it.isFocused } ?: ws.firstOrNull { it.isActive }
         val pkgs = ws.mapNotNull { try { it.root?.packageName?.toString() } catch (_: Exception) { null } }.toSet()
         val use = if (pkgs.size > 1 && preferred != null) listOf(preferred) else ws
-        val roots = use.mapNotNull { win ->
+        val fg = foregroundPackage()
+        // Only trust roots that belong to the foreground app. WeChat ≥8.0.52 returns no root for
+        // its own window, and a leftover launcher window would otherwise be read as "WeChat"
+        // (PPG-AN00 self-test: 「活动日报 | Chrome | Google」 reported as WeChat tree).
+        val roots = TreeRoots.select(fg, use.mapNotNull { win ->
             try { win.root?.also { it.refresh() } } catch (_: Exception) { null }
-        }.ifEmpty { listOfNotNull(s.rootInActiveWindow) }
+        }.ifEmpty { listOfNotNull(s.rootInActiveWindow) }) { it.packageName?.toString() }
         val budget = intArrayOf(1500)
+        walkDeadline = System.currentTimeMillis() + 1500
         val items = ScreenItems.leaves(roots.map { toRaw(it, 0, budget) }, w, h)
-        return Screen(foregroundPackage(), w, h, items, if (items.isEmpty()) "none" else "tree", imeTop())
+        return Screen(fg, w, h, items, if (items.isEmpty()) "none" else "tree", imeTop())
     }
 
     private fun dimen(name: String): Int {
@@ -220,7 +229,7 @@ class A11yDevice(
         s.awaitSettle()
         val start = System.currentTimeMillis()
         var t = treeScreen()
-        val budget = if (t.pkg in blindPkgs) 600L else 3000L
+        val budget = if (t.pkg in blindPkgs) 0L else 1500L
         while (t.textCount < 3 && System.currentTimeMillis() - start < budget) {
             delay(300); t = treeScreen()
         }

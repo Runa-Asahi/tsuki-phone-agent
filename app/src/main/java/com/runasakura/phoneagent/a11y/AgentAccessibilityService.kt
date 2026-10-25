@@ -221,7 +221,14 @@ class AgentAccessibilityService : AccessibilityService() {
                         android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND,
                     android.graphics.PixelFormat.TRANSLUCENT
                 ).apply { gravity = android.view.Gravity.CENTER; dimAmount = 0.5f }
-                wm.addView(box, lp)
+                try {
+                    wm.addView(box, lp)
+                } catch (e: Exception) {
+                    if (!android.provider.Settings.canDrawOverlays(this)) throw e
+                    Log.w(TAG, "a11y overlay failed (${e.message}), using TYPE_APPLICATION_OVERLAY")
+                    lp.type = android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                    wm.addView(box, lp)
+                }
                 view = box
             } catch (e: Exception) {
                 Log.w(TAG, "confirm overlay failed: ${e.message}")
@@ -232,9 +239,17 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     /** Self-test helper: can we add/remove an accessibility overlay window? */
-    fun overlayWorks(): Boolean {
+    fun overlayWorks(): Boolean = overlayProbe().first
+
+    /**
+     * (ok, detail). Previously posted to the main looper and then blocked the caller with a
+     * latch — when the self-test ran on the main thread this deadlocked for 2s and always
+     * reported FAIL. Now runs inline on the main thread and reports the real exception.
+     */
+    fun overlayProbe(): Pair<Boolean, String> {
         val latch = CountDownLatch(1); val ok = AtomicBoolean(false)
-        Handler(Looper.getMainLooper()).post {
+        val err = java.util.concurrent.atomic.AtomicReference("超时")
+        val body = Runnable {
             try {
                 val wm = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
                 val v = android.view.View(this)
@@ -243,11 +258,12 @@ class AgentAccessibilityService : AccessibilityService() {
                     android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
                     android.graphics.PixelFormat.TRANSLUCENT))
-                wm.removeView(v); ok.set(true)
-            } catch (_: Exception) {} finally { latch.countDown() }
+                wm.removeView(v); ok.set(true); err.set("TYPE_ACCESSIBILITY_OVERLAY 可用")
+            } catch (e: Throwable) { err.set("${e.javaClass.simpleName}: ${e.message}") } finally { latch.countDown() }
         }
-        latch.await(2, TimeUnit.SECONDS)
-        return ok.get()
+        if (Looper.myLooper() == Looper.getMainLooper()) body.run()
+        else { Handler(Looper.getMainLooper()).post(body); latch.await(2, TimeUnit.SECONDS) }
+        return ok.get() to err.get()
     }
 
     fun imeChannelEnabled(): Boolean = Build.VERSION.SDK_INT >= 33 &&

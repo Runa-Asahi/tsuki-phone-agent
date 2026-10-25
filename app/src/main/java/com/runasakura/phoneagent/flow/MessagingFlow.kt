@@ -206,10 +206,15 @@ class MessagingFlow(
         s = d.screen()
         val cancel = s.items.firstOrNull { it.cy < s.h * 0.15 && Text.eq(it.label, "取消") }
         val searchEdit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.15 }
-        if (cancel == null && searchEdit == null) return "点击搜索后未进入搜索页（看到：${s.summary()}）"
-        val placeholder = s.items.firstOrNull { it.cy < s.h * 0.15 && it.label.startsWith("搜索") }
-        val hx = searchEdit?.cx ?: placeholder?.cx ?: (s.w * 0.45).toInt()
-        val hy = searchEdit?.cy ?: placeholder?.cy ?: cancel?.cy ?: (s.h * 0.07).toInt()
+        if (!SearchPage.isSearchPage(s)) {
+            // Page may still be animating in; re-read once before giving up.
+            d.afterAction(800); s = d.screen()
+            if (!SearchPage.isSearchPage(s)) return "点击搜索后未进入搜索页（看到：${s.summary()}）"
+        }
+        log("✓ 已进入搜索页")
+        val fieldXY = SearchPage.field(s)
+        val hx = searchEdit?.cx ?: fieldXY?.first ?: (s.w * 0.45).toInt()
+        val hy = searchEdit?.cy ?: fieldXY?.second ?: cancel?.cy ?: (s.h * 0.07).toInt()
         var typedOk = false
         for (attempt in 0..2) {
             if (!d.type(contact, hx, hy, attempt)) continue
@@ -234,7 +239,7 @@ class MessagingFlow(
                     log("✓ 唯一精确匹配：${hits[0].label}")
                     d.tap(hits[0]); d.afterAction(2000)
                     val after = d.screen()
-                    if (after.items.any { it.cy < after.h * 0.15 && Text.eq(it.label, "取消") }) {
+                    if (SearchPage.strong(after)) {
                         return "点击了「${hits[0].label}」但仍停在搜索页，未进入聊天"
                     }
                     return null
