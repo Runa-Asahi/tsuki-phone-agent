@@ -6,54 +6,114 @@ import org.json.JSONObject
 
 object ActionParser {
     fun parse(raw: String): PlanStep {
+        if (raw.isBlank()) {
+            return PlanStep(
+                thought = "empty_response",
+                action = AgentAction.Fail("LLM returned empty content")
+            )
+        }
         val jsonText = extractJson(raw)
         val obj = try {
             JSONObject(jsonText)
         } catch (e: Exception) {
+            // Heuristic: model said launch settings in prose
+            val lower = raw.lowercase()
+            if (raw.contains("打开设置") || lower.contains("launch") && lower.contains("settings")) {
+                return PlanStep(
+                    thought = "heuristic_from_prose",
+                    action = AgentAction.Launch(appName = "设置")
+                )
+            }
             return PlanStep(
                 thought = "parse_error",
-                action = AgentAction.Fail("Cannot parse model JSON: ${raw.take(200)}")
+                action = AgentAction.Fail(
+                    "Cannot parse model JSON: ${e.message}; raw=${raw.take(300)}"
+                )
             )
         }
         val thought = obj.optString("thought").ifBlank { obj.optString("reasoning") }
         val needShot = obj.optBoolean("need_screenshot", false)
         val backend = obj.nullableString("backend")
-        val actionObj = when {
+
+        val actionObj: JSONObject = when {
             obj.has("action") && obj.get("action") is JSONObject -> obj.getJSONObject("action")
+            obj.has("action") && obj.get("action") is String -> {
+                // {"action":"launch","package":"..."} flat-ish
+                obj
+            }
+            obj.has("type") || obj.has("name") -> obj
             else -> obj
         }
-        val type = actionObj.optString("type").ifBlank {
+
+        var type = actionObj.optString("type").ifBlank {
             actionObj.optString("name")
-        }.lowercase()
+        }.ifBlank {
+            // {"action":"tap", ...} where action is string
+            if (obj.opt("action") is String) obj.optString("action") else ""
+        }.lowercase().trim()
+
+        // Normalize aliases
+        type = when (type) {
+            "click", "press" -> "tap"
+            "longpress", "long-press" -> "long_press"
+            "doubletap", "double-tap" -> "double_tap"
+            "scroll" -> "swipe"
+            "input", "set_text", "settext" -> "type"
+            "finish", "complete", "success" -> "done"
+            "error" -> "fail"
+            "confirm" -> "ask_confirm"
+            "takeover" -> "human_takeover"
+            "open", "start_app" -> "launch"
+            else -> type
+        }
+
+        // Thought-only / missing type: try recover from thought + fields
+        if (type.isBlank()) {
+            when {
+                actionObj.has("package") || actionObj.has("app") || actionObj.has("app_name") ->
+                    type = "launch"
+                actionObj.has("text") && (actionObj.has("x") || actionObj.has("node_id")) ->
+                    type = "tap"
+                actionObj.has("text") && thought.contains("点击") -> type = "tap"
+                thought.contains("打开设置") || thought.contains("启动设置") -> type = "launch"
+                thought.contains("完成") || thought.contains("已打开") -> type = "done"
+                else -> type = ""
+            }
+        }
+
         val action = when (type) {
             "launch" -> AgentAction.Launch(
-                packageName = actionObj.nullableString("package"),
-                appName = actionObj.nullableString("app") ?: actionObj.nullableString("app_name")
+                packageName = actionObj.nullableString("package")
+                    ?: obj.nullableString("package"),
+                appName = actionObj.nullableString("app")
+                    ?: actionObj.nullableString("app_name")
+                    ?: obj.nullableString("app")
+                    ?: if (thought.contains("设置")) "设置" else null
             )
-            "tap", "click" -> AgentAction.Tap(
-                x = actionObj.optIntOrNull("x"),
-                y = actionObj.optIntOrNull("y"),
-                nodeId = actionObj.nullableString("node_id"),
-                text = actionObj.nullableString("text")
+            "tap" -> AgentAction.Tap(
+                x = actionObj.optIntOrNull("x") ?: obj.optIntOrNull("x"),
+                y = actionObj.optIntOrNull("y") ?: obj.optIntOrNull("y"),
+                nodeId = actionObj.nullableString("node_id") ?: obj.nullableString("node_id"),
+                text = actionObj.nullableString("text") ?: obj.nullableString("text")
             )
-            "long_press", "longpress" -> AgentAction.LongPress(
+            "long_press" -> AgentAction.LongPress(
                 x = actionObj.optIntOrNull("x"),
                 y = actionObj.optIntOrNull("y"),
                 nodeId = actionObj.nullableString("node_id")
             )
-            "double_tap", "doubletap" -> AgentAction.DoubleTap(
+            "double_tap" -> AgentAction.DoubleTap(
                 x = actionObj.optInt("x"),
                 y = actionObj.optInt("y")
             )
-            "swipe", "scroll" -> AgentAction.Swipe(
+            "swipe" -> AgentAction.Swipe(
                 x1 = actionObj.optInt("x1", actionObj.optInt("start_x")),
                 y1 = actionObj.optInt("y1", actionObj.optInt("start_y")),
                 x2 = actionObj.optInt("x2", actionObj.optInt("end_x")),
                 y2 = actionObj.optInt("y2", actionObj.optInt("end_y")),
                 durationMs = actionObj.optLong("duration_ms", 300)
             )
-            "type", "input", "set_text" -> AgentAction.Type(
-                text = actionObj.optString("text"),
+            "type" -> AgentAction.Type(
+                text = actionObj.optString("text").ifBlank { obj.optString("text") },
                 nodeId = actionObj.nullableString("node_id")
             )
             "clear" -> AgentAction.Clear(actionObj.nullableString("node_id"))
@@ -61,32 +121,98 @@ object ActionParser {
             "home" -> AgentAction.Home
             "recents" -> AgentAction.Recents
             "wait" -> AgentAction.Wait(actionObj.optLong("ms", 800))
-            "done", "finish", "complete" -> AgentAction.Done(
+            "done" -> AgentAction.Done(
                 actionObj.optString("summary").ifBlank { thought }
             )
-            "fail", "error" -> AgentAction.Fail(
+            "fail" -> AgentAction.Fail(
                 actionObj.optString("reason").ifBlank { "model failed" }
             )
-            "ask_confirm", "confirm" -> AgentAction.AskConfirm(
+            "ask_confirm" -> AgentAction.AskConfirm(
                 actionObj.optString("reason").ifBlank { "需要确认" }
             )
-            "human_takeover", "takeover" -> AgentAction.HumanTakeover(
+            "human_takeover" -> AgentAction.HumanTakeover(
                 actionObj.optString("reason").ifBlank { "需要人工接管" }
             )
-            else -> AgentAction.Fail("Unknown action type: $type")
+            else -> AgentAction.Fail(
+                "Unknown action type='$type'; raw=${raw.take(240)}"
+            )
         }
-        return PlanStep(thought = thought, action = action, needScreenshot = needShot, backendHint = backend)
+        return PlanStep(
+            thought = thought,
+            action = action,
+            needScreenshot = needShot,
+            backendHint = backend
+        )
     }
 
-    private fun extractJson(raw: String): String {
-        val trimmed = raw.trim()
-        if (trimmed.startsWith("{")) return trimmed
-        val fence = Regex("```(?:json)?\\s*([\\s\\S]*?)```", RegexOption.IGNORE_CASE)
-        fence.find(trimmed)?.groupValues?.getOrNull(1)?.trim()?.let { return it }
+    fun isInvalid(plan: PlanStep): Boolean =
+        plan.action is AgentAction.Fail && (
+            plan.thought == "parse_error" ||
+                plan.thought == "empty_response" ||
+                (plan.action as AgentAction.Fail).reason.startsWith("Unknown action") ||
+                (plan.action as AgentAction.Fail).reason.startsWith("Cannot parse") ||
+                (plan.action as AgentAction.Fail).reason.startsWith("LLM returned empty")
+            )
+
+    /**
+     * Extract a JSON object from raw model output:
+     * - bare JSON
+     * - markdown fences
+     * - leading/trailing prose
+     * - first balanced {...}
+     */
+    fun extractJson(raw: String): String {
+        var trimmed = raw.trim()
+          .removePrefix("\uFEFF")
+        if (trimmed.isEmpty()) return trimmed
+
+        // Strip <think>...</think> blocks some models emit
+        trimmed = trimmed.replace(Regex("(?s)<think>.*?</think>"), "").trim()
+
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            return trimmed
+        }
+
+        val fence = Regex("```(?:json|JSON)?\\s*([\\s\\S]*?)```")
+        fence.find(trimmed)?.groupValues?.getOrNull(1)?.trim()?.let { inner ->
+            if (inner.startsWith("{")) return balancedObject(inner) ?: inner
+        }
+
+        balancedObject(trimmed)?.let { return it }
+
+        // Last resort: from first { to last }
         val start = trimmed.indexOf('{')
         val end = trimmed.lastIndexOf('}')
         if (start >= 0 && end > start) return trimmed.substring(start, end + 1)
         return trimmed
+    }
+
+    private fun balancedObject(s: String): String? {
+        val start = s.indexOf('{')
+        if (start < 0) return null
+        var depth = 0
+        var inStr = false
+        var escape = false
+        for (i in start until s.length) {
+            val c = s[i]
+            if (inStr) {
+                when {
+                    escape -> escape = false
+                    c == '\\' -> escape = true
+                    c == '"' -> inStr = false
+                }
+                continue
+            }
+            when (c) {
+                '"' -> inStr = true
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return s.substring(start, i + 1)
+                }
+            }
+        }
+        return null
     }
 
     private fun JSONObject.optIntOrNull(key: String): Int? =

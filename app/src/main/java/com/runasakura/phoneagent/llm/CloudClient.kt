@@ -17,7 +17,8 @@ class CloudClient(
     private val model: String,
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(180, TimeUnit.SECONDS)
+        .callTimeout(200, TimeUnit.SECONDS)
         .build()
 ) : LlmClient {
     override val name: String = "cloud"
@@ -56,10 +57,10 @@ class CloudClient(
                     val latency = System.currentTimeMillis() - started
                     if (!resp.isSuccessful) {
                         return@withContext LlmResponse(
-                            "", name, latency, "HTTP ${resp.code}: ${raw.take(400)}"
+                            "", name, latency, "HTTP ${resp.code}: ${raw.take(400)}", raw
                         )
                     }
-                    LlmResponse(LocalMnnClient.parseContent(raw), name, latency)
+                    LlmResponse(LocalMnnClient.parseContent(raw), name, latency, rawBody = raw)
                 }
             } catch (e: Exception) {
                 LlmResponse("", name, System.currentTimeMillis() - started, e.message)

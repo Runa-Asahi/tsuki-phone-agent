@@ -6,7 +6,9 @@ data class LlmResponse(
     val content: String,
     val backend: String,
     val latencyMs: Long,
-    val error: String? = null
+    val error: String? = null,
+    /** Full HTTP body for on-screen debug (may be large). */
+    val rawBody: String? = null
 )
 
 interface LlmClient {

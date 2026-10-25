@@ -21,6 +21,7 @@
 | LocalMnnClient + 可选 CloudClient + hybrid 路由 | ✅ |
 | 安全确认 / 敏感包名 / 急停 | ✅ |
 | 主界面 + 设置 + 前台服务 | ✅ |
+| 「打开设置」快路径 + ACTION_SETTINGS（MagicOS） | ✅ |
 | 本机截图 → 云端 VLM 完整多模态 | ⚠️ 预留（need_screenshot / takeScreenshot API 已接，上传链路二期） |
 | 端侧 GUI 小模型 | ❌ 二期 |
 

@@ -3,8 +3,10 @@ package com.runasakura.phoneagent.agent
 import android.util.Log
 import com.runasakura.phoneagent.a11y.AgentAccessibilityService
 import com.runasakura.phoneagent.llm.ChatMessage
+import com.runasakura.phoneagent.llm.LlmResponse
 import com.runasakura.phoneagent.llm.LlmRouter
 import com.runasakura.phoneagent.model.AgentAction
+import com.runasakura.phoneagent.model.PlanStep
 import com.runasakura.phoneagent.model.UiSnapshot
 import com.runasakura.phoneagent.prefs.AgentPreferences
 import kotlinx.coroutines.CancellationException
@@ -37,6 +39,29 @@ class AgentLoop(
             onLog("目标含敏感语义，开始前请知悉：发送/支付等会二次确认")
         }
 
+        // Fast-path: 打开设置 / 打开系统设置 — don't wait 30s+ on tiny local LLM
+        if (isOpenSettingsGoal(goal)) {
+            onLog("快路径：检测到「打开设置」，直接 Intent(Settings.ACTION_SETTINGS)")
+            val ok = a11y.launchSystemSettings()
+            onLog(if (ok) "已发起打开系统设置" else "打开系统设置失败")
+            if (ok) {
+                delay(1200)
+                val snap = a11y.dumpUiTree()
+                onLog("前台=${snap.packageName}")
+                if (a11y.isSettingsForeground(snap.packageName) || goalReachedSettings(goal, snap)) {
+                    return Result(true, 1, "已打开系统设置 (${snap.packageName})")
+                }
+                // Still try once more after wait
+                delay(800)
+                val snap2 = a11y.dumpUiTree()
+                onLog("复查前台=${snap2.packageName}")
+                if (a11y.isSettingsForeground(snap2.packageName)) {
+                    return Result(true, 1, "已打开系统设置 (${snap2.packageName})")
+                }
+                onLog("快路径未确认进入设置页，继续走 LLM 循环")
+            }
+        }
+
         var step = 0
         val max = prefs.maxSteps
         while (step < max) {
@@ -48,19 +73,70 @@ class AgentLoop(
             val snap = a11y.dumpUiTree()
             onLog("前台=${snap.packageName} 节点=${snap.nodeCount} low=${snap.lowConfidence}")
 
-            val observe = buildObserveMessage(goal, snap, step)
-            val messages = history + ChatMessage("user", observe)
-            val forceCloud = snap.lowConfidence && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY
-            val resp = router.plan(messages, forceCloud = forceCloud)
+            // Goal already satisfied?
+            if (goalReachedSettings(goal, snap) && a11y.isSettingsForeground(snap.packageName)) {
+                onLog("目标已达成（已在设置页）")
+                return Result(true, step, "已在系统设置 (${snap.packageName})")
+            }
+
+            onLog("请求本机 MNN（可能需数十秒）…")
+            var resp = router.plan(
+                history + ChatMessage("user", buildObserveMessage(goal, snap, step)),
+                forceCloud = snap.lowConfidence && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY
+            )
+            logLlm(resp)
+
             if (resp.error != null && resp.content.isBlank()) {
                 onLog("LLM 错误(${resp.backend}): ${resp.error}")
                 return Result(false, step, "LLM 不可用: ${resp.error}")
             }
-            onLog("脑=${resp.backend} ${resp.latencyMs}ms")
-            val plan = ActionParser.parse(resp.content)
+
+            var plan = ActionParser.parse(resp.content)
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
+
+            if (ActionParser.isInvalid(plan)) {
+                onLog("解析失败，使用短提示重试一次…")
+                resp = router.plan(
+                    listOf(
+                        ChatMessage("system", SystemPrompt.SHORT),
+                        ChatMessage(
+                            "user",
+                            "目标：$goal\n前台：${snap.packageName}\n只输出一行 JSON，例如：" +
+                                """{"thought":"开设置","action":{"type":"launch","app":"设置"}}"""
+                        )
+                    ),
+                    forceCloud = false,
+                    temperature = 0.1
+                )
+                logLlm(resp)
+                if (resp.error != null && resp.content.isBlank()) {
+                    // Last resort for settings goal
+                    if (isOpenSettingsGoal(goal)) {
+                        onLog("重试仍失败，回退快路径打开设置")
+                        if (a11y.launchSystemSettings()) {
+                            delay(1000)
+                            return Result(true, step, "回退打开系统设置")
+                        }
+                    }
+                    return Result(false, step, "LLM 不可用: ${resp.error}")
+                }
+                plan = ActionParser.parse(resp.content)
+                onLog("retry thought: ${plan.thought}")
+                onLog("retry action: ${plan.action}")
+                if (ActionParser.isInvalid(plan) && isOpenSettingsGoal(goal)) {
+                    onLog("仍无法解析，回退打开系统设置")
+                    if (a11y.launchSystemSettings()) {
+                        delay(1000)
+                        return Result(true, step, "解析失败回退：已打开设置")
+                    }
+                }
+            }
+
             history += ChatMessage("assistant", resp.content)
+
+            // Rewrite ambiguous tap on "设置" while still in our app → system settings launch
+            plan = rewriteSettingsAmbiguity(plan, snap, goal)
 
             val gate = safety.check(plan.action, snap, goal)
             when (gate.decision) {
@@ -81,21 +157,93 @@ class AgentLoop(
 
             when (val action = plan.action) {
                 is AgentAction.Done -> return Result(true, step, action.summary.ifBlank { "完成" })
-                is AgentAction.Fail -> return Result(false, step, action.reason)
+                is AgentAction.Fail -> {
+                    if (isOpenSettingsGoal(goal)) {
+                        onLog("模型 Fail，回退打开系统设置")
+                        if (a11y.launchSystemSettings()) {
+                            delay(1000)
+                            val s = a11y.dumpUiTree()
+                            if (a11y.isSettingsForeground(s.packageName)) {
+                                return Result(true, step, "Fail 回退成功")
+                            }
+                        }
+                    }
+                    return Result(false, step, action.reason)
+                }
                 is AgentAction.HumanTakeover -> return Result(false, step, action.reason)
                 is AgentAction.AskConfirm -> {
                     val ok = onConfirm(action.reason)
                     if (!ok) return Result(false, step, "用户取消")
-                    // after confirm, continue loop (model should issue real action next)
                 }
                 else -> {
                     val ok = execute(a11y, action, snap)
                     onLog(if (ok) "执行成功" else "执行失败/部分失败")
-                    delay(450)
+                    delay(900)
+                    val after = a11y.dumpUiTree()
+                    onLog("执行后前台=${after.packageName}")
+                    if (goalReachedSettings(goal, after) && a11y.isSettingsForeground(after.packageName)) {
+                        return Result(true, step, "已打开系统设置 (${after.packageName})")
+                    }
                 }
             }
         }
         return Result(false, step, "达到最大步数 $max")
+    }
+
+    private fun logLlm(resp: LlmResponse) {
+        onLog("脑=${resp.backend} ${resp.latencyMs}ms err=${resp.error ?: "-"}")
+        val content = resp.content
+        if (content.isBlank()) {
+            onLog("LLM content: <empty>")
+        } else {
+            onLog("LLM content: ${content.take(800)}")
+            if (content.length > 800) onLog("…(content truncated, len=${content.length})")
+        }
+        resp.rawBody?.let { raw ->
+            // Keep short: choices[0].message often enough; full body for parse debug
+            onLog("LLM raw: ${raw.take(600)}")
+            if (raw.length > 600) onLog("…(raw truncated, len=${raw.length})")
+        }
+    }
+
+    private fun rewriteSettingsAmbiguity(
+        plan: PlanStep,
+        snap: UiSnapshot,
+        goal: String
+    ): PlanStep {
+        if (!isOpenSettingsGoal(goal)) return plan
+        val inOurApp = snap.packageName.contains("runasakura.phoneagent")
+        val action = plan.action
+        if (inOurApp && action is AgentAction.Tap) {
+            val t = action.text.orEmpty()
+            // Toolbar "设置" opens our SettingsActivity — redirect to system settings
+            if (t == "设置" || t.contains("设置")) {
+                onLog("改写：点「设置」会进本 App 设置页 → 改为 launchSystemSettings")
+                return plan.copy(action = AgentAction.Launch(appName = "设置"))
+            }
+        }
+        if (inOurApp && action is AgentAction.Launch) {
+            if (action.packageName.isNullOrBlank() && action.appName.isNullOrBlank()) {
+                return plan.copy(action = AgentAction.Launch(appName = "设置"))
+            }
+        }
+        return plan
+    }
+
+    private fun isOpenSettingsGoal(goal: String): Boolean {
+        val g = goal.trim()
+        return g == "打开设置" ||
+            g == "打开系统设置" ||
+            g == "去设置" ||
+            g.matches(Regex("^打开(系统)?设置$")) ||
+            g.equals("open settings", ignoreCase = true)
+    }
+
+    private fun goalReachedSettings(goal: String, snap: UiSnapshot): Boolean {
+        if (!isOpenSettingsGoal(goal) && !goal.contains("设置")) return false
+        return AgentAccessibilityService.SETTINGS_PACKAGES.any {
+            snap.packageName.equals(it, true)
+        } || snap.packageName.contains("settings", ignoreCase = true)
     }
 
     private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int): String = buildString {
@@ -103,8 +251,10 @@ class AgentLoop(
         appendLine("目标: $goal")
         appendLine("屏幕: ${snap.screenWidth}x${snap.screenHeight}")
         appendLine("前台包名: ${snap.packageName}")
+        appendLine("注意: 当前若在 com.runasakura.phoneagent* ，工具栏「设置」是 Agent 自己的设置页，不是系统设置。打开系统设置请用 launch + app=设置 或 package=com.android.settings。")
         appendLine("节点树(压缩):")
-        appendLine(snap.compressedText.ifBlank { "(空)" })
+        // Trim huge trees for small models
+        appendLine(snap.compressedText.take(4500).ifBlank { "(空)" })
         appendLine("请输出下一步 JSON action。")
     }
 
@@ -117,9 +267,27 @@ class AgentLoop(
             when (action) {
                 is AgentAction.Launch -> {
                     when {
-                        !action.packageName.isNullOrBlank() -> a11y.launchApp(action.packageName!!)
-                        !action.appName.isNullOrBlank() -> a11y.launchByLabel(action.appName!!)
-                        else -> false
+                        !action.packageName.isNullOrBlank() -> {
+                            if (action.packageName!!.contains("settings", true) ||
+                                AgentAccessibilityService.SETTINGS_PACKAGES.any {
+                                    it.equals(action.packageName, true)
+                                }
+                            ) {
+                                a11y.launchSystemSettings() || a11y.launchApp(action.packageName!!)
+                            } else {
+                                a11y.launchApp(action.packageName!!)
+                            }
+                        }
+                        !action.appName.isNullOrBlank() -> {
+                            if (action.appName!!.contains("设置") ||
+                                action.appName!!.contains("settings", true)
+                            ) {
+                                a11y.launchSystemSettings() || a11y.launchByLabel(action.appName!!)
+                            } else {
+                                a11y.launchByLabel(action.appName!!)
+                            }
+                        }
+                        else -> a11y.launchSystemSettings()
                     }
                 }
                 is AgentAction.Tap -> {
@@ -147,7 +315,9 @@ class AgentLoop(
                     }
                 }
                 is AgentAction.DoubleTap -> a11y.doubleTap(action.x, action.y)
-                is AgentAction.Swipe -> a11y.swipe(action.x1, action.y1, action.x2, action.y2, action.durationMs)
+                is AgentAction.Swipe -> a11y.swipe(
+                    action.x1, action.y1, action.x2, action.y2, action.durationMs
+                )
                 is AgentAction.Type -> {
                     val node = action.nodeId?.let { a11y.findNodeById(it) }
                     a11y.typeText(action.text, node)

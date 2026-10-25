@@ -32,6 +32,7 @@ class AgentForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var job: Job? = null
     private val stopFlag = AtomicBoolean(false)
+    private val starting = AtomicBoolean(false)
     private var overlay: EmergencyStopOverlay? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -56,8 +57,8 @@ class AgentForegroundService : Service() {
     }
 
     private fun begin(goal: String) {
-        if (job?.isActive == true) {
-            log("已有任务在运行")
+        if (job?.isActive == true || starting.getAndSet(true)) {
+            log("已有任务在运行，忽略重复开始")
             return
         }
         stopFlag.set(false)
@@ -93,6 +94,7 @@ class AgentForegroundService : Service() {
             )
             overlay?.hide()
             overlay = null
+            starting.set(false)
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
@@ -110,6 +112,7 @@ class AgentForegroundService : Service() {
 
     fun requestStop() {
         stopFlag.set(true)
+        starting.set(false)
         job?.cancel()
         pendingConfirm?.invoke(false)
         pendingConfirm = null

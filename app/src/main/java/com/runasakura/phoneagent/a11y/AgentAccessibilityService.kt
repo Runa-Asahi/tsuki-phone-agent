@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.accessibilityservice.GestureDescription
 import android.content.Intent
+import android.provider.Settings
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -277,26 +278,104 @@ class AgentAccessibilityService : AccessibilityService() {
     fun recents(): Boolean = performGlobalAction(GLOBAL_ACTION_RECENTS)
 
     fun launchApp(packageName: String): Boolean {
+        // Honor/MagicOS: system Settings often needs ACTION_SETTINGS, not launcher intent
+        if (isSettingsPackage(packageName) || packageName.contains("settings", ignoreCase = true)) {
+            if (launchSystemSettings()) return true
+        }
         val pm = packageManager
-        val intent = pm.getLaunchIntentForPackage(packageName) ?: return false
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
-        return true
+        val intent = pm.getLaunchIntentForPackage(packageName)
+        if (intent != null) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            return try {
+                startActivity(intent)
+                true
+            } catch (e: Exception) {
+                Log.e(TAG, "launchApp failed $packageName", e)
+                false
+            }
+        }
+        // Fallbacks for Honor settings package names
+        for (pkg in SETTINGS_PACKAGES) {
+            if (pkg == packageName) continue
+            val i = pm.getLaunchIntentForPackage(pkg) ?: continue
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                startActivity(i)
+                return true
+            } catch (_: Exception) {
+            }
+        }
+        return false
     }
 
     fun launchByLabel(appName: String): Boolean {
+        if (appName.contains("设置") || appName.contains("settings", ignoreCase = true)) {
+            if (launchSystemSettings()) return true
+        }
         val pm = packageManager
         val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val apps = pm.queryIntentActivities(main, 0)
+        // Prefer system settings over our own in-app "设置" menu label
         val match = apps.firstOrNull {
+            val label = it.loadLabel(pm).toString()
+            label.contains(appName, ignoreCase = true) &&
+                !it.activityInfo.packageName.startsWith("com.runasakura.phoneagent")
+        } ?: apps.firstOrNull {
             it.loadLabel(pm).toString().contains(appName, ignoreCase = true)
         } ?: return false
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             .setClassName(match.activityInfo.packageName, match.activityInfo.name)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        startActivity(intent)
-        return true
+        return try {
+            startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "launchByLabel failed", e)
+            false
+        }
     }
+
+    /** Preferred way to open system Settings on Honor MagicOS / Android. */
+    fun launchSystemSettings(): Boolean {
+        val attempts = listOf(
+            Intent(Settings.ACTION_SETTINGS),
+            Intent(Settings.ACTION_SETTINGS).setPackage("com.android.settings"),
+            Intent(Settings.ACTION_SETTINGS).setPackage("com.hihonor.settings"),
+            Intent(Settings.ACTION_SETTINGS).setPackage("com.huawei.systemmanager")
+        )
+        for (base in attempts) {
+            try {
+                val i = Intent(base).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+                Log.i(TAG, "launchSystemSettings ok via ${base.action} pkg=${base.`package`}")
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "launchSystemSettings attempt failed: ${e.message}")
+            }
+        }
+        for (pkg in SETTINGS_PACKAGES) {
+            val i = packageManager.getLaunchIntentForPackage(pkg) ?: continue
+            try {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(i)
+                Log.i(TAG, "launchSystemSettings via launcher $pkg")
+                return true
+            } catch (_: Exception) {
+            }
+        }
+        return false
+    }
+
+    fun isSettingsForeground(packageName: String): Boolean {
+        val p = packageName.lowercase()
+        return isSettingsPackage(packageName) ||
+            p.contains("settings") ||
+            p == "com.android.settings" ||
+            p.startsWith("com.hihonor") && p.contains("setting")
+    }
+
+    private fun isSettingsPackage(packageName: String): Boolean =
+        SETTINGS_PACKAGES.any { it.equals(packageName, ignoreCase = true) }
 
     fun takeScreenshotBitmap(timeoutMs: Long = 4000): Bitmap? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
@@ -398,6 +477,13 @@ class AgentAccessibilityService : AccessibilityService() {
         private const val TAG = "AgentA11y"
         const val ACTION_A11Y_STATE = "com.runasakura.phoneagent.A11Y_STATE"
         const val EXTRA_CONNECTED = "connected"
+
+        val SETTINGS_PACKAGES = listOf(
+            "com.android.settings",
+            "com.hihonor.settings",
+            "com.huawei.systemmanager",
+            "com.hihonor.systemmanager"
+        )
 
         @Volatile
         var instance: AgentAccessibilityService? = null
