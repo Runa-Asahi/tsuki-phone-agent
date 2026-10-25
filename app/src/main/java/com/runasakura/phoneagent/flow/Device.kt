@@ -22,6 +22,7 @@ interface Device {
     suspend fun screen(): Screen
     suspend fun tap(item: ScreenItem): Boolean
     suspend fun tapXY(x: Int, y: Int): Boolean
+    suspend fun longPress(item: ScreenItem): Boolean
     /**
      * Type into the focused/given field (tap hint first if needed). Replaces existing text.
      * [attempt] selects the strategy order so callers can retry with a different channel:

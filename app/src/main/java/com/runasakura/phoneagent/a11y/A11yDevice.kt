@@ -251,6 +251,13 @@ class A11yDevice(
         s.tap(x, y) || (n != null && s.tapNode(n))
     }
 
+    override suspend fun longPress(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
+        invalidateOcr("longPress")
+        coroutineContext.ensureActive()
+        val (x, y) = avoidOverlay(item.cx, item.cy)
+        s.longPress(x, y)
+    }
+
     override suspend fun tapXY(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
         invalidateOcr("tapXY")
         coroutineContext.ensureActive()

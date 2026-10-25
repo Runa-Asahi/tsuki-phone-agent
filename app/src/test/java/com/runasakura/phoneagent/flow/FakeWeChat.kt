@@ -22,7 +22,9 @@ class FakeWeChat(
     val silentTypeAttempts: Set<Int> = emptySet(),
     var voiceMode: Boolean = false,
     /** Extra search-result pages revealed by scroll (pagination). */
-    var extraResultPages: List<List<String>> = emptyList()
+    var extraResultPages: List<List<String>> = emptyList(),
+    /** Chat-list rows shown after the first scroll (scroll-until-visible tests). */
+    val moreListRows: List<String> = emptyList()
 ) : Device {
     val W = 1264; val H = 2800
     val taps = mutableListOf<String>()
@@ -44,7 +46,8 @@ class FakeWeChat(
             state == "main" -> {
                 items += item(tabs[0], 632, 200)
                 searchLabel?.let { items += item(it, 632, 330) }
-                listRows.forEachIndexed { i, r -> items += item(r, 400, 420 + i * 220) }
+                val rows = if (scrolls > 0 && moreListRows.isNotEmpty()) moreListRows else listRows
+                rows.forEachIndexed { i, r -> items += item(r, 400, 420 + i * 220) }
                 tabs.forEachIndexed { i, t -> items += item(t, 158 + i * 316, 2690) }
             }
             state == "me" -> {
@@ -52,6 +55,7 @@ class FakeWeChat(
                 listOf("微信", "通讯录", "发现", "我").forEachIndexed { i, t -> items += item(t, 158 + i * 316, 2690) }
             }
             state == "moments" -> items += item("朋友圈", 632, 200)
+            state.startsWith("menu:") -> { items += item("置顶该聊天", 632, 1300); items += item("删除该聊天", 632, 1500) }
             state == "search" -> {
                 items += item(searchText.ifBlank { "搜索" }, 560, 200, edit = source == "tree")
                 items += item("取消", 1180, 200)
@@ -105,6 +109,13 @@ class FakeWeChat(
             state.startsWith("chat:") && label == "发送" -> { sent += state to inputText; inputText = "" }
             state.startsWith("chat:") && voiceMode && (x < 150 || label.contains("键盘")) -> { voiceMode = false }
         }
+        return true
+    }
+
+    val longPresses = mutableListOf<String>()
+    override suspend fun longPress(item: ScreenItem): Boolean {
+        longPresses += item.label
+        if (state == "main") state = "menu:" + item.label
         return true
     }
 

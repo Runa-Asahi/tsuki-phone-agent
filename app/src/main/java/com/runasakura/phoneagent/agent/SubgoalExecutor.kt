@@ -25,6 +25,54 @@ class SubgoalExecutor(
         Subgoal.Back -> changed("返回") { d.back() }
         Subgoal.Home -> { d.home(); d.afterAction(1500); onLog("✓ 已回到桌面"); Status.OK }
         is Subgoal.Search -> if (searchFor(sub.query)) Status.OK else Status.FAILED
+        is Subgoal.LongPress -> longPress(sub.target)
+        is Subgoal.TypeInto -> typeInto(sub.field, sub.text)
+        is Subgoal.ScrollTo -> if (scrollTo(sub.target) != null) Status.OK else Status.FAILED
+    }
+
+    private suspend fun longPress(target: String): Status {
+        onLog("子目标：长按「$target」")
+        val s = d.screen()
+        val hit = pick(s, target, below = (s.h * 0.04).toInt()) ?: scrollTo(target)
+            ?: run { onLog("✗ 未找到「$target」"); return Status.FAILED }
+        val before = sig(d.screen())
+        d.longPress(hit); d.afterAction(1500)
+        return if (sig(d.screen()) != before) { onLog("✓ 已长按「${hit.label}」"); Status.OK }
+        else { onLog("✗ 长按后界面无变化"); Status.FAILED }
+    }
+
+    /** 在X输入Y: find a field by edit label/placeholder or nearby label, type, verify text shows. */
+    private suspend fun typeInto(field: String, text: String): Status {
+        onLog("子目标：在「$field」输入「$text」")
+        var s = d.screen()
+        val f = Text.norm(field)
+        val target = s.items.firstOrNull { it.edit && Text.norm(it.label).contains(f) }
+            ?: s.items.firstOrNull { Text.norm(it.label).contains(f) }
+            ?: run { onLog("✗ 未找到输入框「$field」"); return Status.FAILED }
+        for (attempt in 0..2) {
+            if (!d.type(text, target.cx, target.cy, attempt)) continue
+            d.afterAction(1200)
+            s = d.screen()
+            if (s.items.any { Text.norm(it.label).contains(Text.norm(text)) }) {
+                onLog("✓ 已在「$field」输入"); return Status.OK
+            }
+        }
+        onLog("✗ 输入后未在屏幕上看到文字"); return Status.FAILED
+    }
+
+    /** Scroll (≤8) until [target] is visible; stops early at list end. Returns the item. */
+    suspend fun scrollTo(target: String, maxScrolls: Int = 8): ScreenItem? {
+        var s = d.screen()
+        pick(s, target, below = (s.h * 0.04).toInt())?.let { return it }
+        var still = 0
+        for (i in 1..maxScrolls) {
+            val before = sig(s)
+            d.scroll(true); d.afterAction(1200)
+            s = d.screen()
+            pick(s, target, below = (s.h * 0.04).toInt())?.let { onLog("✓ 滑动 $i 次后看到「${it.label}」"); return it }
+            if (sig(s) == before) { if (++still >= 2) { onLog("已到底，未见「$target」"); return null } } else still = 0
+        }
+        return null
     }
 
     private fun sig(s: Screen) = s.pkg + "|" + s.items.joinToString("|") { it.label }
