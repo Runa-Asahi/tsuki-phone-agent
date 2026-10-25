@@ -42,8 +42,24 @@ class LocalMnnClient(
     }
 
     override suspend fun chat(messages: List<ChatMessage>, temperature: Double): LlmResponse {
-        val started = System.currentTimeMillis()
         val modelName = try { resolveModel() } catch (_: Exception) { "" }
+        val hasImg = messages.any { it.imageBase64 != null }
+        if (hasImg && modelName.contains("vl", ignoreCase = true)) {
+            Log.i(TAG, "attaching screenshot (VL model)")
+            val r = chatOnce(messages, temperature, modelName, true)
+            if (r.error == null || r.content.isNotBlank()) return r
+            Log.w(TAG, "image request failed (${r.error}); retry text-only")
+        }
+        return chatOnce(messages, temperature, modelName, false)
+    }
+
+    private suspend fun chatOnce(
+        messages: List<ChatMessage>,
+        temperature: Double,
+        modelName: String,
+        withImages: Boolean
+    ): LlmResponse {
+        val started = System.currentTimeMillis()
         val body = JSONObject().apply {
             if (modelName.isNotBlank() && modelName != "mnn-local") put("model", modelName)
             put("temperature", temperature)
@@ -51,7 +67,20 @@ class LocalMnnClient(
             put("max_tokens", maxTokens)
             put("messages", JSONArray().apply {
                 messages.forEach { m ->
-                    put(JSONObject().put("role", m.role).put("content", m.content))
+                    val img = m.imageBase64
+                    if (withImages && img != null) {
+                        val parts = JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", m.content))
+                            .put(
+                                JSONObject().put("type", "image_url").put(
+                                    "image_url",
+                                    JSONObject().put("url", "data:image/jpeg;base64,$img")
+                                )
+                            )
+                        put(JSONObject().put("role", m.role).put("content", parts))
+                    } else {
+                        put(JSONObject().put("role", m.role).put("content", m.content))
+                    }
                 }
             })
         }

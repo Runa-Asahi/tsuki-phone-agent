@@ -55,11 +55,11 @@ object ActionParser {
 
         // Normalize aliases
         type = when (type) {
-            "click", "press" -> "tap"
+            "click", "press", "tap_text", "click_text", "touch" -> "tap"
             "longpress", "long-press" -> "long_press"
             "doubletap", "double-tap" -> "double_tap"
             "scroll" -> "swipe"
-            "input", "set_text", "settext" -> "type"
+            "input", "enter", "enter_text", "set_text", "settext" -> "type"
             "finish", "complete", "success" -> "done"
             "error" -> "fail"
             "confirm" -> "ask_confirm"

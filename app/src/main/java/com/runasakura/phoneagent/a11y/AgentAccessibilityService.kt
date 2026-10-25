@@ -20,6 +20,9 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.runasakura.phoneagent.model.UiNode
 import com.runasakura.phoneagent.model.UiSnapshot
+import com.runasakura.phoneagent.screen.RawNode
+import com.runasakura.phoneagent.screen.ScreenItem
+import com.runasakura.phoneagent.screen.ScreenItems
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -46,6 +49,98 @@ class AgentAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         event.packageName?.toString()?.let { lastPackage = it }
+        lastEventAt = System.currentTimeMillis()
+    }
+
+    @Volatile
+    var lastEventAt: Long = 0L
+        private set
+
+    @Volatile
+    var lastItems: List<ScreenItem> = emptyList()
+        private set
+
+    /** Roots of all interactive windows; application windows first, then the active one. */
+    fun windowRoots(): List<AccessibilityNodeInfo> {
+        val out = mutableListOf<AccessibilityNodeInfo>()
+        try {
+            val ws = windows.orEmpty().sortedBy { if (it.type == AccessibilityWindowInfo.TYPE_APPLICATION) 0 else 1 }
+            for (w in ws) {
+                if (w.type == AccessibilityWindowInfo.TYPE_SYSTEM ||
+                    w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
+                val r = w.root ?: continue
+                if (r.packageName?.toString()?.startsWith("com.runasakura.phoneagent") == true &&
+                    w.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue // our overlay
+                out += r
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "windows() failed: ${e.message}")
+        }
+        if (out.isEmpty()) rootInActiveWindow?.let { out += it }
+        return out
+    }
+
+    private fun toRaw(n: AccessibilityNodeInfo, depth: Int, budget: IntArray): RawNode {
+        budget[0]--
+        val r = Rect(); n.getBoundsInScreen(r)
+        val kids = mutableListOf<RawNode>()
+        if (depth < 35) {
+            for (i in 0 until n.childCount) {
+                if (budget[0] <= 0) break
+                val c = n.getChild(i) ?: continue
+                if (!c.isVisibleToUser) continue
+                kids += toRaw(c, depth + 1, budget)
+            }
+        }
+        return RawNode(
+            text = n.text?.toString().orEmpty(),
+            desc = n.contentDescription?.toString().orEmpty(),
+            viewId = n.viewIdResourceName.orEmpty().substringAfterLast('/'),
+            l = r.left, t = r.top, r = r.right, b = r.bottom,
+            clickable = n.isClickable || n.isLongClickable,
+            editable = n.isEditable,
+            scrollable = n.isScrollable,
+            children = kids,
+            ref = n
+        )
+    }
+
+    fun screenItems(): List<ScreenItem> {
+        val (w, h) = screenSize()
+        val budget = intArrayOf(600)
+        val raws = windowRoots().map { toRaw(it, 0, budget) }
+        return ScreenItems.build(raws, w, h).also { lastItems = it }
+    }
+
+    /** Find a visible on-screen node whose label contains [text] (exact match preferred). */
+    fun findVisibleByText(text: String, allowEditable: Boolean = false): AccessibilityNodeInfo? {
+        val items = screenItems()
+        val cands = items.filter { it.label.contains(text, true) && (allowEditable || !it.edit) }
+        val best = cands.minByOrNull { if (it.label == text) 0 else it.label.length }
+        return best?.ref as? AccessibilityNodeInfo
+    }
+
+    fun firstVisibleEditable(): AccessibilityNodeInfo? =
+        screenItems().firstOrNull { it.edit }?.ref as? AccessibilityNodeInfo
+
+    /** JPEG base64 of the screen, downscaled (for VL models). */
+    fun screenshotJpegBase64(maxSide: Int = 896): String? {
+        val bmp = takeScreenshotBitmap() ?: return null
+        val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height)
+        val scaled = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+        val os = java.io.ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, 70, os)
+        return android.util.Base64.encodeToString(os.toByteArray(), android.util.Base64.NO_WRAP)
+    }
+
+    /** Fallback text entry: clipboard + ACTION_PASTE on the node. */
+    fun pasteText(node: AccessibilityNodeInfo, text: String): Boolean = try {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("agent", text))
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+    } catch (e: Exception) {
+        Log.w(TAG, "paste failed: ${e.message}"); false
     }
 
     override fun onInterrupt() {
@@ -65,66 +160,26 @@ class AgentAccessibilityService : AccessibilityService() {
         try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
             ?: lastPackage.ifEmpty { "unknown" }
 
-    fun dumpUiTree(maxNodes: Int = 120): UiSnapshot {
-        val root = rootInActiveWindow
+    fun dumpUiTree(@Suppress("UNUSED_PARAMETER") maxNodes: Int = 120): UiSnapshot {
         val (w, h) = screenSize()
-        if (root == null) {
-            return UiSnapshot(
-                packageName = lastPackage.ifEmpty { "unknown" },
-                screenWidth = w,
-                screenHeight = h,
-                tree = null,
-                compressedText = "(empty tree)",
-                nodeCount = 0,
-                lowConfidence = true
-            )
-        }
-        val pkg = root.packageName?.toString() ?: lastPackage
-        val counter = intArrayOf(0)
-        val tree = buildNode(root, counter, maxNodes, depth = 0)
-        val sb = StringBuilder()
-        flatten(tree, sb, 0)
-        val text = sb.toString().take(8000)
-        val low = counter[0] < 3 || text.length < 20
+        val items = try { screenItems() } catch (e: Exception) { emptyList() }
+        val pkg = foregroundPackage()
+        val text = items.joinToString("\n") { it.format() }
         return UiSnapshot(
             packageName = pkg,
             screenWidth = w,
             screenHeight = h,
-            tree = tree,
-            compressedText = text,
-            nodeCount = counter[0],
-            lowConfidence = low
+            tree = null,
+            compressedText = text.ifBlank { "(空)" },
+            nodeCount = items.size,
+            lowConfidence = ScreenItems.textCount(items) < 3
         )
     }
 
     /**
      * Compact dump for small/VL models: only interactive / labeled nodes, hard char cap.
      */
-    fun dumpInteractiveCompact(maxLines: Int = 40, maxChars: Int = 1800): UiSnapshot {
-        val full = dumpUiTree(maxNodes = 80)
-        val lines = full.compressedText.lineSequence()
-            .map { it.trimEnd() }
-            .filter { line ->
-                line.contains(" click") || line.contains(" edit") ||
-                    line.contains(" scroll") ||
-                    Regex("""\[[n\d]+\]\s+\S+""").containsMatchIn(line)
-            }
-            .filter { line ->
-                // drop pure layout chrome without label
-                val label = line.substringAfter("] ").substringBefore(" (")
-                label.isNotBlank() && label !in listOf(
-                    "FrameLayout", "LinearLayout", "ViewGroup", "View",
-                    "RelativeLayout", "ContentFrameLayout", "action_bar_root", "content"
-                )
-            }
-            .take(maxLines)
-            .toList()
-        val compact = lines.joinToString("\n").take(maxChars)
-        return full.copy(
-            compressedText = compact.ifBlank { full.compressedText.take(maxChars) },
-            nodeCount = lines.size
-        )
-    }
+    fun dumpInteractiveCompact(@Suppress("UNUSED_PARAMETER") maxLines: Int = 40, @Suppress("UNUSED_PARAMETER") maxChars: Int = 1200): UiSnapshot = dumpUiTree()
 
     /** Generic launch of any installed app by package (MagicOS-friendly NEW_TASK + label fallback). */
     fun launchPackage(pkg: String, label: String? = null): Boolean {
@@ -231,6 +286,10 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     fun findNodeById(id: String): AccessibilityNodeInfo? {
+        if (id.startsWith("e")) {
+            (lastItems.firstOrNull { it.id == id }?.ref as? AccessibilityNodeInfo)?.let { return it }
+            return (screenItems().firstOrNull { it.id == id }?.ref as? AccessibilityNodeInfo)
+        }
         val root = rootInActiveWindow ?: return null
         val counter = intArrayOf(0)
         return findBySyntheticId(root, id, counter)
@@ -253,6 +312,7 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     fun findByText(text: String): AccessibilityNodeInfo? {
+        findVisibleByText(text, allowEditable = true)?.let { return it }
         val root = rootInActiveWindow ?: return null
         val list = root.findAccessibilityNodeInfosByText(text)
         return list?.firstOrNull { it.isClickable || it.isEditable }
@@ -339,8 +399,9 @@ class AgentAccessibilityService : AccessibilityService() {
                 found ?: findFocusedEditable()
             }
             else -> findFocusedEditable()
-        } ?: return false
-        return setText(editable, text)
+        } ?: firstVisibleEditable() ?: return false
+        if (setText(editable, text)) return true
+        return pasteText(editable, text)
     }
 
     private fun findFocusedEditable(): AccessibilityNodeInfo? {

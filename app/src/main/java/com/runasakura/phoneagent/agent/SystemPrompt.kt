@@ -46,7 +46,7 @@ JSON schema:
 /no_think
 你是手机 Agent。只输出一个 JSON：
 {"thought":"...","action":{"type":"launch|tap|type|back|home|wait|done|fail|ask_confirm","app":"...","package":"...","text":"...","node_id":"...","x":0,"y":0}}
-打开系统设置用 type=launch, app=设置。打开微信用 package=com.tencent.mm。点发送前 ask_confirm。
+打开微信用 package=com.tencent.mm。点发送前 ask_confirm。
 """.trimIndent()
 
     val FOCUSED = """

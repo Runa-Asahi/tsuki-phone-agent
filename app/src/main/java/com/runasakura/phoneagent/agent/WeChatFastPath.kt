@@ -151,7 +151,7 @@ class WeChatFastPath(
         }
         // Top-right heuristic on PPG-AN00 portrait 1264x2800
         val (w, h) = a11y.screenSize()
-        if (a11y.tap((w * 0.90).toInt(), (h * 0.07).toInt())) {
+        if (a11y.tap((w * 0.836).toInt(), (h * 0.071).toInt())) {
             onLog("点击右上角启发式搜索位")
             delay(400)
             return true

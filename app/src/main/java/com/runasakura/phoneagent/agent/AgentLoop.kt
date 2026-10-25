@@ -103,9 +103,28 @@ class AgentLoop(
                 val remaining = AppResolver.remainingGoal(goal, appName)
                 if (remaining == null) return Result(true, 1, "已打开${match.label}")
                 onLog("剩余子目标：$remaining")
+                // Deterministic subgoal execution first (no model)
+                val exec = SubgoalExecutor(a11y, onLog, onConfirm)
+                exec.waitForTree()
+                val subs = GoalSplitter.split(remaining)
+                var left: String? = null
+                for ((i, sg) in subs.withIndex()) {
+                    coroutineContext.ensureActive()
+                    if (isStopped()) return Result(false, 1, "已急停")
+                    when (exec.run(sg, goal)) {
+                        SubgoalExecutor.Status.OK -> Unit
+                        SubgoalExecutor.Status.CANCELLED -> return Result(false, 1, "用户取消发送")
+                        SubgoalExecutor.Status.FAILED -> {
+                            left = subs.drop(i).joinToString("，") { it.describe() }
+                            break
+                        }
+                    }
+                }
+                if (left == null) return Result(true, 1, "已完成：$remaining（确定性执行）")
+                onLog("确定性执行未完成，剩余交给模型：$left")
                 history.clear()
                 history += ChatMessage("system", SystemPrompt.FOCUSED)
-                history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$remaining")
+                history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$left")
             }
         }
 
@@ -144,17 +163,23 @@ class AgentLoop(
                 step--; continue
             }
 
+            val shot = if (snap.lowConfidence) {
+                onLog("界面文本少于3项，附带截图（仅 VL 模型会使用）")
+                try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
+            } else null
             onLog("请求本机 MNN（2B 可能需数十秒，日志会心跳）…")
             val useFocused = history.firstOrNull()?.content == SystemPrompt.FOCUSED
             val sys = if (useFocused) SystemPrompt.FOCUSED else SystemPrompt.SHORT
             val msgs = if (useFocused) {
-                history + ChatMessage("user", buildObserveMessage(goal, snap, step))
+                // system + first user + last assistant turn only
+                history.take(2) + history.drop(2).takeLast(1) +
+                    ChatMessage("user", buildObserveMessage(goal, snap, step), shot)
             } else {
                 // Keep history short for VL: system SHORT + last user observe only
                 listOf(
                     ChatMessage("system", SystemPrompt.SHORT),
                     ChatMessage("user", "目标：$goal"),
-                    ChatMessage("user", buildObserveMessage(goal, snap, step))
+                    ChatMessage("user", buildObserveMessage(goal, snap, step), shot)
                 )
             }
             var resp = planWithTimeout(
@@ -172,15 +197,19 @@ class AgentLoop(
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
 
-            if (ActionParser.isInvalid(plan) || ActionParser.hasThinkWithoutJson(resp.content)) {
-                onLog("解析失败，使用短提示重试一次…")
+            val tapMissing = (plan.action as? AgentAction.Tap)?.let { tapTargetMissing(a11y, it) } ?: false
+            if (ActionParser.isInvalid(plan) || ActionParser.hasThinkWithoutJson(resp.content) || tapMissing) {
+                val why = if (tapMissing) "点击目标不在屏幕上" else "动作无效/无法解析"
+                onLog("$why，附错误说明重问一次…")
                 resp = planWithTimeout(
                     listOf(
                         ChatMessage("system", SystemPrompt.SHORT),
                         ChatMessage(
                             "user",
-                            "目标：$goal\n前台：${snap.packageName}\n只输出一行 JSON，例如：" +
-                                """{"thought":"开设置","action":{"type":"launch","app":"设置"}}"""
+                            "目标：$goal\n前台：${snap.packageName}\n上次回复错误：$why。\n" +
+                                "屏幕元素（只能点这些 id）：\n${snap.compressedText.take(1000)}\n" +
+                                "只输出一行 JSON，例如：" +
+                                """{"thought":"点目标","action":{"type":"tap","node_id":"e3"}}"""
                         )
                     ),
                     forceCloud = false,
@@ -402,6 +431,14 @@ class AgentLoop(
         return AgentAccessibilityService.SETTINGS_PACKAGES.any {
             snap.packageName.equals(it, true)
         } || snap.packageName.contains("settings", ignoreCase = true)
+    }
+
+    private fun tapTargetMissing(a11y: AgentAccessibilityService, tap: AgentAction.Tap): Boolean {
+        val id = tap.nodeId
+        if (!id.isNullOrBlank()) return a11y.findNodeById(id) == null && tap.x == null
+        val txt = tap.text
+        if (!txt.isNullOrBlank()) return a11y.findVisibleByText(txt) == null
+        return false
     }
 
     private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int): String {

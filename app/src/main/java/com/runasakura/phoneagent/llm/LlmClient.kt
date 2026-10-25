@@ -1,6 +1,11 @@
 package com.runasakura.phoneagent.llm
 
-data class ChatMessage(val role: String, val content: String)
+data class ChatMessage(
+    val role: String,
+    val content: String,
+    /** Optional JPEG base64 screenshot (only sent to VL models). */
+    val imageBase64: String? = null
+)
 
 data class LlmResponse(
     val content: String,
