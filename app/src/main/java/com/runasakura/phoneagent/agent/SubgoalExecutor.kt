@@ -110,11 +110,15 @@ class SubgoalExecutor(
         val target = s.items.firstOrNull { it.edit && Text.norm(it.label).contains(f) }
             ?: s.items.firstOrNull { Text.norm(it.label).contains(f) }
             ?: run { onLog("✗ 未找到输入框「$field」"); return Status.FAILED }
+        val want = Text.norm(text)
+        // Text may already be on screen (e.g. typing 「搜索」 into the 搜索 box) — require new evidence.
+        val baseline = s.items.count { Text.norm(it.label).contains(want) }
         for (attempt in 0..2) {
             if (!d.type(text, target.cx, target.cy, attempt)) continue
             d.afterAction(1200)
             s = d.screen()
-            if (s.items.any { Text.norm(it.label).contains(Text.norm(text)) }) {
+            val inEdit = s.items.any { it.edit && Text.norm(it.label).contains(want) }
+            if (inEdit || s.items.count { Text.norm(it.label).contains(want) } > baseline) {
                 onLog("✓ 已在「$field」输入"); return Status.OK
             }
         }
