@@ -42,17 +42,29 @@ JSON schema:
 {"thought":"点击电池入口","action":{"type":"tap","text":"电池"}}
 """.trimIndent()
 
+    /** Few-shot prompt for small local models (LFM2.5-1.2B etc.) using the [e#] screen list. */
     val SHORT = """
 /no_think
-你是手机 Agent。只输出一个 JSON：
-{"thought":"...","action":{"type":"launch|tap|type|back|home|wait|done|fail|ask_confirm","app":"...","package":"...","text":"...","node_id":"...","x":0,"y":0}}
-打开微信用 package=com.tencent.mm。点发送前 ask_confirm。
+你是手机操作助手。输入是屏幕元素列表，每行格式：[e编号] 文字 (x,y) tap|edit|scroll。
+只输出一行 JSON，不要解释，不要 <think>。
+动作 type：tap(node_id) | type(text,可带 node_id) | swipe(x1,y1,x2,y2) | back | home | wait | done(summary) | fail(reason) | ask_confirm(reason)
+规则：node_id 只能用列表里出现的 e 编号；点「发送」「支付」「删除」前先 ask_confirm；目标已达成输出 done。
+示例1
+屏幕：
+[e1] 微信 (632,200)
+[e2] 文件传输助手 (400,420) tap
+目标：进入文件传输助手
+输出：{"thought":"点文件传输助手","action":{"type":"tap","node_id":"e2"}}
+示例2
+屏幕：
+[e1] 搜索 (560,200) edit
+目标：搜索天气
+输出：{"thought":"输入搜索词","action":{"type":"type","node_id":"e1","text":"天气"}}
+示例3
+目标在屏幕上已达成：{"thought":"已完成","action":{"type":"done","summary":"已进入"}}
+示例4
+要看更多内容：{"thought":"向上滑","action":{"type":"swipe","x1":632,"y1":1960,"x2":632,"y2":840}}
 """.trimIndent()
 
-    val FOCUSED = """
-/no_think
-你是手机 Agent。根据「当前界面要点」只输出一个 JSON 动作，不要解释。
-{"thought":"...","action":{"type":"tap|type|launch|back|wait|done|fail|ask_confirm","text":"...","node_id":"...","x":0,"y":0,"ms":500,"reason":"..."}}
-规则：点「发送」前必须 type=ask_confirm。禁止输出 <think>。
-""".trimIndent()
+    val FOCUSED = SHORT
 }

@@ -72,7 +72,9 @@ class AgentForegroundService : Service() {
         overlay = null
         starting.set(true)
         stopFlag.set(false)
-        overlay = EmergencyStopOverlay(this) { requestStop() }.also { it.show() }
+        // Prefer the accessibility overlay (no SYSTEM_ALERT_WINDOW needed)
+        val overlayCtx: android.content.Context = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() ?: this
+        overlay = EmergencyStopOverlay(overlayCtx) { requestStop() }.also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
         val cloud = if (prefs.cloudBaseUrl.isNotBlank()) {
@@ -105,7 +107,8 @@ class AgentForegroundService : Service() {
                 log("读取 /v1/models 失败：${e.message}")
             }
             val result = try {
-                loop.run(goal)
+                kotlinx.coroutines.withTimeoutOrNull(TASK_TIMEOUT_MS) { loop.run(goal) }
+                    ?: AgentLoop.Result(false, 0, "任务超时（${TASK_TIMEOUT_MS / 60000} 分钟），已停止")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 AgentLoop.Result(false, 0, "已取消")
             } catch (e: Exception) {
@@ -127,7 +130,20 @@ class AgentForegroundService : Service() {
         }
     }
 
-    private suspend fun askConfirm(reason: String): Boolean =
+    private suspend fun askConfirm(reason: String): Boolean {
+        com.runasakura.phoneagent.util.Diagnostics.log("[确认] $reason")
+        broadcastStatus("confirm-overlay", reason)
+        updateNotification("等待确认: ${reason.take(40)}")
+        // Preferred: accessibility overlay drawn by the service (works on top of any app)
+        com.runasakura.phoneagent.a11y.AgentAccessibilityService.require()?.confirmOverlay(reason)?.let {
+            log(if (it) "用户确认" else "用户拒绝")
+            return it
+        }
+        log("无障碍浮窗不可用，改用确认页")
+        return askConfirmActivity(reason)
+    }
+
+    private suspend fun askConfirmActivity(reason: String): Boolean =
         suspendCancellableCoroutine { cont ->
             pendingConfirm = { ok ->
                 if (cont.isActive) cont.resume(ok)
@@ -212,6 +228,7 @@ class AgentForegroundService : Service() {
     }
 
     companion object {
+        const val TASK_TIMEOUT_MS = 8 * 60_000L
         private const val TAG = "AgentFgs"
         const val NOTIF_ID = 42
         const val ACTION_START = "com.runasakura.phoneagent.START"

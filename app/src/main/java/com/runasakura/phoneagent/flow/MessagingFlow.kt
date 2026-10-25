@@ -66,7 +66,7 @@ class MessagingFlow(
             .filter { it.cy < s.h * 0.86 }
         val entered = if (listHits.size == 1) {
             log("聊天列表中精确匹配到「$contact」，直接进入")
-            d.tap(listHits[0]); d.sleep(1200); true
+            d.tap(listHits[0]); d.afterAction(2000); true
         } else {
             if (listHits.size > 1) log("聊天列表中有 ${listHits.size} 个同名项，改用搜索")
             when (val r = searchAndOpen(contact)) {
@@ -82,7 +82,7 @@ class MessagingFlow(
         if (!titleMatches(s, contact)) {
             val seen = s.items.filter { it.cy < s.h * 0.12 }.joinToString("、") { it.label }
             log("✗ 聊天标题与「$contact」不符（看到：$seen），退出")
-            d.back(); d.sleep(500); d.back()
+            d.back(); d.afterAction(1000); d.back()
             return fail("打开的聊天标题不是「$contact」（看到：${seen.ifBlank { "无" }}），已退出，未输入任何内容")
         }
         log("✓ 聊天标题已核对：$contact")
@@ -90,17 +90,22 @@ class MessagingFlow(
         // 3) type message (switch out of voice mode first)
         s.items.firstOrNull { it.cy > s.h * 0.8 && Text.norm(it.label).let { n -> n.contains("按住") && n.contains("说话") } }?.let {
             log("输入栏处于语音模式，切换到键盘")
-            d.tapXY((s.w * 0.06).toInt(), it.cy); d.sleep(600); s = d.screen()
+            d.tapXY((s.w * 0.06).toInt(), it.cy); d.afterAction(1000); s = d.screen()
         }
         val bubblesBefore = countBubbles(s, message)
         val edit = s.items.lastOrNull { it.edit && (s.imeTop == null || it.cy < s.imeTop) }
         val hx = edit?.cx ?: (s.w * app.inputFallback.first).toInt()
         val hy = edit?.cy ?: (s.h * app.inputFallback.second).toInt()
-        if (!d.type(message, hx, hy)) return fail("无法在输入框输入文字")
-        d.sleep(700)
-        s = d.screen()
-        val send = findSend(s) ?: return fail("输入后未出现「发送」按钮（可能处于语音模式或输入失败），未发送")
-        if (!inputContains(s, message, send)) return fail("无法核对输入框内容为「$message」，未发送")
+        var send: ScreenItem? = null
+        for (attempt in 0..2) {
+            if (!d.type(message, hx, hy, attempt)) continue
+            d.afterAction(1200)
+            s = d.screen()
+            val sb = findSend(s)
+            if (sb != null && inputContains(s, message, sb)) { send = sb; break }
+            log("输入框未核对到「$message」，换输入方式重试（${attempt + 1}/3）")
+        }
+        if (send == null) return fail("输入后无法核对输入框内容/未出现「发送」按钮（可能语音模式或输入失败），未发送")
         log("✓ 输入框已核对")
 
         // 4) confirm
@@ -113,13 +118,13 @@ class MessagingFlow(
         s = d.screen()
         if (s.pkg != app.pkg) {
             log("确认框关闭后前台=${s.pkg}，回到${app.label}")
-            d.bringToFront(app.pkg, app.label); d.sleep(900); s = d.screen()
+            d.bringToFront(app.pkg, app.label); d.afterAction(1500); s = d.screen()
         }
         if (!titleMatches(s, contact)) return fail("确认期间界面已变化，未发送")
         val send2 = findSend(s) ?: return fail("确认后找不到「发送」按钮，未发送")
         d.tap(send2)
         log("已点击发送")
-        d.sleep(1000)
+        d.afterAction(1500)
 
         // 5) verify bubble
         s = d.screen()
@@ -150,15 +155,15 @@ class MessagingFlow(
             if (s.pkg != app.pkg) {
                 if (relaunches++ >= 2) return false
                 log("前台=${s.pkg}，将${app.label}带到前台")
-                d.bringToFront(app.pkg, app.label); d.sleep(1200); continue
+                d.bringToFront(app.pkg, app.label); d.afterAction(1500); continue
             }
             if (isMain(s)) {
-                s.items.firstOrNull { it.cy > s.h * 0.85 && Text.eq(it.label, app.chatTab) }?.let { d.tap(it); d.sleep(500) }
+                s.items.firstOrNull { it.cy > s.h * 0.85 && Text.eq(it.label, app.chatTab) }?.let { d.tap(it); d.afterAction(800) }
                 log("✓ 已在${app.label}主界面")
                 return true
             }
             log("不在主界面，返回一步")
-            d.back(); d.sleep(700)
+            d.back(); d.afterAction(1200)
         }
         return false
     }
@@ -172,12 +177,15 @@ class MessagingFlow(
         when {
             searchItem != null -> d.tap(searchItem)
             app.searchFallback != null -> {
-                log("未见「搜索」，点击右上角搜索位")
-                d.tapXY((s.w * app.searchFallback.first).toInt(), (s.h * app.searchFallback.second).toInt())
+                // y from the title row anchor (「微信」/「微信(3)」), x from the profile ratio
+                val title = s.items.firstOrNull { it.cy < s.h * 0.12 && Text.norm(it.label).startsWith(app.chatTab) }
+                val y = title?.cy ?: (s.h * app.searchFallback.second).toInt()
+                log("未见「搜索」文字，按${if (title != null) "标题行锚点" else "比例"}点击右上角搜索位 y=$y")
+                d.tapXY((s.w * app.searchFallback.first).toInt(), y)
             }
             else -> return "找不到搜索入口"
         }
-        d.sleep(900)
+        d.afterAction(1500)
         s = d.screen()
         val cancel = s.items.firstOrNull { it.cy < s.h * 0.15 && Text.eq(it.label, "取消") }
         val searchEdit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.15 }
@@ -185,9 +193,18 @@ class MessagingFlow(
         val placeholder = s.items.firstOrNull { it.cy < s.h * 0.15 && it.label.startsWith("搜索") }
         val hx = searchEdit?.cx ?: placeholder?.cx ?: (s.w * 0.45).toInt()
         val hy = searchEdit?.cy ?: placeholder?.cy ?: cancel!!.cy
-        if (!d.type(contact, hx, hy)) return "无法在搜索框输入联系人"
-        log("已在搜索框输入「$contact」")
-        d.sleep(1500)
+        var typedOk = false
+        for (attempt in 0..2) {
+            if (!d.type(contact, hx, hy, attempt)) continue
+            d.afterAction(1500)
+            s = d.screen()
+            // postcondition: the search box (top band) shows the contact text
+            if (s.items.any { it.cy < s.h * 0.15 && Text.norm(it.label).contains(Text.norm(contact)) }) { typedOk = true; break }
+            log("搜索框未显示「$contact」，换输入方式重试（${attempt + 1}/3）")
+        }
+        if (!typedOk) return "搜索框输入未生效（三种输入方式都失败）"
+        log("✓ 搜索框已显示「$contact」")
+        d.afterAction(1200)
         s = d.screen()
         val barBottom = maxOf(cancel?.cy ?: 0, searchEdit?.cy ?: 0, (s.h * 0.08).toInt()) + (s.h * 0.025).toInt()
         val hits = exactMatches(s, contact, top = barBottom, excludeSections = true)
@@ -196,7 +213,7 @@ class MessagingFlow(
                 val near = s.items.filter { it.cy > barBottom && it.label.contains(contact) }.take(4).joinToString("、") { it.label }
                 "搜索结果中没有与「$contact」完全一致的联系人" + (if (near.isNotBlank()) "（相近：$near）" else "") + "，为安全起见未点击，请提供准确备注名"
             }
-            1 -> { log("✓ 唯一精确匹配：${hits[0].label}"); d.tap(hits[0]); d.sleep(1300); null }
+            1 -> { log("✓ 唯一精确匹配：${hits[0].label}"); d.tap(hits[0]); d.afterAction(2000); null }
             else -> "搜索结果中有 ${hits.size} 个同名「$contact」，无法确定是哪一位，已停止，请改用唯一备注名"
         }
     }

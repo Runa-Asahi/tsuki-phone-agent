@@ -18,7 +18,8 @@ class EmergencyStopOverlay(
 
     fun show() {
         if (button != null) return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+        val a11y = context is android.accessibilityservice.AccessibilityService
+        if (!a11y && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
             !android.provider.Settings.canDrawOverlays(context)
         ) {
             return // optional; notification stop still works
@@ -28,8 +29,13 @@ class EmergencyStopOverlay(
             setBackgroundColor(ContextCompat.getColor(context, R.color.stop_red))
             setTextColor(ContextCompat.getColor(context, android.R.color.white))
             setOnClickListener { onStop() }
+            minWidth = 0; minimumWidth = 0
+            textSize = 12f
+            setPadding(12, 8, 12, 8)
         }
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val type = if (a11y) {
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
             @Suppress("DEPRECATION")
@@ -51,6 +57,10 @@ class EmergencyStopOverlay(
         try {
             wm.addView(btn, params)
             button = btn
+            btn.post {
+                val loc = IntArray(2); btn.getLocationOnScreen(loc)
+                bounds = android.graphics.Rect(loc[0], loc[1], loc[0] + btn.width, loc[1] + btn.height)
+            }
         } catch (_: Exception) {
             // no overlay permission
         }
@@ -64,5 +74,11 @@ class EmergencyStopOverlay(
             }
         }
         button = null
+        bounds = null
+    }
+
+    companion object {
+        /** Screen bounds of the visible stop button (gesture taps must avoid it). */
+        @Volatile var bounds: android.graphics.Rect? = null
     }
 }

@@ -15,6 +15,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.runasakura.phoneagent.R
 import com.runasakura.phoneagent.a11y.AgentAccessibilityService
 import com.runasakura.phoneagent.databinding.ActivityMainBinding
@@ -60,6 +62,7 @@ class MainActivity : AppCompatActivity() {
             appendLog("请求急停")
         }
         binding.btnExport.setOnClickListener { exportDiagnostics() }
+        binding.btnSelfTest.setOnClickListener { runSelfTest() }
         binding.btnOpenA11y.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
@@ -138,6 +141,31 @@ class MainActivity : AppCompatActivity() {
                 AgentForegroundService.deliverConfirm(false)
             }
             .show()
+    }
+
+    private fun runSelfTest() {
+        AlertDialog.Builder(this)
+            .setTitle("自检")
+            .setMessage("将检查无障碍、浮窗、截图、OCR、MNN API、微信/QQ 可启动性。\n\n可选：短暂打开微信和 QQ 检查能否读到界面（不会点击或发送任何内容）。")
+            .setPositiveButton("含打开微信/QQ") { _, _ -> doSelfTest(true) }
+            .setNeutralButton("仅基础检查") { _, _ -> doSelfTest(false) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun doSelfTest(probe: Boolean) {
+        binding.logView.text = ""
+        appendLog("—— 自检开始 ——")
+        lifecycleScope.launch {
+            val res = SelfTest(this@MainActivity) { line -> runOnUiThread { appendLog(line) } }.run(probe)
+            val fails = res.count { !it.ok }
+            appendLog("—— 自检完成：${res.size - fails} 通过，$fails 失败（可点「导出诊断日志」分享）——")
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle(if (fails == 0) "自检全部通过" else "自检：$fails 项失败")
+                .setMessage(res.joinToString("\n") { "${if (it.ok) "✅" else "❌"} ${it.name}\n    ${it.detail}" })
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
+        }
     }
 
     private fun exportDiagnostics() {

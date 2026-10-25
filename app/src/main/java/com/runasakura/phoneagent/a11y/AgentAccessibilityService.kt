@@ -170,6 +170,84 @@ class AgentAccessibilityService : AccessibilityService() {
         lastPackage = ""
     }
 
+    /**
+     * Send-confirmation drawn by the service itself as TYPE_ACCESSIBILITY_OVERLAY: needs no
+     * SYSTEM_ALERT_WINDOW and is not subject to background-activity-start rules, so it reliably
+     * appears above WeChat/QQ. NOT_FOCUSABLE keeps the chat's keyboard/input untouched.
+     * Returns null if the window could not be added (caller falls back to an Activity).
+     */
+    suspend fun confirmOverlay(message: String): Boolean? = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+        val main = Handler(Looper.getMainLooper())
+        val wm = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+        var view: android.view.View? = null
+        fun remove() { view?.let { v -> main.post { try { wm.removeView(v) } catch (_: Exception) {} } }; view = null }
+        main.post {
+            try {
+                val d = resources.displayMetrics.density
+                val box = android.widget.LinearLayout(this).apply {
+                    orientation = android.widget.LinearLayout.VERTICAL
+                    setPadding((20 * d).toInt(), (20 * d).toInt(), (20 * d).toInt(), (12 * d).toInt())
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        setColor(android.graphics.Color.WHITE); cornerRadius = 16 * d
+                    }
+                }
+                box.addView(android.widget.TextView(this).apply {
+                    text = getString(com.runasakura.phoneagent.R.string.confirm_title)
+                    textSize = 18f; setTextColor(android.graphics.Color.BLACK)
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                })
+                box.addView(android.widget.TextView(this).apply {
+                    text = message; textSize = 15f; setTextColor(android.graphics.Color.DKGRAY)
+                    setPadding(0, (10 * d).toInt(), 0, (14 * d).toInt())
+                })
+                val row = android.widget.LinearLayout(this).apply { gravity = android.view.Gravity.END }
+                fun btn(label: Int, ok: Boolean) = android.widget.Button(this).apply {
+                    text = getString(label)
+                    setOnClickListener { remove(); if (cont.isActive) cont.resume(ok) {} }
+                }
+                row.addView(btn(com.runasakura.phoneagent.R.string.confirm_no, false))
+                row.addView(btn(com.runasakura.phoneagent.R.string.confirm_yes, true))
+                box.addView(row)
+                val lp = android.view.WindowManager.LayoutParams(
+                    (resources.displayMetrics.widthPixels * 0.88).toInt(),
+                    android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+                    android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND,
+                    android.graphics.PixelFormat.TRANSLUCENT
+                ).apply { gravity = android.view.Gravity.CENTER; dimAmount = 0.5f }
+                wm.addView(box, lp)
+                view = box
+            } catch (e: Exception) {
+                Log.w(TAG, "confirm overlay failed: ${e.message}")
+                if (cont.isActive) cont.resume(null) {}
+            }
+        }
+        cont.invokeOnCancellation { remove() }
+    }
+
+    /** Self-test helper: can we add/remove an accessibility overlay window? */
+    fun overlayWorks(): Boolean {
+        val latch = CountDownLatch(1); val ok = AtomicBoolean(false)
+        Handler(Looper.getMainLooper()).post {
+            try {
+                val wm = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+                val v = android.view.View(this)
+                wm.addView(v, android.view.WindowManager.LayoutParams(1, 1,
+                    android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    android.graphics.PixelFormat.TRANSLUCENT))
+                wm.removeView(v); ok.set(true)
+            } catch (_: Exception) {} finally { latch.countDown() }
+        }
+        latch.await(2, TimeUnit.SECONDS)
+        return ok.get()
+    }
+
+    fun imeChannelEnabled(): Boolean = Build.VERSION.SDK_INT >= 33 &&
+        (serviceInfo?.flags ?: 0) and android.accessibilityservice.AccessibilityServiceInfo.FLAG_INPUT_METHOD_EDITOR != 0
+
     fun focusedInput(): AccessibilityNodeInfo? = try {
         findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
     } catch (_: Exception) { null }

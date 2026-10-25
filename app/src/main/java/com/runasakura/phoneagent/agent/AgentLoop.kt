@@ -101,25 +101,28 @@ class AgentLoop(
                 if (isMsgApp && o != null && sd != null && subs.size == 2) {
                     return runMessaging(dev, match.packageName, o.target, sd.text, reallySend = sd.send)
                 }
-                val exec = SubgoalExecutor(dev, onLog, onConfirm)
-                var left: String? = null
-                for ((i, sg) in subs.withIndex()) {
-                    coroutineContext.ensureActive()
-                    if (isStopped()) return Result(false, 1, "已急停")
-                    when (exec.run(sg)) {
-                        SubgoalExecutor.Status.OK -> Unit
-                        SubgoalExecutor.Status.CANCELLED -> return Result(false, 1, "用户取消发送")
-                        SubgoalExecutor.Status.FAILED -> {
-                            left = subs.drop(i).joinToString("，") { it.describe() }
-                            break
-                        }
-                    }
-                }
-                if (left == null) return Result(true, 1, "已完成：$remaining（确定性执行）")
+                val (res, left) = runSubgoals(dev, subs)
+                if (res != null) return res
                 onLog("确定性执行未完成，剩余交给模型（最后手段）：$left")
                 history.clear()
                 history += ChatMessage("system", SystemPrompt.FOCUSED)
                 history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$left")
+            } else {
+                // No app named: generic gestures/navigation on the current app (通用点击滑动)
+                val subs = GoalSplitter.split(goal)
+                if (subs.isNotEmpty() && subs.none { it is Subgoal.Unknown }) {
+                    if (AppResolver.isAgentOrBrain(dev.foregroundPackage()) && subs.first() !is Subgoal.Home) {
+                        onLog("前台是 Agent 自身，先回桌面再执行（不操作 Agent/MNN 界面）")
+                        dev.home(); dev.afterAction(1500)
+                    }
+                    onLog("拆分：" + subs.joinToString(" → ") { it.describe() })
+                    val (res, left) = runSubgoals(dev, subs)
+                    if (res != null) return res
+                    onLog("确定性执行未完成，剩余交给模型（最后手段）：$left")
+                    history.clear()
+                    history += ChatMessage("system", SystemPrompt.FOCUSED)
+                    history += ChatMessage("user", "剩余目标：$left")
+                }
             }
         }
 
@@ -198,48 +201,30 @@ class AgentLoop(
             var plan = ActionParser.parse(resp.content)
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
-
-            val tapMissing = (plan.action as? AgentAction.Tap)?.let { tapTargetMissing(a11y, it) } ?: false
-            if (ActionParser.isInvalid(plan) || ActionParser.hasThinkWithoutJson(resp.content) || tapMissing) {
-                val why = if (tapMissing) "点击目标不在屏幕上" else "动作无效/无法解析"
-                onLog("$why，附错误说明重问一次…")
+            var err = validationError(plan, resp.content, sc)
+            var tries = 0
+            while (err != null && tries < 2) {
+                tries++
+                onLog("动作无效：$err —— 附错误说明重问（$tries/2）")
                 resp = planWithTimeout(
                     listOf(
                         ChatMessage("system", SystemPrompt.SHORT),
                         ChatMessage(
                             "user",
-                            "目标：$goal\n前台：${snap.packageName}\n上次回复错误：$why。\n" +
-                                "屏幕元素（只能点这些 id）：\n${snap.compressedText.take(1000)}\n" +
-                                "只输出一行 JSON，例如：" +
-                                """{"thought":"点目标","action":{"type":"tap","node_id":"e3"}}"""
+                            "屏幕：\n${snap.compressedText}\n目标：$goal\n上次输出错误：$err\n" +
+                                "请只用上面列表中的 e 编号，只输出一行 JSON。"
                         )
                     ),
                     forceCloud = false,
                     temperature = 0.1
                 )
                 logLlm(resp)
-                if (resp.error != null && resp.content.isBlank()) {
-                    // Last resort for settings goal
-                    if (isOpenSettingsGoal(goal)) {
-                        onLog("重试仍失败，回退快路径打开设置")
-                        if (a11y.launchSystemSettings()) {
-                            delay(1000)
-                            return Result(true, step, "回退打开系统设置")
-                        }
-                    }
-                    return Result(false, step, "LLM 不可用: ${resp.error}")
-                }
+                if (resp.error != null && resp.content.isBlank()) return Result(false, step, "LLM 不可用: ${resp.error}")
                 plan = ActionParser.parse(resp.content)
-                onLog("retry thought: ${plan.thought}")
                 onLog("retry action: ${plan.action}")
-                if (ActionParser.isInvalid(plan) && isOpenSettingsGoal(goal)) {
-                    onLog("仍无法解析，回退打开系统设置")
-                    if (a11y.launchSystemSettings()) {
-                        delay(1000)
-                        return Result(true, step, "解析失败回退：已打开设置")
-                    }
-                }
+                err = validationError(plan, resp.content, sc)
             }
+            if (err != null) return Result(false, step, "模型连续给出无效动作（$err），已停止以免误操作")
 
             history += ChatMessage("assistant", resp.content)
 
@@ -433,6 +418,25 @@ class AgentLoop(
         return AgentAccessibilityService.SETTINGS_PACKAGES.any {
             snap.packageName.equals(it, true)
         } || snap.packageName.contains("settings", ignoreCase = true)
+    }
+
+    private fun validationError(plan: PlanStep, raw: String, sc: com.runasakura.phoneagent.flow.Screen): String? {
+        if (ActionParser.hasThinkWithoutJson(raw)) return "只有思考没有 JSON"
+        return ActionValidator.validate(plan.action, sc.items, sc.w, sc.h)
+    }
+
+    private suspend fun runSubgoals(dev: com.runasakura.phoneagent.a11y.A11yDevice, subs: List<Subgoal>): Pair<Result?, String?> {
+        val exec = SubgoalExecutor(dev, onLog, onConfirm)
+        for ((i, sg) in subs.withIndex()) {
+            coroutineContext.ensureActive()
+            if (isStopped()) return Result(false, i, "已急停") to null
+            when (exec.run(sg)) {
+                SubgoalExecutor.Status.OK -> Unit
+                SubgoalExecutor.Status.CANCELLED -> return Result(false, i, "用户取消发送") to null
+                SubgoalExecutor.Status.FAILED -> return null to subs.drop(i).joinToString("，") { it.describe() }
+            }
+        }
+        return Result(true, subs.size, "已完成：" + subs.joinToString(" → ") { it.describe() } + "（确定性执行）") to null
     }
 
     private fun buildDump(sc: com.runasakura.phoneagent.flow.Screen): String {

@@ -19,21 +19,18 @@ object OcrEngine {
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
     }
 
-    suspend fun recognize(bmp: Bitmap, ignore: Set<String> = emptySet()): List<ScreenItem>? =
+    /** Raw OCR lines (screen coords, [yOffset] added back after cropping). */
+    suspend fun recognizeLines(bmp: Bitmap, yOffset: Int = 0): List<OcrLine>? =
         suspendCancellableCoroutine { cont ->
             try {
                 recognizer.process(InputImage.fromBitmap(bmp, 0))
                     .addOnSuccessListener { t ->
-                        val lines = mutableListOf<ScreenItem>()
+                        val out = mutableListOf<OcrLine>()
                         for (b in t.textBlocks) for (l in b.lines) {
                             val box = l.boundingBox ?: continue
-                            val label = l.text.trim()
-                            if (label.isEmpty() || label in ignore) continue
-                            lines += ScreenItem("", label, box.centerX(), box.centerY(), true, false, false, null)
+                            out += OcrLine(l.text, box.left, box.top + yOffset, box.right, box.bottom + yOffset)
                         }
-                        val sorted = lines.sortedWith(compareBy({ it.cy }, { it.cx }))
-                            .mapIndexed { i, it -> it.copy(id = "e${i + 1}") }
-                        if (cont.isActive) cont.resume(sorted)
+                        if (cont.isActive) cont.resume(out)
                     }
                     .addOnFailureListener { e ->
                         Log.w(TAG, "OCR failed: ${e.message}")

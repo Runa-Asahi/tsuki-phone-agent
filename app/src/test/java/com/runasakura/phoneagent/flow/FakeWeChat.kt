@@ -17,7 +17,9 @@ class FakeWeChat(
     val tabs: List<String> = listOf("微信", "通讯录", "发现", "我"),
     val pkg: String = "com.tencent.mm",
     val searchLabel: String? = null,
-    val resultTapWorks: Boolean = true
+    val resultTapWorks: Boolean = true,
+    /** type() attempts that silently do nothing (simulates WeChat ignoring SET_TEXT). */
+    val silentTypeAttempts: Set<Int> = emptySet()
 ) : Device {
     val W = 1264; val H = 2800
     val taps = mutableListOf<String>()
@@ -87,7 +89,10 @@ class FakeWeChat(
 
     override suspend fun tapXY(x: Int, y: Int): Boolean = tapLabel("@$x,$y", x, y)
 
-    override suspend fun type(text: String, hintX: Int?, hintY: Int?): Boolean {
+    val typeAttempts = mutableListOf<Int>()
+    override suspend fun type(text: String, hintX: Int?, hintY: Int?, attempt: Int): Boolean {
+        typeAttempts += attempt
+        if (attempt in silentTypeAttempts) return true
         typed += text
         when {
             state == "search" -> searchText = text
@@ -110,4 +115,6 @@ class FakeWeChat(
     var scrolls = 0
     override suspend fun scroll(forward: Boolean) { scrolls++ }
     override suspend fun sleep(ms: Long) {}
+    override suspend fun home() { state = "home" }
+    override suspend fun afterAction(maxMs: Long) {}
 }

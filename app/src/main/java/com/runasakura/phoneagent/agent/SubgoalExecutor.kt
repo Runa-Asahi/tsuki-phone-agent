@@ -21,6 +21,50 @@ class SubgoalExecutor(
         is Subgoal.Open -> if (open(sub.target)) Status.OK else Status.FAILED
         is Subgoal.Send -> send(sub.text, sub.send)
         is Subgoal.Unknown -> Status.FAILED
+        is Subgoal.Scroll -> scroll(sub.forward)
+        Subgoal.Back -> changed("返回") { d.back() }
+        Subgoal.Home -> { d.home(); d.afterAction(1500); onLog("✓ 已回到桌面"); Status.OK }
+        is Subgoal.Search -> if (searchFor(sub.query)) Status.OK else Status.FAILED
+    }
+
+    private fun sig(s: Screen) = s.pkg + "|" + s.items.joinToString("|") { it.label }
+
+    /** Run [act] and verify the screen changed (postcondition). */
+    private suspend fun changed(name: String, act: suspend () -> Unit): Status {
+        val before = sig(d.screen())
+        act(); d.afterAction(1500)
+        val after = d.screen()
+        return if (sig(after) != before) { onLog("✓ $name"); Status.OK }
+        else { onLog("✗ $name 后界面无变化"); Status.FAILED }
+    }
+
+    private suspend fun scroll(forward: Boolean): Status {
+        val before = d.screen()
+        if (before.isEmpty()) { onLog("✗ 界面为空"); return Status.FAILED }
+        d.scroll(forward); d.afterAction(1200)
+        val after = d.screen()
+        return if (sig(after) != sig(before)) { onLog("✓ ${if (forward) "上滑" else "下滑"}"); Status.OK }
+        else { onLog("⚠ 滑动后内容未变化（可能已到${if (forward) "底" else "顶"}）"); Status.OK }
+    }
+
+    /** 搜索X：open the in-app search, type X, verify it shows, submit nothing else. */
+    suspend fun searchFor(q: String): Boolean {
+        onLog("子目标：搜索「$q」")
+        var s = d.screen()
+        val entry = s.items.firstOrNull { it.cy < s.h * 0.2 && (it.edit || Text.norm(it.label).startsWith("搜索")) }
+        if (entry == null) { onLog("✗ 未找到搜索入口"); return false }
+        d.tap(entry); d.afterAction(1500)
+        for (attempt in 0..2) {
+            s = d.screen()
+            val edit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.2 }
+            if (!d.type(q, edit?.cx ?: entry.cx, edit?.cy ?: entry.cy, attempt)) continue
+            d.afterAction(1500)
+            s = d.screen()
+            if (s.items.any { it.cy < s.h * 0.2 && Text.norm(it.label).contains(Text.norm(q)) }) {
+                onLog("✓ 已输入搜索词"); return true
+            }
+        }
+        onLog("✗ 搜索词未出现在搜索框"); return false
     }
 
     /** Pick the best on-screen item for [target]: exact first, else shortest containing label. */
@@ -39,7 +83,7 @@ class SubgoalExecutor(
             if (s.isEmpty()) { onLog("✗ 界面为空（树/OCR 都读不到）"); return false }
             val hit = pick(s, target, below = (s.h * 0.04).toInt())
             if (hit != null) {
-                d.tap(hit); d.sleep(900)
+                d.tap(hit); d.afterAction(1500)
                 onLog(if (i == 0) "✓ 文字匹配（${s.source}）：${hit.label}" else "✓ 滚动 $i 次后找到：${hit.label}")
                 return true
             }
@@ -55,14 +99,14 @@ class SubgoalExecutor(
         var s = d.screen()
         val search = s.items.firstOrNull { it.cy < s.h * 0.2 && (Text.eq(it.label, "搜索") || it.label.startsWith("搜索")) }
             ?: return false
-        d.tap(search); d.sleep(900)
+        d.tap(search); d.afterAction(1500)
         s = d.screen()
         val edit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.2 }
         if (!d.type(target, edit?.cx, edit?.cy)) { onLog("搜索框输入失败"); return false }
-        d.sleep(1300)
+        d.afterAction(1500)
         s = d.screen()
         val hit = pick(s, target, below = (s.h * 0.11).toInt()) ?: return false
-        d.tap(hit); d.sleep(900)
+        d.tap(hit); d.afterAction(1500)
         return true
     }
 

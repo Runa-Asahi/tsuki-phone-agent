@@ -19,6 +19,8 @@ import com.runasakura.phoneagent.util.Diagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 /**
  * Real phone implementation of [Device]. Observation = accessibility tree (all app windows,
@@ -81,21 +83,40 @@ class A11yDevice(
         return Screen(foregroundPackage(), w, h, items, if (items.isEmpty()) "none" else "tree", imeTop())
     }
 
+    private fun dimen(name: String): Int {
+        val id = s.resources.getIdentifier(name, "dimen", "android")
+        return if (id > 0) s.resources.getDimensionPixelSize(id) else 0
+    }
+
     private suspend fun ocrScreen(pkg: String): Screen? {
         val (w, h) = s.screenSize()
         val wait = 400 - (System.currentTimeMillis() - lastShotAt)
         if (wait > 0) delay(wait) // takeScreenshot is rate limited (~3/s)
+        coroutineContext.ensureActive()
         var bmp = withContext(Dispatchers.IO) { s.takeScreenshotBitmap() }
         if (bmp == null) { delay(450); bmp = withContext(Dispatchers.IO) { s.takeScreenshotBitmap() } }
         lastShotAt = System.currentTimeMillis()
         if (bmp == null) { log("截图失败（系统拒绝或频率限制）"); return null }
-        val items = OcrEngine.recognize(bmp, setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop)))
-            ?: return null
+        coroutineContext.ensureActive()
+        // Crop status bar and gesture/nav bar (clock, battery, nav hints are noise)
+        val top = dimen("status_bar_height").coerceIn(0, bmp.height / 10)
+        val bottom = (bmp.height - dimen("navigation_bar_height").coerceIn(0, bmp.height / 10)).coerceAtLeast(top + 1)
+        val crop = try { android.graphics.Bitmap.createBitmap(bmp, 0, top, bmp.width, bottom - top) } catch (_: Exception) { bmp }
+        val off = if (crop === bmp) 0 else top
+        // Screenshot may differ from logical screen size: scale back to screen coordinates
+        val sx = w.toFloat() / bmp.width; val sy = h.toFloat() / bmp.height
+        val lines = OcrEngine.recognizeLines(crop, off) ?: return null
+        val scaled = lines.map {
+            com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * sx).toInt(), (it.t * sy).toInt(), (it.r * sx).toInt(), (it.b * sy).toInt())
+        }
+        val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
+        val items = com.runasakura.phoneagent.ocr.OcrPost.process(scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore)
         return Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
     }
 
     /** Settle (≤1.5s), then tree (poll ≤3s, ≤0.6s for known-blind apps), else OCR. */
     override suspend fun screen(): Screen {
+        coroutineContext.ensureActive()
         s.awaitSettle()
         val start = System.currentTimeMillis()
         var t = treeScreen()
@@ -117,32 +138,61 @@ class A11yDevice(
 
     // ---------- actions ----------
 
-    override suspend fun tap(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
-        val n = item.ref as? AccessibilityNodeInfo
-        // Coordinates are what the user sees; prefer a real gesture (works for obfuscated trees too).
-        val ok = s.tap(item.cx, item.cy) || (n != null && s.tapNode(n))
-        ok
+    /** Never let an injected tap land on our own emergency-stop button. */
+    private fun avoidOverlay(x: Int, y: Int): Pair<Int, Int> {
+        val r = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.bounds ?: return x to y
+        return if (r.contains(x, y)) (r.right + 12) to y else x to y
     }
 
-    override suspend fun tapXY(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) { s.tap(x, y) }
+    override suspend fun tap(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
+        coroutineContext.ensureActive()
+        val n = item.ref as? AccessibilityNodeInfo
+        val (x, y) = avoidOverlay(item.cx, item.cy)
+        // Coordinates are what the user sees; prefer a real gesture (works for obfuscated trees too).
+        s.tap(x, y) || (n != null && s.tapNode(n))
+    }
 
-    override suspend fun type(text: String, hintX: Int?, hintY: Int?): Boolean {
+    override suspend fun tapXY(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
+        coroutineContext.ensureActive()
+        val (ax, ay) = avoidOverlay(x, y); s.tap(ax, ay)
+    }
+
+    override suspend fun type(text: String, hintX: Int?, hintY: Int?, attempt: Int): Boolean {
+        coroutineContext.ensureActive()
         var node = s.focusedInput()
         if (node == null && hintX != null && hintY != null) {
             withContext(Dispatchers.IO) { s.tap(hintX, hintY) }
-            delay(600)
+            afterAction(800)
             node = s.focusedInput()
         }
-        if (node != null && node.isEditable) {
-            if (s.setText(node, text)) {
-                delay(250); node.refresh()
-                if (Text.norm(node.text?.toString().orEmpty()) == Text.norm(text)) return true
-                log("ACTION_SET_TEXT 未生效，改用输入法通道")
-            }
+        suspend fun setText(): Boolean {
+            val n = node ?: return false
+            if (!n.isEditable || !s.setText(n, text)) return false
+            delay(250); n.refresh()
+            return Text.norm(n.text?.toString().orEmpty()) == Text.norm(text)
         }
-        if (s.imeCommit(text)) { log("已通过无障碍输入法通道输入"); return true }
-        if (node != null && s.pasteText(node, text)) { log("已通过剪贴板粘贴输入"); return true }
-        return false
+        suspend fun paste(): Boolean {
+            val n = node ?: s.focusedInput() ?: return false
+            s.clearText(n)
+            return s.pasteText(n, text).also { if (it) log("输入方式：剪贴板粘贴") }
+        }
+        fun ime(): Boolean = s.imeCommit(text).also { if (it) log("输入方式：无障碍输入法通道") }
+        return when (attempt) {
+            0 -> setText() || ime() || paste()
+            1 -> paste() || ime()
+            else -> ime() || paste()
+        }
+    }
+
+    override suspend fun home() { s.home(); delay(150) }
+
+    override suspend fun afterAction(maxMs: Long) {
+        val t0 = System.currentTimeMillis()
+        // wait for the first UI event caused by the action…
+        while (s.lastEventAt < t0 && System.currentTimeMillis() - t0 < maxMs) delay(50)
+        // …then for ~300ms of quiet (bounded by the remaining budget)
+        val left = (maxMs - (System.currentTimeMillis() - t0)).coerceAtLeast(150)
+        s.awaitSettle(300, left)
     }
 
     override suspend fun back() { s.back(); delay(150) }

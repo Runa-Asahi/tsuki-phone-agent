@@ -11,6 +11,7 @@ object Diagnostics {
     private val fmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
     @Volatile var goal: String = ""
     @Volatile var model: String = ""
+    @Volatile var selfTest: String = "(未运行自检)"
     private var ocrCount = 0
     private var treeCount = 0
 
@@ -35,6 +36,8 @@ object Diagnostics {
         appendLine("无障碍: $a11yInfo")
         appendLine("任务: $goal")
         appendLine("观察次数: 树=$treeCount OCR=$ocrCount")
+        appendLine("--- 自检 ---")
+        appendLine(selfTest)
         appendLine("--- 日志 ---")
         lines.forEach { appendLine(it) }
     }
