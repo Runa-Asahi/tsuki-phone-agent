@@ -2,7 +2,7 @@
 
 面向 **荣耀 PPG-AN00 / MagicOS 10（Android 16）** 的本机手机 Agent：
 
-- **脑**：本机 [MNN Chat](https://github.com/alibaba/MNN) OpenAI 兼容 API（默认 `http://127.0.0.1:8080/v1`）；可选云端 hybrid（需自行配置）
+- **脑**：本机 [MNN Chat](https://github.com/alibaba/MNN) OpenAI 兼容 API（默认 `http://127.0.0.1:8080/v1`）；可选云端（DeepSeek / OpenAI 兼容，API Key 存加密 SharedPreferences）
 - **手**：`AccessibilityService` + 手势 / 输入法通道 / 剪贴板
 - **眼**：无障碍节点树；微信等隐藏树时 → 截图 + **端侧 ML Kit 中文 OCR**（离线、无需 GMS）
 - **安全**：发送/支付确认闸（无障碍浮窗）+ 敏感包名拦截 + 急停 + 空联系人拒绝
@@ -19,9 +19,26 @@
 | 确定性消息流程（微信/QQ：精确匹配、标题核对、确认后发送） | ✅ |
 | 通用子目标：打开 App / 进入 / 点击 / 上滑下滑 / 返回 / 搜索 / 输入发送 | ✅ |
 | OCR 兜底 + 缓存（动作后失效）+ PPG-AN00 手势条裁剪 | ✅ |
-| 本机 MNN + 可选 Cloud hybrid（本地失败才上云；可附截图） | ✅ |
+| 本机 MNN + 可选云端（DeepSeek / OpenAI 兼容 / hybrid） | ✅ |
+| 通用搜索入口（购物 App 占位搜索栏） | ✅ |
 | 自检 / 导出诊断日志 | ✅ |
 | 端侧 GUI 小模型 | ❌ 二期 |
+
+
+## 云端模型（DeepSeek / OpenAI 兼容）
+
+设置页 → **云端提供商**：
+
+| 选项 | Base URL | 默认模型 |
+|---|---|---|
+| 不使用云端 | — | — |
+| DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| OpenAI 兼容 | 自填 | 自填 |
+
+- API Key **只在设置页粘贴**，写入本机 `EncryptedSharedPreferences`（MasterKey AES-GCM）；诊断日志只显示遮罩（前4…后4）。
+- 路由：`local_only`（默认）/ `local_first` / `hybrid`（本机失败再上云）/ `cloud_only`。
+- 协议与本机 MNN 相同：OpenAI `POST /v1/chat/completions`。
+- 截图上云默认关闭；金融类包名仍禁止。
 
 ## 安装（PPG-AN00）
 

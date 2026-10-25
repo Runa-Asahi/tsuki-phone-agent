@@ -23,6 +23,8 @@ class LlmRouter(
         }
         return when (mode) {
             AgentPreferences.ROUTE_LOCAL_ONLY -> local.chat(messages, temperature)
+            AgentPreferences.ROUTE_CLOUD_ONLY -> cloud?.chat(messages, temperature)
+                ?: LlmResponse("", "cloud", 0, "未配置云端（设置里选择 DeepSeek / OpenAI 兼容并填写 API Key）")
             AgentPreferences.ROUTE_LOCAL_FIRST,
             AgentPreferences.ROUTE_HYBRID -> {
                 val localResp = local.chat(messages, temperature)

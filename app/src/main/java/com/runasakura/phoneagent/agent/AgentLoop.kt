@@ -39,6 +39,7 @@ class AgentLoop(
         val history = mutableListOf<ChatMessage>()
         history += ChatMessage("system", SystemPrompt.TEXT)
         val steps = StepHistory()
+        var uselessConfirms = 0
         history += ChatMessage("user", "用户目标：$goal")
 
         if (safety.goalNeedsConfirm(goal)) {
@@ -285,6 +286,26 @@ class AgentLoop(
                 }
                 is AgentAction.HumanTakeover -> return Result(false, step, action.reason)
                 is AgentAction.AskConfirm -> {
+                    // Only real send/pay/delete confirms are shown. Null-pending / vague
+                    // "确认节点" asks from small models are ignored (PPG-AN00 PDD 22:14 loop).
+                    if (!ConfirmPolicy.isSensitive(action)) {
+                        uselessConfirms++
+                        onLog("忽略无意义的 ask_confirm（${action.reason}），禁止为搜索/点击询问确认")
+                        if (uselessConfirms == 1) {
+                            SearchEntry.find(sc)?.let { bar ->
+                                onLog("启发式：点顶部搜索栏「${bar.label}」")
+                                execute(a11y, AgentAction.Tap(nodeId = bar.id, text = bar.label, x = bar.cx, y = bar.cy), snap)
+                                steps.recordAction("heuristic_tap_search")
+                                delay(900)
+                            }
+                        } else if (uselessConfirms >= 2) {
+                            return Result(false, step, "模型连续输出无意义 ask_confirm（${action.reason}），已停止；请改用云端模型或更明确的目标")
+                        }
+                        // Drop the confusing assistant turn so it can't teach the next loop.
+                        while (history.size > 2 && history.last().role == "assistant") history.removeAt(history.lastIndex)
+                        continue
+                    }
+                    uselessConfirms = 0
                     val ok = onConfirm(action.reason)
                     if (!ok) return Result(false, step, "用户取消")
                 }
@@ -512,7 +533,7 @@ class AgentLoop(
             diffNote?.let { appendLine(it) }
             appendLine("要点(可点/可输入):")
             appendLine(compact.compressedText.take(1600).ifBlank { "(空)" })
-            appendLine("只输出一个 JSON action。发送前 ask_confirm。")
+            appendLine("只输出一个 JSON action。仅发送/支付/删除前 ask_confirm；禁止为搜索/点击询问确认。")
         }
     }
 

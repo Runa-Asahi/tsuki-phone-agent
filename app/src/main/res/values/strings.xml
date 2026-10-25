@@ -33,7 +33,9 @@
     <string name="label_mnn_key">MNN API Key</string>
     <string name="label_mnn_model">MNN Model</string>
     <string name="label_route">路由模式</string>
-    <string name="label_cloud_url">云端 Base URL（可选）</string>
+    <string name="label_cloud_provider">云端提供商</string>
+    <string name="label_cloud_url">云端 Base URL</string>
+    <string name="cloud_key_hint">API Key（仅保存在本机加密存储，不会写入诊断日志）</string>
     <string name="label_cloud_key">云端 API Key</string>
     <string name="label_cloud_model">云端 Model</string>
     <string name="label_max_steps">最大步数</string>

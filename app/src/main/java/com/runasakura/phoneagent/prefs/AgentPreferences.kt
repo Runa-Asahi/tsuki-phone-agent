@@ -2,18 +2,33 @@ package com.runasakura.phoneagent.prefs
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 
 class AgentPreferences(context: Context) {
     private val sp: SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** API keys only — never written to the plain prefs file or the diagnostic log. */
+    private val secure: SharedPreferences = try {
+        val master = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        EncryptedSharedPreferences.create(
+            context, PREFS_SECURE, master,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    } catch (_: Exception) {
+        // Emulators / missing StrongBox: fall back to private prefs (still MODE_PRIVATE).
+        context.getSharedPreferences(PREFS_SECURE_FALLBACK, Context.MODE_PRIVATE)
+    }
 
     var mnnBaseUrl: String
         get() = sp.getString(KEY_MNN_URL, DEFAULT_MNN_URL) ?: DEFAULT_MNN_URL
         set(v) = sp.edit().putString(KEY_MNN_URL, v.trimEnd('/')).apply()
 
     var mnnApiKey: String
-        get() = sp.getString(KEY_MNN_KEY, "mnn") ?: "mnn"
-        set(v) = sp.edit().putString(KEY_MNN_KEY, v).apply()
+        get() = secure.getString(KEY_MNN_KEY, "mnn") ?: "mnn"
+        set(v) = secure.edit().putString(KEY_MNN_KEY, v).apply()
 
     var mnnModel: String
         get() = sp.getString(KEY_MNN_MODEL, "mnn-local") ?: "mnn-local"
@@ -23,16 +38,21 @@ class AgentPreferences(context: Context) {
         get() = sp.getString(KEY_ROUTE, ROUTE_LOCAL_ONLY) ?: ROUTE_LOCAL_ONLY
         set(v) = sp.edit().putString(KEY_ROUTE, v).apply()
 
+    /** none | deepseek | openai_compatible */
+    var cloudProvider: String
+        get() = sp.getString(KEY_CLOUD_PROVIDER, PROVIDER_NONE) ?: PROVIDER_NONE
+        set(v) = sp.edit().putString(KEY_CLOUD_PROVIDER, v).apply()
+
     var cloudBaseUrl: String
         get() = sp.getString(KEY_CLOUD_URL, "") ?: ""
         set(v) = sp.edit().putString(KEY_CLOUD_URL, v.trimEnd('/')).apply()
 
     var cloudApiKey: String
-        get() = sp.getString(KEY_CLOUD_KEY, "") ?: ""
-        set(v) = sp.edit().putString(KEY_CLOUD_KEY, v).apply()
+        get() = secure.getString(KEY_CLOUD_KEY, "") ?: ""
+        set(v) = secure.edit().putString(KEY_CLOUD_KEY, v).apply()
 
     var cloudModel: String
-        get() = sp.getString(KEY_CLOUD_MODEL, "gui-plus") ?: "gui-plus"
+        get() = sp.getString(KEY_CLOUD_MODEL, "deepseek-chat") ?: "deepseek-chat"
         set(v) = sp.edit().putString(KEY_CLOUD_MODEL, v).apply()
 
     var maxSteps: Int
@@ -47,12 +67,25 @@ class AgentPreferences(context: Context) {
         get() = sp.getStringSet(KEY_SENSITIVE_PKGS, DEFAULT_SENSITIVE) ?: DEFAULT_SENSITIVE
         set(v) = sp.edit().putStringSet(KEY_SENSITIVE_PKGS, v).apply()
 
+    /** Masked form for diagnostics / UI — never the raw key. */
+    fun cloudKeyMasked(): String {
+        val k = cloudApiKey
+        return when {
+            k.isEmpty() -> "(未设置)"
+            k.length <= 8 -> "****"
+            else -> k.take(4) + "…" + k.takeLast(4)
+        }
+    }
+
     companion object {
         private const val PREFS = "honor_phone_agent"
+        private const val PREFS_SECURE = "honor_phone_agent_secure"
+        private const val PREFS_SECURE_FALLBACK = "honor_phone_agent_secure_fallback"
         private const val KEY_MNN_URL = "mnn_url"
         private const val KEY_MNN_KEY = "mnn_key"
         private const val KEY_MNN_MODEL = "mnn_model"
         private const val KEY_ROUTE = "route_mode"
+        private const val KEY_CLOUD_PROVIDER = "cloud_provider"
         private const val KEY_CLOUD_URL = "cloud_url"
         private const val KEY_CLOUD_KEY = "cloud_key"
         private const val KEY_CLOUD_MODEL = "cloud_model"
@@ -64,10 +97,17 @@ class AgentPreferences(context: Context) {
         const val ROUTE_LOCAL_FIRST = "local_first"
         const val ROUTE_HYBRID = "hybrid"
         const val ROUTE_LOCAL_ONLY = "local_only"
+        const val ROUTE_CLOUD_ONLY = "cloud_only"
+
+        const val PROVIDER_NONE = "none"
+        const val PROVIDER_DEEPSEEK = "deepseek"
+        const val PROVIDER_OPENAI = "openai_compatible"
+
+        const val DEEPSEEK_BASE = "https://api.deepseek.com/v1"
+        const val DEEPSEEK_MODEL = "deepseek-chat"
 
         val DEFAULT_SENSITIVE = setOf(
             "com.eg.android.AlipayGphone",
-            // WeChat: allow UI automation; send still needs confirm (SafetyGate)
             "com.unionpay",
             "cmb.pb",
             "com.chinamworld.main",

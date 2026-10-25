@@ -1,12 +1,15 @@
 package com.runasakura.phoneagent.ui
 
 import android.os.Bundle
+import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.runasakura.phoneagent.PhoneAgentApp
 import com.runasakura.phoneagent.R
 import com.runasakura.phoneagent.databinding.ActivitySettingsBinding
+import com.runasakura.phoneagent.llm.CloudProviders
 import com.runasakura.phoneagent.prefs.AgentPreferences
 
 class SettingsActivity : AppCompatActivity() {
@@ -26,6 +29,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.mnnModel.setText(prefs.mnnModel)
         binding.cloudUrl.setText(prefs.cloudBaseUrl)
         binding.cloudKey.setText(prefs.cloudApiKey)
+        binding.cloudKey.hint = getString(R.string.cloud_key_hint)
         binding.cloudModel.setText(prefs.cloudModel)
         binding.maxSteps.setText(prefs.maxSteps.toString())
         binding.cloudShot.isChecked = prefs.allowCloudScreenshot
@@ -33,17 +37,36 @@ class SettingsActivity : AppCompatActivity() {
         val modes = listOf(
             AgentPreferences.ROUTE_LOCAL_ONLY,
             AgentPreferences.ROUTE_LOCAL_FIRST,
-            AgentPreferences.ROUTE_HYBRID
+            AgentPreferences.ROUTE_HYBRID,
+            AgentPreferences.ROUTE_CLOUD_ONLY
         )
-        binding.routeMode.adapter = ArrayAdapter(
-            this, android.R.layout.simple_spinner_dropdown_item, modes
-        )
+        binding.routeMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, modes)
         binding.routeMode.setSelection(modes.indexOf(prefs.routeMode).coerceAtLeast(0))
+
+        val providers = CloudProviders.ALL
+        binding.cloudProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers.map { it.label })
+        binding.cloudProvider.setSelection(providers.indexOfFirst { it.id == prefs.cloudProvider }.coerceAtLeast(0))
+        binding.cloudProvider.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val p = providers[position]
+                if (p.id == AgentPreferences.PROVIDER_DEEPSEEK) {
+                    if (binding.cloudUrl.text.isNullOrBlank() || binding.cloudUrl.text.toString() == AgentPreferences.DEEPSEEK_BASE ||
+                        prefs.cloudProvider != AgentPreferences.PROVIDER_DEEPSEEK) {
+                        binding.cloudUrl.setText(AgentPreferences.DEEPSEEK_BASE)
+                    }
+                    if (binding.cloudModel.text.isNullOrBlank() || prefs.cloudProvider != AgentPreferences.PROVIDER_DEEPSEEK) {
+                        binding.cloudModel.setText(AgentPreferences.DEEPSEEK_MODEL)
+                    }
+                }
+            }
+        }
 
         binding.btnSave.setOnClickListener {
             prefs.mnnBaseUrl = binding.mnnUrl.text.toString()
             prefs.mnnApiKey = binding.mnnKey.text.toString()
             prefs.mnnModel = binding.mnnModel.text.toString()
+            prefs.cloudProvider = providers[binding.cloudProvider.selectedItemPosition].id
             prefs.cloudBaseUrl = binding.cloudUrl.text.toString()
             prefs.cloudApiKey = binding.cloudKey.text.toString()
             prefs.cloudModel = binding.cloudModel.text.toString()

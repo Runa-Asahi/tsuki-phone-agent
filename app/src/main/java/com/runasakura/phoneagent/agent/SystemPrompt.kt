@@ -49,6 +49,7 @@ JSON schema:
 只输出一行 JSON，不要解释，不要 <think>。
 动作 type：tap(node_id) | type(text,可带 node_id) | swipe(x1,y1,x2,y2) | back | home | wait | done(summary) | fail(reason) | ask_confirm(reason)
 规则：node_id 只能用列表里出现的 e 编号；点「发送」「支付」「删除」前先 ask_confirm；目标已达成输出 done。
+禁止：为「搜索/打开/点击/节点」这类普通操作输出 ask_confirm；禁止无 pending 的 ask_confirm。搜索框（含「泡面 拍照搜索」这类占位）直接 tap，再 type。
 示例1
 屏幕：
 [e1] 微信 (632,200)

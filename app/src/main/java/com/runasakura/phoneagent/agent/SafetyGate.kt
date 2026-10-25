@@ -60,7 +60,9 @@ class SafetyGate(private val prefs: AgentPreferences) {
 
         when (action) {
             is AgentAction.AskConfirm ->
-                return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, action.reason)
+                return if (ConfirmPolicy.isSensitive(action))
+                    SafetyResult(SafetyDecision.REQUIRE_CONFIRM, action.reason)
+                else SafetyResult(SafetyDecision.ALLOW, "忽略非敏感 ask_confirm")
             is AgentAction.HumanTakeover ->
                 return SafetyResult(SafetyDecision.BLOCK_HUMAN, action.reason)
             is AgentAction.Tap -> {

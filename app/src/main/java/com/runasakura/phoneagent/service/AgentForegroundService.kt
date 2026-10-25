@@ -13,7 +13,6 @@ import com.runasakura.phoneagent.prefs.AgentPreferences
 import com.runasakura.phoneagent.R
 import com.runasakura.phoneagent.agent.AgentLoop
 import com.runasakura.phoneagent.agent.SafetyGate
-import com.runasakura.phoneagent.llm.CloudClient
 import com.runasakura.phoneagent.llm.LlmRouter
 import com.runasakura.phoneagent.llm.LocalMnnClient
 import com.runasakura.phoneagent.overlay.EmergencyStopOverlay
@@ -96,11 +95,13 @@ class AgentForegroundService : Service() {
         overlay = EmergencyStopOverlay(overlayCtx) { requestStop() }.also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
-        val cloud = if (prefs.cloudBaseUrl.isNotBlank() && prefs.cloudApiKey.isNotBlank()) {
-            CloudClient(prefs.cloudBaseUrl, prefs.cloudApiKey, prefs.cloudModel)
-        } else null
-        if (prefs.routeMode == AgentPreferences.ROUTE_HYBRID && cloud == null) {
-            log("路由=hybrid 但未配置云端，实际等同 local_only")
+        val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)
+        if (prefs.cloudProvider != AgentPreferences.PROVIDER_NONE) {
+            log("云端：${prefs.cloudProvider} ${prefs.cloudBaseUrl} model=${prefs.cloudModel} key=${prefs.cloudKeyMasked()}" +
+                if (cloud == null) "（未就绪：请在设置填写 API Key）" else "")
+        }
+        if ((prefs.routeMode == AgentPreferences.ROUTE_HYBRID || prefs.routeMode == AgentPreferences.ROUTE_CLOUD_ONLY) && cloud == null) {
+            log("路由=${prefs.routeMode} 但云端未就绪")
         }
         val router = LlmRouter(prefs, local, cloud)
         val loop = AgentLoop(

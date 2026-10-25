@@ -171,20 +171,50 @@ class SubgoalExecutor(
     suspend fun searchFor(q: String): Boolean {
         onLog("子目标：搜索「$q」")
         var s = d.screen()
-        val entry = s.items.firstOrNull { it.cy < s.h * 0.2 && (it.edit || Text.norm(it.label).startsWith("搜索")) }
-        if (entry == null) { onLog("✗ 未找到搜索入口"); return false }
-        d.tap(entry); d.afterAction(1500)
-        for (attempt in 0..2) {
-            s = d.screen()
-            val edit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.2 }
-            if (!d.type(q, edit?.cx ?: entry.cx, edit?.cy ?: entry.cy, attempt)) continue
-            d.afterAction(1500)
-            s = d.screen()
-            if (s.items.any { it.cy < s.h * 0.2 && Text.norm(it.label).contains(Text.norm(q)) }) {
-                onLog("✓ 已输入搜索词"); return true
-            }
+        val entry = SearchEntry.find(s)
+        if (entry == null) {
+            onLog("✗ 未找到搜索入口（顶部：" + SearchEntry.dumpTop(s) + "）")
+            return false
         }
-        onLog("✗ 搜索词未出现在搜索框"); return false
+        onLog("搜索入口：「${entry.label}」@(${entry.cx},${entry.cy})")
+        d.tap(entry); d.afterAction(1200)
+        s = d.screen()
+        // Wait briefly for the focused edit / keyboard to appear.
+        if (s.items.none { it.edit && it.cy < s.h * 0.25 } && s.imeTop == null) {
+            d.afterAction(800); s = d.screen()
+        }
+        var typed = false
+        for (attempt in 0..2) {
+            if (attempt > 0) { d.clearField(); d.afterAction(300) }
+            val edit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.25 }
+            val hx = edit?.cx ?: entry.cx
+            val hy = edit?.cy ?: entry.cy
+            if (!d.type(q, hx, hy, attempt)) continue
+            d.afterAction(1000)
+            s = d.screen()
+            val shown = d.fieldText()?.let { Text.norm(it).contains(Text.norm(q)) } == true ||
+                s.items.any { it.cy < s.h * 0.25 && Text.norm(it.label).contains(Text.norm(q)) }
+            if (shown) { typed = true; break }
+            onLog("搜索框未显示「$q」，换方式重试（${attempt + 1}/3）")
+        }
+        if (!typed) { onLog("✗ 搜索词未出现在搜索框"); return false }
+        onLog("✓ 已输入搜索词")
+        // Submit: on-screen 「搜索」/「搜索」button, else the soft-keyboard enter isn't available
+        // through a11y — tap a top-right 搜索/Search when present, otherwise leave results to load.
+        val submit = s.items.firstOrNull {
+            it.cy < s.h * 0.2 && it.tap && Text.norm(it.label) in setOf("搜索", "search", "确定", "完成")
+        } ?: s.items.firstOrNull {
+            it.cy < s.h * 0.18 && it.cx > s.w * 0.75 && it.tap &&
+                SearchEntry.isSearchWord(it.label) && !SearchEntry.isCameraOnly(it.label)
+        }
+        if (submit != null) { d.tap(submit); d.afterAction(1500) }
+        else d.afterAction(800)
+        s = d.screen()
+        val qn = Text.norm(q)
+        val hit = s.items.any { Text.norm(it.label).contains(qn) }
+        if (hit) onLog("✓ 搜索结果页出现「$q」相关内容")
+        else onLog("⚠ 已提交搜索，结果页未见「$q」（继续）")
+        return true
     }
 
     /** Pick the best on-screen item for [target]: exact first, else shortest containing label. */
