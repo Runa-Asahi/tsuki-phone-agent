@@ -47,6 +47,9 @@ class FakeWeChat(
     /** "" | "plus" | "sheet" — chat bottom panels for the call flow. */
     var chatPanel = ""
     var showPlusLabel = true
+    /** 「+」 panel labels (row 1 at y=2135 for real-OCR cases). */
+    var plusLabels = listOf("相册", "拍摄", "音视频通话", "位置")
+    var plusRowY = 2300
     val calls = mutableListOf<String>()
     override suspend fun fieldText(): String? = if (!fieldReadable) null else when {
         state.startsWith("chat:") -> inputText
@@ -127,7 +130,7 @@ class FakeWeChat(
                     }
                 }
                 when (chatPanel) {
-                    "plus" -> listOf("相册", "拍摄", "音视频通话", "位置").forEachIndexed { i, l -> items += item(l, 200 + i * 300, 2300) }
+                    "plus" -> plusLabels.forEachIndexed { i, l -> if (l.isNotEmpty()) items += item(l, 200 + i * 300, plusRowY) }
                     "sheet" -> { items += item("视频通话", 632, 2300); items += item("语音通话", 632, 2450); items += item("取消", 632, 2600) }
                 }
                 if (inputText.isBlank() && showPlusLabel && !voiceMode) items += item("+", 1200, 2660)
@@ -170,7 +173,7 @@ class FakeWeChat(
             state == "search" && label in currentSearchRows() && !resultTapWorks -> Unit
             state == "search" && label in currentSearchRows() -> { state = "chat:" + chatTitleFor(label); inputText = draft; resultPage = 0 }
             state.startsWith("chat:") && chatPanel == "" && inputText.isBlank() && (label == "+" || (x > 1150 && y in 2600..2720)) -> chatPanel = "plus"
-            state.startsWith("chat:") && chatPanel == "plus" && label == "音视频通话" -> chatPanel = "sheet"
+            state.startsWith("chat:") && chatPanel == "plus" && (label == plusLabels.getOrNull(2) || (label.startsWith("@") && x in 700..900 && kotlin.math.abs(y - plusRowY) < 120)) -> chatPanel = "sheet"
             state.startsWith("chat:") && chatPanel == "sheet" && (label == "语音通话" || label == "视频通话") -> {
                 val kind = if (label == "视频通话") "video" else "voice"
                 calls += kind; state = "call:$kind:" + state.removePrefix("chat:"); chatPanel = ""

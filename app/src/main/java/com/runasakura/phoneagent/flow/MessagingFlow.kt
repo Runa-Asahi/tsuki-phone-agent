@@ -398,12 +398,16 @@ class MessagingFlow(
             d.afterAction(900); s = d.screen()
         }
         dump("更多面板", s)
-        val entry = s.items.firstOrNull { Text.eq(it.label, CALL_ENTRY) }
-            ?: s.items.firstOrNull { Text.norm(it.label).contains("视频通话") && it.cy > s.h * 0.6 }
-            ?: return fail("未找到「音视频通话」入口（已在「$contact」聊天页），未拨打").also { d.back() }
-        d.tap(entry); d.afterAction(900); s = d.screen()
+        val entry = findCallEntry(s)
+        if (entry != null) { log("通话入口：「${entry.label}」"); d.tap(entry) } else {
+            val (gx, gy) = callEntryGridPos(s)
+                ?: return fail("未找到「音视频通话」入口（已在「$contact」聊天页），未拨打").also { d.back() }
+            log("通话入口文字未识别，面板已核对（相册/红包），按网格第3格点击 ($gx,$gy)")
+            d.tapXY(gx, gy)
+        }
+        d.afterAction(900); s = d.screen()
         dump("通话类型", s)
-        val opt = s.items.filter { Text.eq(it.label, kind) }.maxByOrNull { it.cy }
+        val opt = findCallOption(s, video)
             ?: return fail("未找到「$kind」选项，未拨打").also { d.back() }
         val who = containsTitle?.let { "$contact（⚠ 包含匹配，完整名称「$it」）" }
             ?: fuzzyTitle?.let { "$contact（⚠ 屏幕标题识别为「$it」）" } ?: "$contact（已核对聊天标题）"
@@ -418,6 +422,35 @@ class MessagingFlow(
         val inCall = s.items.any { Text.norm(it.label).let { n -> CALL_MARKERS.any { m -> n.contains(m) } } }
         return if (inCall) { log("✓ 已进入${kind}界面"); Outcome(true, "已向「$contact」发起$kind", verified = true) }
         else fail("已点击「$kind」，但未识别到通话界面（请在手机上查看）")
+    }
+
+    /** 「音视频通话」 entry in the 「+」 panel, tolerant of OCR misreads like 「初麵通话」. */
+    fun findCallEntry(s: Screen): ScreenItem? {
+        val lower = s.items.filter { it.cy > s.h * 0.6 && (s.imeTop == null || it.cy < s.imeTop) }
+        s.items.firstOrNull { Text.eq(it.label, CALL_ENTRY) }?.let { return it }
+        return lower.firstOrNull { val n = Text.norm(it.label); n.contains("视频通话") }
+            ?: lower.firstOrNull { val n = Text.norm(it.label); n.length in 3..6 && n.endsWith("通话") }
+            ?: lower.firstOrNull { val n = Text.norm(it.label); n.length in 4..6 && Text.editDistance(n, CALL_ENTRY) <= 2 && n.contains("通") }
+    }
+
+    /** Grid fallback: only when the 「+」 panel is verified (相册 and/or 红包 visible low on screen). 3rd cell of row 1. */
+    fun callEntryGridPos(s: Screen): Pair<Int, Int>? {
+        val album = s.items.firstOrNull { it.cy > s.h * 0.6 && Text.eq(it.label, "相册") } ?: return null
+        val panelOk = s.items.any { it.cy > s.h * 0.6 && Text.norm(it.label).let { n -> n == "红包" || n == "拍摄" || n == "位置" || n == "转账" } }
+        if (!panelOk) return null
+        if (album.cx > s.w * 0.4) return null
+        return (s.w * 0.625).toInt() to album.cy
+    }
+
+    /** 视频通话 / 语音通话 option in the bottom sheet (fuzzy: one wrong char allowed, never the other kind). */
+    fun findCallOption(s: Screen, video: Boolean): ScreenItem? {
+        val kind = if (video) "视频通话" else "语音通话"
+        val other = if (video) "语音" else "视频"
+        val pool = s.items.filter { it.cy > s.h * 0.5 }
+        return pool.filter { Text.eq(it.label, kind) }.maxByOrNull { it.cy }
+            ?: pool.filter { val n = Text.norm(it.label); !n.contains(other) && n.length in 3..5 &&
+                (n.contains("通") || n.endsWith("话")) &&
+                (n.contains(kind.take(2)) || Text.editDistance(n, kind) <= 1) }.maxByOrNull { it.cy }
     }
 
     /** Exact label matches below [top] and above the keyboard, optionally skipping non-contact sections. */
