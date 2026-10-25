@@ -13,11 +13,11 @@ package com.runasakura.phoneagent.flow
  * Deliberately NOT allowed: trailing digits (could be part of the remark name).
  */
 object TitleMatch {
-    private val LEAD = Regex("^(?:‹|<|←|返回)+")
+    private val LEAD = Regex("^(?:‹|<|←|返回|く)+")
     private val GROUP = Regex("^\\((\\d{1,4})\\)$")
     private val TRAIL_JUNK = Regex("^[·.•…]+$")
 
-    fun clean(raw: String): String = Text.norm(LEAD.replace(raw, ""))
+    fun clean(raw: String): String = LEAD.replace(Text.norm(LEAD.replace(raw.trim(), "")), "")
 
     fun matches(titleRaw: String, contactRaw: String): Boolean {
         val title = clean(titleRaw)
@@ -35,4 +35,8 @@ object TitleMatch {
 
     fun findMatching(titles: List<String>, contact: String): String? =
         titles.firstOrNull { matches(it, contact) }
+
+    /** Fuzzy fallback (OCR typo): only when exactly one top-band label is within the edit budget. */
+    fun findFuzzy(titles: List<String>, contact: String): String? =
+        Text.uniqueFuzzy(titles.map { clean(it) }, contact)?.let { titles[it] }
 }

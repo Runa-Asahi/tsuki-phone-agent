@@ -113,7 +113,8 @@ class MessagingFlow(
         log("✓ 输入框已核对")
 
         // 4) confirm
-        if (!confirm("发送确认（${app.label}）\n收件人：$contact（已核对聊天标题）\n内容：$message\n\n确认后将点击「发送」。")) {
+        if (!confirm("发送确认（${app.label}）\n收件人：$contact（" +
+                (fuzzyTitle?.let { "⚠ 屏幕标题识别为「$it」，请核对是否同一人" } ?: "已核对聊天标题") + "）\n内容：$message\n\n确认后将点击「发送」。")) {
             log("用户取消发送")
             return Outcome(false, "用户取消发送", cancelled = true)
         }
@@ -269,26 +270,41 @@ class MessagingFlow(
         val limit = s.imeTop ?: s.h
         var section: String? = null
         val out = mutableListOf<ScreenItem>()
+        val cands = mutableListOf<ScreenItem>()
         val secMap = mutableMapOf<ScreenItem, String?>()
         for (it in s.items.filter { it.cy in (top + 1) until limit }.sortedBy { it.cy }) {
             val n = Text.norm(it.label)
             if (SECTION_HEADERS.contains(n) && !Text.eq(n, contact)) { section = n; continue }
             if (it.edit) continue
-            if (n != Text.norm(contact)) continue
             if (excludeSections && section != null && section in EXCLUDED_SECTIONS) continue
+            if (Text.nameKey(it.label) != Text.nameKey(contact)) { cands += it; secMap[it] = section; continue }
             if (out.any { o -> kotlin.math.abs(o.cy - it.cy) < s.h * 0.015 }) continue
             out += it
             secMap[it] = section
         }
+        if (out.isEmpty()) {
+            Text.uniqueFuzzy(cands.map { it.label }, contact)?.let { i ->
+                log("⚠ 未找到完全一致的「$contact」，唯一近似项「${cands[i].label}」（OCR 误差容忍）")
+                out += cands[i]
+            }
+        }
         return out to secMap
     }
+
+    /** Set when the chat title only matched fuzzily; shown verbatim in the send confirmation. */
+    private var fuzzyTitle: String? = null
 
     fun titleMatches(s: Screen, contact: String): Boolean {
         if (s.pkg != app.pkg) return false
         // Still on the search page (search box holds the same text) is NOT a chat
         if (s.items.any { it.cy < s.h * 0.12 && (it.edit || Text.eq(it.label, "取消")) }) return false
         val titles = s.items.filter { it.cy < s.h * 0.14 && !it.edit }.map { it.label }
-        return TitleMatch.findMatching(titles, contact) != null
+        if (TitleMatch.findMatching(titles, contact) != null) return true
+        TitleMatch.findFuzzy(titles, contact)?.let {
+            log("⚠ 标题模糊匹配：看到「$it」≈「$contact」（OCR 误差，唯一候选）")
+            fuzzyTitle = it; return true
+        }
+        return false
     }
 
     fun findSend(s: Screen): ScreenItem? = s.items

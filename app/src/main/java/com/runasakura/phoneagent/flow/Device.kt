@@ -57,7 +57,59 @@ object Text {
      * Canonical form used for ALL label comparisons: strip whitespace/zero-width, full→half width.
      * Exact matching stays exact after this normalization (no fuzzy/edit-distance).
      */
-    fun norm(s: String): String = halfWidth(SPACES.replace(s, "")).trim()
+    fun norm(s: String): String = fold(TradSimp.toSimp(halfWidth(SPACES.replace(s, "")).trim()))
+
+    /**
+     * OCR confusables + Latin case-fold, applied identically to both sides of every comparison:
+     * I/l/| → 1, O/o → 0, く/〈/‹ → <, then lowercase. (「文件传輸助手」 == 「文件传输助手」 via TradSimp.)
+     */
+    fun fold(s: String): String {
+        val sb = StringBuilder(s.length)
+        for (c in s) sb.append(when (c) {
+            'I', 'l', '|', '丨' -> '1'
+            'O', 'o' -> '0'
+            'く', '〈', '‹', '＜' -> '<'
+            else -> c.lowercaseChar()
+        })
+        return sb.toString()
+    }
+
+    /** Name key: [norm] plus dropping punctuation/symbols (keeps letters, digits, CJK, parentheses). */
+    fun nameKey(s: String): String = norm(s).filter { it.isLetterOrDigit() || it == '(' || it == ')' }
+
+    fun editDistance(a: String, b: String): Int {
+        if (a == b) return 0
+        val dp = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = dp[0]; dp[0] = i
+            for (j in 1..b.length) {
+                val tmp = dp[j]
+                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = tmp
+            }
+        }
+        return dp[b.length]
+    }
+
+    /** Allowed edits for a fuzzy name match: none below 4 chars, 1 for 4–7, 2 for ≥8. */
+    fun fuzzyBudget(len: Int) = when { len < 4 -> 0; len < 8 -> 1; else -> 2 }
+
+    /**
+     * Index of the single label within the fuzzy budget of [target] (by [nameKey]); null when
+     * zero or several labels qualify — ambiguity is never resolved by guessing.
+     */
+    fun uniqueFuzzy(labels: List<String>, target: String): Int? {
+        val t = nameKey(target)
+        val budget = fuzzyBudget(t.length)
+        if (budget == 0) return null
+        // Substitutions only (same length): OCR misreads a glyph, it rarely adds one — and
+        // insertions would let 「dramadan2」 pass for 「dramadan」.
+        val hits = labels.indices.filter { i ->
+            val k = nameKey(labels[i])
+            k.length == t.length && k.indices.count { k[it] != t[it] } <= budget
+        }
+        return hits.singleOrNull()
+    }
 
     fun eq(a: String, b: String) = norm(a) == norm(b)
 }
