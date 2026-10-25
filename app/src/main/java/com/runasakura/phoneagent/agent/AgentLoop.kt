@@ -31,7 +31,9 @@ class AgentLoop(
         val summary: String
     )
 
-    suspend fun run(goal: String): Result {
+    suspend fun run(goalIn: String): Result {
+        val goal = GoalRewrite.normalize(goalIn)
+        if (goal != goalIn) onLog("目标规范化：$goal")
         val a11y = AgentAccessibilityService.require()
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { AgentAccessibilityService.require() } }
             ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
