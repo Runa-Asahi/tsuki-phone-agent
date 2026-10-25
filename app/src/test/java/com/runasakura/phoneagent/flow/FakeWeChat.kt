@@ -100,6 +100,10 @@ class FakeWeChat(
         return Screen(if (state == "home") "launcher" else pkg, W, H, items, source, imeTop)
     }
 
+    /** Service "dies" after this many taps (null = never). */
+    var dieAfterTaps: Int? = null
+    override fun alive(): Boolean = dieAfterTaps?.let { taps.size < it } ?: true
+
     override suspend fun tap(item: ScreenItem): Boolean = tapLabel(item.label, item.cx, item.cy)
 
     private fun tapLabel(label: String, x: Int, y: Int): Boolean {

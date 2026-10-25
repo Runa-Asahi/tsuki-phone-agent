@@ -257,6 +257,8 @@ class A11yDevice(
         s.tap(x, y) || (n != null && s.tapNode(n))
     }
 
+    override fun alive(): Boolean = AgentAccessibilityService.require() === s
+
     override suspend fun longPress(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
         invalidateOcr("longPress")
         coroutineContext.ensureActive()

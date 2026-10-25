@@ -45,6 +45,7 @@ class MessagingFlow(
     data class Outcome(val ok: Boolean, val summary: String, val cancelled: Boolean = false, val verified: Boolean = false)
 
     companion object {
+        const val DISCONNECTED = "无障碍服务已断开，任务已停止，未发送；请重新打开无障碍服务后重试"
         /** Result sections whose rows are NOT the contact itself. */
         val EXCLUDED_SECTIONS = setOf(
             "聊天记录", "公众号", "服务号", "小程序", "搜一搜", "文章", "朋友圈", "视频号",
@@ -61,7 +62,8 @@ class MessagingFlow(
         log("消息流程：${app.label} → 「$contact」 内容「${message.take(40)}${if (message.length > 40) "…" else ""}」")
         val probe = d.screen()
         if (probe.w > probe.h) return fail("当前为横屏（${probe.w}x${probe.h}），请竖屏后重试")
-        if (!ensureMain()) return fail("无法回到${app.label}主界面（请先手动打开${app.label}首页后重试）")
+        if (!d.alive()) return fail(DISCONNECTED)
+        if (!ensureMain()) return if (!d.alive()) fail(DISCONNECTED) else fail("无法回到${app.label}主界面（请先手动打开${app.label}首页后重试）")
 
         // 1) exact match in visible chat list (only if exactly one)
         var s = d.screen()
@@ -77,6 +79,7 @@ class MessagingFlow(
                 else -> return fail(r)
             }
         }
+        if (!d.alive()) return fail(DISCONNECTED)
         if (!entered) return fail("未能进入聊天")
 
         // 2) verify chat title
@@ -105,6 +108,7 @@ class MessagingFlow(
             if (sb != null && InputVerify.inputContains(s, message, sb)) { send = sb; break }
             log("输入框未核对到「$message」，换输入方式重试（${attempt + 1}/3）")
         }
+        if (!d.alive()) return fail(DISCONNECTED)
         if (send == null) return fail("输入后无法核对输入框内容/未出现「发送」按钮（可能语音模式或输入失败），未发送")
         log("✓ 输入框已核对")
 
@@ -121,6 +125,7 @@ class MessagingFlow(
             log("确认框关闭后前台=${s.pkg}，回到${app.label}")
             d.bringToFront(app.pkg, app.label); d.afterAction(1500); s = d.screen()
         }
+        if (!d.alive()) return fail(DISCONNECTED)
         if (!titleMatches(s, contact)) return fail("确认期间界面已变化，未发送")
         val send2 = findSend(s) ?: return fail("确认后找不到「发送」按钮，未发送")
         d.tap(send2)

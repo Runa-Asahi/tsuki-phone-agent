@@ -455,6 +455,7 @@ class AgentLoop(
             when (exec.run(sg)) {
                 SubgoalExecutor.Status.OK -> Unit
                 SubgoalExecutor.Status.CANCELLED -> return Result(false, i, "用户取消发送") to null
+                SubgoalExecutor.Status.DISCONNECTED -> return Result(false, i, "无障碍服务在第 ${i + 1} 步（${sg.describe()}）时断开，任务已停止；请重新打开无障碍服务后重试") to null
                 SubgoalExecutor.Status.FAILED -> return null to subs.drop(i).joinToString("，") { it.describe() }
             }
         }

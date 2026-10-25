@@ -15,15 +15,16 @@ class SubgoalExecutor(
     private val onLog: (String) -> Unit,
     private val onConfirm: suspend (String) -> Boolean
 ) {
-    enum class Status { OK, FAILED, CANCELLED }
+    enum class Status { OK, FAILED, CANCELLED, DISCONNECTED }
 
     /** Screen before each successful subgoal, newest last (for 撤销 / wrong-page recovery). */
     private val trail = ArrayDeque<ScreenSig>()
 
     suspend fun run(sub: Subgoal): Status {
+        if (!d.alive()) { onLog("✗ 无障碍服务已断开"); return Status.DISCONNECTED }
         if (sub == Subgoal.Undo) return undo()
         val before = d.screen()
-        val r = runInner(sub)
+        val r = runInner(sub).let { if (it != Status.OK && !d.alive()) Status.DISCONNECTED else it }
         when (r) {
             Status.OK -> { trail.addLast(ScreenSig.of(before)); while (trail.size > 10) trail.removeFirst() }
             Status.FAILED -> {
