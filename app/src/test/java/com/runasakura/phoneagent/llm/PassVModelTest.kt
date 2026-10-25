@@ -29,4 +29,12 @@ class PassVModelTest {
         assertEquals(listOf("deepseek-chat", "deepseek-reasoner"), CloudProviders.parseModels(raw))
         assertTrue(CloudProviders.parseModels("not json").isEmpty())
     }
+
+    @Test fun providerSwitchKeepsCustomValues() {
+        val ds = CloudProviders.byId(AgentPreferences.PROVIDER_DEEPSEEK); val qw = CloudProviders.byId(CloudProviders.PROVIDER_QWEN)
+        assertEquals(qw.baseUrl to "qwen-plus", CloudProviders.onProviderChange(ds, qw, ds.baseUrl, "deepseek-reasoner"))
+        assertEquals("https://my/v1" to "my-model", CloudProviders.onProviderChange(ds, qw, "https://my/v1", "my-model"))
+        val none = CloudProviders.byId(AgentPreferences.PROVIDER_NONE)
+        assertEquals(ds.baseUrl to "deepseek-chat", CloudProviders.onProviderChange(none, ds, "", ""))
+    }
 }

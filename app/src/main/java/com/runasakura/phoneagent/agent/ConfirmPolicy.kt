@@ -4,7 +4,8 @@ import com.runasakura.phoneagent.model.AgentAction
 
 /** ask_confirm is only legitimate for send / pay / delete (or an explicit pendingAction of that kind). */
 object ConfirmPolicy {
-    private val SENSITIVE = listOf("发送", "發送", "支付", "付款", "转账", "轉賬", "删除", "刪除", "红包", "提现", "确认付款", "确认支付")
+    private val SENSITIVE = listOf("发送", "發送", "支付", "付款", "转账", "轉賬", "删除", "刪除", "红包", "提现", "确认付款", "确认支付",
+        "通话", "拨打", "呼叫", "打电话", "下单", "购买", "提交订单", "卸载")
 
     fun isSensitive(action: AgentAction.AskConfirm): Boolean {
         action.pendingAction?.let { p ->

@@ -16,6 +16,17 @@ object CloudProviders {
             listOf("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"))
     )
 
+    /**
+     * Settings: user switched provider [old] → [new]. Replace URL/model only when they still hold the old
+     * provider's defaults (or are blank) — never clobber a custom URL or a typed/fetched model.
+     */
+    fun onProviderChange(old: Preset, new: Preset, url: String, model: String): Pair<String, String> {
+        val u = url.trim(); val m = model.trim()
+        val nu = if (new.baseUrl.isNotBlank() && (u.isBlank() || u == old.baseUrl)) new.baseUrl else u
+        val nm = if (new.model.isNotBlank() && (m.isBlank() || m in old.models)) new.model else m
+        return nu to nm
+    }
+
     /** Model used for requests: the saved one if any, else the provider default. */
     fun effectiveModel(provider: String, baseUrl: String, key: String, model: String): String =
         model.trim().ifBlank { byId(effectiveProvider(provider, baseUrl, key)).model.ifBlank { AgentPreferences.DEEPSEEK_MODEL } }

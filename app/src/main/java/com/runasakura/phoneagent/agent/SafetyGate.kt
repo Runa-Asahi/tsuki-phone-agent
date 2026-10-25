@@ -25,6 +25,16 @@ class SafetyGate(private val prefs: AgentPreferences) {
         "send", "pay", "transfer", "delete", "uninstall", "purchase"
     )
 
+    companion object {
+        private val CALL_KEYS = listOf("视频通话", "语音通话", "音视频通话", "拨打", "呼叫", "拨号", "打电话")
+        /** Model-fallback taps on call buttons always need confirmation (OCR-fuzzy, e.g. 「初麵通话」). */
+        fun isCallLike(label: String): Boolean {
+            val n = com.runasakura.phoneagent.flow.KeyMatch.clean(label)
+            if (n.isBlank() || n.length > 8) return false
+            return n.contains("通话") || CALL_KEYS.any { com.runasakura.phoneagent.flow.KeyMatch.isKey(n, it) }
+        }
+    }
+
     private val sendButtonLabels = listOf(
         "发送", "Send", "傳送", "发送(S)", "送出", "发消息", "Send Message"
     )
@@ -77,6 +87,9 @@ class SafetyGate(private val prefs: AgentPreferences) {
                 }
                 if (isSendLike(resolved) || isSendLike(label)) {
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将点击「发送」，确认后才会真正发出")
+                }
+                if (isCallLike(resolved) || isCallLike(label)) {
+                    return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将发起语音/视频通话或拨号，确认后才会拨出")
                 }
                 if (payButtonLabels.any { resolved.equals(it, true) || label.equals(it, true) }) {
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将点击支付/转账类按钮，确认后才会执行")

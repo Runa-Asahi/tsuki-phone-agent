@@ -77,10 +77,8 @@ class SettingsActivity : AppCompatActivity() {
                 setModelChoices(p.models)
                 if (position == lastPos) return   // initial callback: never overwrite the saved model
                 val old = providers[lastPos]; lastPos = position
-                val url = binding.cloudUrl.text.toString().trim()
-                if (p.baseUrl.isNotBlank() && (url.isBlank() || url == old.baseUrl)) binding.cloudUrl.setText(p.baseUrl)
-                val m = binding.cloudModel.text.toString().trim()
-                if (m.isBlank() || m in old.models) binding.cloudModel.setText(p.model)
+                val (u, m) = CloudProviders.onProviderChange(old, p, binding.cloudUrl.text.toString(), binding.cloudModel.text.toString())
+                binding.cloudUrl.setText(u); binding.cloudModel.setText(m)
             }
         }
         binding.btnFetchModels.setOnClickListener {
