@@ -22,7 +22,7 @@ class PassVCallOcrTest {
         val noEntry = realPanel.copy(items = realPanel.items.filter { it.label != "初麵通话" })
         assertNull(flow.findCallEntry(noEntry))
         assertEquals(790, flow.callEntryGridPos(noEntry)!!.first)
-        val noPanel = noEntry.copy(items = noEntry.items.filter { it.label != "相册" })
+        val noPanel = noEntry.copy(items = noEntry.items.filter { it.cy < 2000 })
         assertNull(flow.callEntryGridPos(noPanel))
     }
 

@@ -12,7 +12,8 @@ object SearchEntry {
     /** IME action key labels: 搜索 (incl. OCR 「搜素」, 「123 搜素」 merges), 前往, Go, Search. */
     fun isImeSubmit(label: String): Boolean {
         val n = com.runasakura.phoneagent.flow.Text.norm(label).lowercase()
-        return n in setOf("搜索", "搜素", "前往", "go", "search", "确定") || n.endsWith("搜索") || n.endsWith("搜素")
+        if (n in setOf("搜索", "搜素", "前往", "go", "search", "确定") || n.endsWith("搜索") || n.endsWith("搜素")) return true
+        return com.runasakura.phoneagent.flow.KeyMatch.isAny(label, listOf("搜索", "前往"), allowContains = false)
     }
 
     private val SEARCH_WORDS = listOf("搜索", "搜一搜", "search", "查找", "searchbox", "search_box")

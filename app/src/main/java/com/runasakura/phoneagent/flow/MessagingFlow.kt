@@ -262,7 +262,7 @@ class MessagingFlow(
     private suspend fun searchAndOpen(contact: String): String? {
         var s = d.screen()
         val searchItem = s.items.firstOrNull {
-            it.cy < s.h * 0.2 && (Text.eq(it.label, "搜索") || it.label.startsWith("搜索"))
+            it.cy < s.h * 0.2 && (KeyMatch.isKey(it.label, "搜索") || it.label.startsWith("搜索"))
         }
         when {
             searchItem != null -> d.tap(searchItem)
@@ -277,7 +277,7 @@ class MessagingFlow(
         }
         d.afterAction(1500)
         s = d.screen()
-        val cancel = s.items.firstOrNull { it.cy < s.h * 0.15 && Text.eq(it.label, "取消") }
+        val cancel = s.items.firstOrNull { it.cy < s.h * 0.15 && KeyMatch.isKey(it.label, "取消", allowContains = false) }
         val searchEdit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.15 }
         if (!SearchPage.isSearchPage(s)) {
             dump("点搜索后", s)
@@ -386,9 +386,9 @@ class MessagingFlow(
         log("通话流程：微信 → 「$contact」 $kind")
         openChat(contact)?.let { return fail(it) }
         var s = leaveVoiceMode(d.screen()) ?: return fail("无法退出语音输入模式，未拨打")
-        if (s.items.none { Text.eq(it.label, CALL_ENTRY) }) {
+        if (s.items.none { Text.eq(it.label, CALL_ENTRY) } && !panelVisible(s)) {
             val plus = s.items.filter { it.cy > s.h * 0.8 && (s.imeTop == null || it.cy < s.imeTop) &&
-                Text.norm(it.label).let { n -> n == "+" || n == "＋" || n.contains("更多功能") } }.maxByOrNull { it.cx }
+                Text.norm(it.label).let { n -> n == "+" || n == "＋" || n == "十" || n == "⊕" || n.contains("更多功能") } && it.cx > s.w * 0.8 }.maxByOrNull { it.cx }
             if (plus != null) d.tap(plus) else {
                 val edit = s.items.lastOrNull { it.edit && (s.imeTop == null || it.cy < s.imeTop) }
                 val y = edit?.cy ?: (s.h * app.inputFallback.second).toInt()
@@ -424,33 +424,59 @@ class MessagingFlow(
         else fail("已点击「$kind」，但未识别到通话界面（请在手机上查看）")
     }
 
-    /** 「音视频通话」 entry in the 「+」 panel, tolerant of OCR misreads like 「初麵通话」. */
+    /** Known 「+」 panel cells (WeChat row 1: 相册 拍摄 视频通话 位置; row 2: 红包 转账 语音输入 …). */
+    private val PANEL_KEYS = listOf("相册", "拍摄", "位置", "红包", "转账", "语音输入", "收藏", "个人名片", "文件")
+    private fun panelItems(s: Screen) = s.items.filter { it.cy > s.h * 0.6 && (s.imeTop == null || it.cy < s.imeTop) &&
+        KeyMatch.isAny(it.label, PANEL_KEYS) }
+    fun panelVisible(s: Screen) = panelItems(s).isNotEmpty()
+
+    /**
+     * 「音视频通话」 entry (Runa's spec): in the verified panel area, a label containing 「通话」, or within edit
+     * distance 2 of 视频通话/音视频通话, or the item in column 3 on 相册's row (|dy| ≤ 30px). Exact always wins.
+     */
     fun findCallEntry(s: Screen): ScreenItem? {
-        val lower = s.items.filter { it.cy > s.h * 0.6 && (s.imeTop == null || it.cy < s.imeTop) }
         s.items.firstOrNull { Text.eq(it.label, CALL_ENTRY) }?.let { return it }
-        return lower.firstOrNull { val n = Text.norm(it.label); n.contains("视频通话") }
-            ?: lower.firstOrNull { val n = Text.norm(it.label); n.length in 3..6 && n.endsWith("通话") }
-            ?: lower.firstOrNull { val n = Text.norm(it.label); n.length in 4..6 && Text.editDistance(n, CALL_ENTRY) <= 2 && n.contains("通") }
+        if (!panelVisible(s)) return null
+        val lower = s.items.filter { it.cy > s.h * 0.6 && (s.imeTop == null || it.cy < s.imeTop) }
+        lower.firstOrNull { val n = KeyMatch.clean(it.label); n.length <= 7 && n.contains("通话") }?.let { return it }
+        lower.firstOrNull { val n = KeyMatch.clean(it.label); n.length in 3..7 &&
+            (Text.editDistance(n, "视频通话") <= 2 || Text.editDistance(n, CALL_ENTRY) <= 2) && !KeyMatch.isAny(it.label, PANEL_KEYS) }?.let { return it }
+        val album = lower.firstOrNull { KeyMatch.isKey(it.label, "相册") } ?: return null
+        return KeyMatch.inGridCell(s, album, col = 2)?.takeIf { !KeyMatch.isAny(it.label, PANEL_KEYS) }
     }
 
-    /** Grid fallback: only when the 「+」 panel is verified (相册 and/or 红包 visible low on screen). 3rd cell of row 1. */
+    /** Position fallback: row 1 col 3 of the 4-column panel grid; row from 相册 or from a row-2 anchor (−1 row). */
     fun callEntryGridPos(s: Screen): Pair<Int, Int>? {
-        val album = s.items.firstOrNull { it.cy > s.h * 0.6 && Text.eq(it.label, "相册") } ?: return null
-        val panelOk = s.items.any { it.cy > s.h * 0.6 && Text.norm(it.label).let { n -> n == "红包" || n == "拍摄" || n == "位置" || n == "转账" } }
-        if (!panelOk) return null
-        if (album.cx > s.w * 0.4) return null
-        return (s.w * 0.625).toInt() to album.cy
+        val items = panelItems(s)
+        if (items.isEmpty()) return null
+        val x = KeyMatch.cellCenterX(s.w, 2)
+        items.firstOrNull { KeyMatch.isAny(it.label, listOf("相册", "拍摄", "位置")) }?.let { return x to it.cy }
+        val row2 = items.minByOrNull { it.cy } ?: return null
+        return x to (row2.cy - (s.h * 0.118).toInt())   // PPG-AN00: 相册@2135 → 红包@2466 ≈ 0.118h
     }
 
-    /** 视频通话 / 语音通话 option in the bottom sheet (fuzzy: one wrong char allowed, never the other kind). */
+    /**
+     * 视频通话 / 语音通话 sheet option: fuzzy (contains 视频/语音, or edit distance ≤ 2), never the other kind;
+     * position fallback only when the sheet is verified (取消 at the bottom, panel gone): the two rows above
+     * 取消 are [视频通话, 语音通话].
+     */
     fun findCallOption(s: Screen, video: Boolean): ScreenItem? {
         val kind = if (video) "视频通话" else "语音通话"
-        val other = if (video) "语音" else "视频"
-        val pool = s.items.filter { it.cy > s.h * 0.5 }
-        return pool.filter { Text.eq(it.label, kind) }.maxByOrNull { it.cy }
-            ?: pool.filter { val n = Text.norm(it.label); !n.contains(other) && n.length in 3..5 &&
-                (n.contains("通") || n.endsWith("话")) &&
-                (n.contains(kind.take(2)) || Text.editDistance(n, kind) <= 1) }.maxByOrNull { it.cy }
+        val key = if (video) "视频" else "语音"
+        val otherKey = if (video) "语音" else "视频"
+        val pool = s.items.filter { it.cy > s.h * 0.5 && !KeyMatch.isKey(it.label, "取消") }
+        pool.filter { Text.eq(it.label, kind) }.maxByOrNull { it.cy }?.let { return it }
+        pool.filter { val n = KeyMatch.clean(it.label); n.length in 2..6 && !n.contains(otherKey) && !n.contains("输入") &&
+            ((n.contains(key) && (n.contains("通") || n.endsWith("话"))) || Text.editDistance(n, kind) <= 2) &&
+            Text.editDistance(n, if (video) "语音通话" else "视频通话") > Text.editDistance(n, kind) }
+            .maxByOrNull { it.cy }?.let { return it }
+        if (panelVisible(s)) return null
+        val cancel = s.items.filter { it.cy > s.h * 0.75 && KeyMatch.isKey(it.label, "取消") }.maxByOrNull { it.cy } ?: return null
+        val above = pool.filter { it.cy < cancel.cy && it.cy > cancel.cy - (s.h * 0.25).toInt() }.sortedByDescending { it.cy }
+        if (above.size < 2) return null
+        val pick = if (video) above[1] else above[0]
+        log("通话类型文字未识别，按底部弹窗位置选择「${pick.label}」（取消上方第${if (video) 2 else 1}行）")
+        return pick
     }
 
     /** Exact label matches below [top] and above the keyboard, optionally skipping non-contact sections. */
@@ -516,7 +542,7 @@ class MessagingFlow(
     fun titleMatches(s: Screen, contact: String): Boolean {
         if (s.pkg != app.pkg) return false
         // Still on the search page (search box holds the same text) is NOT a chat
-        if (s.items.any { it.cy < s.h * 0.12 && (it.edit || Text.eq(it.label, "取消")) }) return false
+        if (s.items.any { it.cy < s.h * 0.12 && (it.edit || KeyMatch.isKey(it.label, "取消", allowContains = false)) }) return false
         val titles = s.items.filter { it.cy < s.h * 0.14 && !it.edit }.map { it.label }
         if (TitleMatch.findMatching(titles, contact) != null) return true
         containsTitle?.let { full -> TitleMatch.findMatching(titles, full)?.let { fuzzyTitle = full; return true } }
@@ -535,6 +561,11 @@ class MessagingFlow(
             .filter { Text.norm(it.label).endsWith(SEND) && it.label.length > SEND.length && it.cy > s.h * 0.5 && (s.imeTop == null || it.cy < s.imeTop) }
             .maxByOrNull { it.cy }
             ?.let { ScreenItem(it.id, it.label, (s.w * SEND_X).toInt(), it.cy, true, false, false, null) }
+        ?: s.items
+            // OCR misread of the button itself (「发迭」「发込」): only at the far right of the bar.
+            .filter { it.cx > s.w * 0.78 && it.cy > s.h * 0.5 && (s.imeTop == null || it.cy < s.imeTop) &&
+                KeyMatch.isKey(it.label, SEND, allowContains = false) }
+            .maxByOrNull { it.cy }
 
     /** Bottom-right of the input bar (WeChat/QQ green 发送 button) when OCR misses the label. */
     private fun sendFallback(s: Screen, barY: Int): ScreenItem {

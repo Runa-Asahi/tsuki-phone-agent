@@ -148,7 +148,7 @@ class A11yDevice(
         val off = if (crop === bmp) 0 else top
         // Half resolution for Chinese OCR speed (scale coords back). Cap long side at 720.
         val longSide = maxOf(crop.width, crop.height)
-        val scaleDown = if (longSide > 720) 720f / longSide else 1f
+        val scaleDown = if (longSide > 960) 960f / longSide else 1f
         val small = if (scaleDown < 0.99f) {
             android.graphics.Bitmap.createScaledBitmap(
                 crop, (crop.width * scaleDown).toInt().coerceAtLeast(1),
@@ -162,28 +162,51 @@ class A11yDevice(
             for (b in listOf(ready, small, crop)) if (b !== bmp && !b.isRecycled) b.recycle()
         }
         val bw = bmp.width; val bh = bmp.height; val swd = small.width; val sht = small.height
+        if (lines == null) { bmp.recycle(); return null }
+        val inv = if (scaleDown < 0.99f) 1f / scaleDown else 1f
+        val globalBmp = lines.map {
+            com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * inv).toInt(), (it.t * inv).toInt() + off,
+                (it.r * inv).toInt(), (it.b * inv).toInt() + off)
+        }
+        // Near-native detail passes on title bar + bottom area (panel / sheets / input bar / IME keys).
+        val detail = LinkedHashMap<Pair<Int, Int>, List<com.runasakura.phoneagent.ocr.OcrLine>>()
+        for (band in com.runasakura.phoneagent.ocr.OcrBands.detailBands(top, bottom)) {
+            coroutineContext.ensureActive()
+            detail[band] = ocrRegion(bmp, band.first, band.second) ?: emptyList()
+        }
         bmp.recycle()
-        if (lines == null) return null
-        // Map OCR pixels → screen: first undo scaleDown, then undo crop offset, then bmp→screen
+        val merged = com.runasakura.phoneagent.ocr.OcrBands.merge(globalBmp, detail)
         val sx = w.toFloat() / bw
         val sy = h.toFloat() / bh
-        val inv = if (scaleDown < 0.99f) 1f / scaleDown else 1f
-        val scaled = lines.map {
-            val l = ((it.l * inv)).toInt()
-            val t = ((it.t * inv) + off).toInt()
-            val r = ((it.r * inv)).toInt()
-            val b = ((it.b * inv) + off).toInt()
-            com.runasakura.phoneagent.ocr.OcrLine(it.text, (l * sx).toInt(), (t * sy).toInt(), (r * sx).toInt(), (b * sy).toInt())
+        val scaled = merged.map {
+            com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * sx).toInt(), (it.t * sy).toInt(), (it.r * sx).toInt(), (it.b * sy).toInt())
         }
         val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
         val items = com.runasakura.phoneagent.ocr.OcrPost.process(
             scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore
         )
         val ms = System.currentTimeMillis() - t0
-        log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}）文字=${items.size}")
+        log("OCR ${ms}ms（截图${bw}x${bh}→全局${swd}x${sht}+细节区${detail.size}个）文字=${items.size}")
         val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
         ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg; ocrCacheGen = actionGen
         return out
+    }
+
+    /** OCR one horizontal band of [bmp] at ≤1280px long side; returns lines in bitmap coords. */
+    private suspend fun ocrRegion(bmp: android.graphics.Bitmap, y0: Int, y1: Int): List<com.runasakura.phoneagent.ocr.OcrLine>? {
+        val a = y0.coerceIn(0, bmp.height - 1); val b = y1.coerceIn(a + 1, bmp.height)
+        val band = try { android.graphics.Bitmap.createBitmap(bmp, 0, a, bmp.width, b - a) } catch (_: Exception) { return null }
+        val long = maxOf(band.width, band.height)
+        val k = if (long > 1280) 1280f / long else 1f
+        val sc = if (k < 0.99f) android.graphics.Bitmap.createScaledBitmap(band, (band.width * k).toInt().coerceAtLeast(1),
+            (band.height * k).toInt().coerceAtLeast(1), true) else band
+        val ready = enhanceContrast(sc)
+        val res = try { TaskTiming.time("OCR细节区") { OcrEngine.recognizeLines(ready, 0) } } finally {
+            for (x in listOf(ready, sc, band)) if (x !== bmp && !x.isRecycled) x.recycle()
+        } ?: return null
+        val inv = 1f / k
+        return res.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * inv).toInt(), (it.t * inv).toInt() + a,
+            (it.r * inv).toInt(), (it.b * inv).toInt() + a) }
     }
 
     /** Linear contrast stretch on luminance — helps dark-mode UI without changing hue much. */
