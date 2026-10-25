@@ -31,7 +31,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 appendLog(msg)
                 when (type) {
-                    "confirm" -> showConfirm(msg)
+                    "confirm" -> Unit // shown by ConfirmActivity on top of any app
                     "running" -> binding.statusText.text = getString(R.string.status_running)
                     "done" -> binding.statusText.text = getString(R.string.status_idle)
                     "stopped" -> binding.statusText.text = getString(R.string.status_idle)
@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity() {
             AgentForegroundService.stop(this)
             appendLog("请求急停")
         }
+        binding.btnExport.setOnClickListener { exportDiagnostics() }
         binding.btnOpenA11y.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
@@ -137,6 +138,24 @@ class MainActivity : AppCompatActivity() {
                 AgentForegroundService.deliverConfirm(false)
             }
             .show()
+    }
+
+    private fun exportDiagnostics() {
+        val ver = try { packageManager.getPackageInfo(packageName, 0).versionName } catch (_: Exception) { "?" }
+        val a11y = if (AgentAccessibilityService.require() != null) "已连接" else "未连接"
+        val text = com.runasakura.phoneagent.util.Diagnostics.export("$packageName $ver", a11y) +
+            "\n--- 界面日志 ---\n" + binding.logView.text
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        cm?.setPrimaryClip(android.content.ClipData.newPlainText("phone-agent-diagnostics", text))
+        Toast.makeText(this, "诊断日志已复制到剪贴板", Toast.LENGTH_SHORT).show()
+        startActivity(
+            Intent.createChooser(
+                Intent(Intent.ACTION_SEND).setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Phone Agent 诊断日志")
+                    .putExtra(Intent.EXTRA_TEXT, text),
+                "分享诊断日志"
+            )
+        )
     }
 
     private fun refreshA11yStatus() {

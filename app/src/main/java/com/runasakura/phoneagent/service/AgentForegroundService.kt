@@ -58,6 +58,7 @@ class AgentForegroundService : Service() {
     }
 
     private fun begin(goal: String) {
+        com.runasakura.phoneagent.util.Diagnostics.reset(goal)
         // Cancel any previous loop (and its in-flight MNN call) before starting a new one
         job?.let {
             if (it.isActive) {
@@ -96,6 +97,7 @@ class AgentForegroundService : Service() {
             try {
                 val m = local.resolveModel()
                 log("MNN 当前模型：${m.ifBlank { "(未知)" }}")
+                com.runasakura.phoneagent.util.Diagnostics.model = m
                 if (m.contains("reason", true) || m.contains("think", true) || m.contains("distill", true)) {
                     log("提示：推理(Reasoning)模型会输出长思考，建议换 Qwen3 1.7B/4B 或 Qwen2.5 Instruct（MNN）")
                 }
@@ -110,6 +112,7 @@ class AgentForegroundService : Service() {
                 Log.e(TAG, "loop error", e)
                 AgentLoop.Result(false, 0, e.message ?: "error")
             }
+            com.runasakura.phoneagent.util.Diagnostics.log("结果: success=${result.success} ${result.summary}")
             broadcastStatus(
                 if (result.success) "done" else "stopped",
                 "结束(${result.steps}步): ${result.summary}"
@@ -132,6 +135,16 @@ class AgentForegroundService : Service() {
             }
             broadcastStatus("confirm", reason)
             updateNotification("等待确认: ${reason.take(40)}")
+            // Show on top of the chat app (MainActivity is paused there and misses broadcasts)
+            try {
+                val i = android.content.Intent(this, com.runasakura.phoneagent.ui.ConfirmActivity::class.java)
+                    .putExtra(com.runasakura.phoneagent.ui.ConfirmActivity.EXTRA_MSG, reason)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                val starter = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require()
+                (starter ?: this).startActivity(i)
+            } catch (e: Exception) {
+                Log.w(TAG, "confirm activity failed: ${e.message}")
+            }
         }
 
     fun requestStop() {
@@ -177,6 +190,7 @@ class AgentForegroundService : Service() {
 
     private fun log(msg: String) {
         Log.i(TAG, msg)
+        com.runasakura.phoneagent.util.Diagnostics.log(msg)
         broadcastStatus("log", msg)
     }
 

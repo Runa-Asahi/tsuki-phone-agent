@@ -58,7 +58,6 @@ class AgentAccessibilityService : AccessibilityService() {
 
     @Volatile
     var lastItems: List<ScreenItem> = emptyList()
-        private set
 
     /** Roots of all interactive windows; application windows first, then the active one. */
     fun windowRoots(): List<AccessibilityNodeInfo> {
@@ -67,6 +66,7 @@ class AgentAccessibilityService : AccessibilityService() {
             val ws = windows.orEmpty().sortedBy { if (it.type == AccessibilityWindowInfo.TYPE_APPLICATION) 0 else 1 }
             for (w in ws) {
                 if (w.type == AccessibilityWindowInfo.TYPE_SYSTEM ||
+                    w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
                     w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
                 val r = w.root ?: continue
                 if (r.packageName?.toString()?.startsWith("com.runasakura.phoneagent") == true &&
@@ -155,10 +155,52 @@ class AgentAccessibilityService : AccessibilityService() {
 
     fun isReady(): Boolean = true
 
+    /** Wait until no accessibility events for [quietMs] (max [maxMs]). */
+    suspend fun awaitSettle(quietMs: Long = 400, maxMs: Long = 1500) {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < maxMs) {
+            if (System.currentTimeMillis() - lastEventAt >= quietMs) return
+            kotlinx.coroutines.delay(100)
+        }
+    }
+
+    /** Clear per-task caches so a new task never reuses stale nodes/ids/packages. */
+    fun resetTaskState() {
+        lastItems = emptyList()
+        lastPackage = ""
+    }
+
+    fun focusedInput(): AccessibilityNodeInfo? = try {
+        findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
+    } catch (_: Exception) { null }
+
+    /**
+     * Type through the accessibility input-method channel (API 33+, flagInputMethodEditor).
+     * Works even when the app hides its node tree, as long as a text field has input focus.
+     */
+    fun imeCommit(text: String): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        return try {
+            val ic = inputMethod?.currentInputConnection ?: return false
+            ic.performContextMenuAction(android.R.id.selectAll)
+            ic.commitText(text, 1, null)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "imeCommit failed: ${e.message}"); false
+        }
+    }
+
     /** Current foreground package (active window root, else last event). */
-    fun foregroundPackage(): String =
-        try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
+    fun foregroundPackage(): String {
+        try {
+            val ws = windows.orEmpty().filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+            val w = ws.firstOrNull { it.isActive || it.isFocused } ?: ws.firstOrNull()
+            w?.root?.packageName?.toString()?.let { return it }
+        } catch (_: Exception) {
+        }
+        return try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
             ?: lastPackage.ifEmpty { "unknown" }
+    }
 
     fun dumpUiTree(@Suppress("UNUSED_PARAMETER") maxNodes: Int = 120): UiSnapshot {
         val (w, h) = screenSize()
@@ -523,12 +565,14 @@ class AgentAccessibilityService : AccessibilityService() {
     private fun isSettingsPackage(packageName: String): Boolean =
         SETTINGS_PACKAGES.any { it.equals(packageName, ignoreCase = true) }
 
+    private val shotExecutor by lazy { java.util.concurrent.Executors.newSingleThreadExecutor() }
+
     fun takeScreenshotBitmap(timeoutMs: Long = 4000): Bitmap? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         val latch = CountDownLatch(1)
         val ref = AtomicReference<Bitmap?>()
         val main = Handler(Looper.getMainLooper())
-        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val executor = shotExecutor
         main.post {
             try {
                 takeScreenshot(

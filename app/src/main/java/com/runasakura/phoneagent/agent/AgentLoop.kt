@@ -34,6 +34,7 @@ class AgentLoop(
     suspend fun run(goal: String): Result {
         val a11y = AgentAccessibilityService.require()
             ?: return Result(false, 0, "无障碍服务未开启")
+        a11y.resetTaskState()
         val history = mutableListOf<ChatMessage>()
         history += ChatMessage("system", SystemPrompt.TEXT)
         history += ChatMessage("user", "用户目标：$goal")
@@ -67,21 +68,14 @@ class AgentLoop(
             }
         }
 
-        // Fast-path: messaging (微信/QQ, 给/向/跟/对 X 发送/说 Y)
+        // ---- Deterministic paths (never call the model here) ----
+        val dev = com.runasakura.phoneagent.a11y.A11yDevice(a11y, onLog)
         val msgGoal = MessagingGoals.parse(goal)
         var targetPkg: String? = null
-        if (msgGoal != null) {
-            targetPkg = msgGoal.packageName
-            val out = WeChatFastPath(a11y, onLog, onConfirm, isStopped).run(msgGoal)
-            if (out.done) return Result(true, out.steps, out.summary)
-            if (out.summary == "用户取消发送") return Result(false, out.steps, out.summary)
-            if (out.fallbackHint == null) return Result(false, out.steps, out.summary)
-            onLog("快路径未完成：${out.summary}，改用短提示 LLM")
-            history.clear()
-            history += ChatMessage("system", SystemPrompt.FOCUSED)
-            history += ChatMessage("user", "用户目标：$goal\n${out.fallbackHint}")
+        if (msgGoal != null && msgGoal.contact != null && msgGoal.message != null) {
+            return runMessaging(dev, msgGoal.packageName, msgGoal.contact, msgGoal.message)
         } else if (subTarget == null) {
-            // Generic: 打开/启动/进入 <任意已安装 App>[并…]
+            // Generic: 打开/启动/进入 <任意已安装 App>[，进入X，发送Y…]
             val appName = AppResolver.extractAppName(goal)
             if (appName != null) {
                 val match = AppResolver.resolve(a11y, appName)
@@ -91,27 +85,28 @@ class AgentLoop(
                 }
                 onLog("匹配应用：${match.label} (${match.packageName}) score=${match.score}")
                 targetPkg = match.packageName
-                var fg = ""
-                for (attempt in 1..2) {
-                    a11y.launchPackage(match.packageName, match.label)
-                    fg = waitForeground(a11y, 3500) { it == match.packageName }
-                    if (fg == match.packageName) break
-                    onLog("第${attempt}次启动后前台=$fg，重试")
+                if (!dev.bringToFront(match.packageName, match.label)) {
+                    return Result(false, 1, "无法把「${match.label}」带到前台（前台=${dev.foregroundPackage()}）")
                 }
-                onLog("前台=$fg")
-                if (fg != match.packageName) return Result(false, 1, "无法把「${match.label}」带到前台（$fg）")
+                onLog("✓ 前台=${match.packageName}")
                 val remaining = AppResolver.remainingGoal(goal, appName)
                 if (remaining == null) return Result(true, 1, "已打开${match.label}")
                 onLog("剩余子目标：$remaining")
-                // Deterministic subgoal execution first (no model)
-                val exec = SubgoalExecutor(a11y, onLog, onConfirm)
-                exec.waitForTree()
                 val subs = GoalSplitter.split(remaining)
+                onLog("拆分：" + subs.joinToString(" → ") { it.describe() })
+                // 微信/QQ：「进入X，发送Y」= 给 X 发消息 → strict messaging flow (title check etc.)
+                val isMsgApp = match.packageName == MessagingGoals.WECHAT || match.packageName == MessagingGoals.QQ
+                val o = subs.getOrNull(0) as? Subgoal.Open
+                val sd = subs.getOrNull(1) as? Subgoal.Send
+                if (isMsgApp && o != null && sd != null && subs.size == 2) {
+                    return runMessaging(dev, match.packageName, o.target, sd.text, reallySend = sd.send)
+                }
+                val exec = SubgoalExecutor(dev, onLog, onConfirm)
                 var left: String? = null
                 for ((i, sg) in subs.withIndex()) {
                     coroutineContext.ensureActive()
                     if (isStopped()) return Result(false, 1, "已急停")
-                    when (exec.run(sg, goal)) {
+                    when (exec.run(sg)) {
                         SubgoalExecutor.Status.OK -> Unit
                         SubgoalExecutor.Status.CANCELLED -> return Result(false, 1, "用户取消发送")
                         SubgoalExecutor.Status.FAILED -> {
@@ -121,7 +116,7 @@ class AgentLoop(
                     }
                 }
                 if (left == null) return Result(true, 1, "已完成：$remaining（确定性执行）")
-                onLog("确定性执行未完成，剩余交给模型：$left")
+                onLog("确定性执行未完成，剩余交给模型（最后手段）：$left")
                 history.clear()
                 history += ChatMessage("system", SystemPrompt.FOCUSED)
                 history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$left")
@@ -137,8 +132,17 @@ class AgentLoop(
 
             step++
             onLog("—— 步骤 $step/$max ——")
-            val snap = a11y.dumpUiTree()
-            onLog("前台=${snap.packageName} 节点=${snap.nodeCount} low=${snap.lowConfidence}")
+            val sc = dev.screen()
+            a11y.lastItems = sc.items
+            val snap = UiSnapshot(
+                packageName = sc.pkg, screenWidth = sc.w, screenHeight = sc.h, tree = null,
+                compressedText = buildDump(sc), nodeCount = sc.items.size,
+                lowConfidence = sc.source != "tree"
+            )
+            onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
+            if (sc.isEmpty() && !AppResolver.isAgentOrBrain(sc.pkg)) {
+                return Result(false, step, "读不到界面（无障碍树与 OCR 均为空），为避免盲猜不调用模型")
+            }
 
             // Goal already satisfied?
             if (goalReachedSettings(goal, snap) && a11y.isSettingsForeground(snap.packageName)) {
@@ -151,9 +155,7 @@ class AgentLoop(
             if (tp != null && snap.packageName != tp) {
                 if (++refocus > 3) return Result(false, step, "多次无法回到目标应用 $tp")
                 onLog("前台(${snap.packageName})不是目标应用，重新启动 $tp（不调用模型）")
-                a11y.launchPackage(tp)
-                val fg = waitForeground(a11y, 3500) { it == tp }
-                if (fg != tp) return Result(false, step, "目标应用无法到前台（$fg）")
+                if (!dev.bringToFront(tp, tp)) return Result(false, step, "目标应用无法到前台（${dev.foregroundPackage()}）")
                 step--; continue
             }
             if (tp == null && AppResolver.isAgentOrBrain(snap.packageName)) {
@@ -433,11 +435,41 @@ class AgentLoop(
         } || snap.packageName.contains("settings", ignoreCase = true)
     }
 
+    private fun buildDump(sc: com.runasakura.phoneagent.flow.Screen): String {
+        val sb = StringBuilder()
+        for (it in sc.items.take(45)) {
+            val line = it.format()
+            if (sb.length + line.length > 1300) break
+            sb.append(line).append('\n')
+        }
+        return sb.toString().trimEnd().ifBlank { "(空)" }
+    }
+
+    private suspend fun runMessaging(
+        dev: com.runasakura.phoneagent.a11y.A11yDevice,
+        pkg: String, contact: String, message: String, reallySend: Boolean = true
+    ): Result {
+        val profile = com.runasakura.phoneagent.flow.AppProfile.forPackage(pkg)
+        if (!reallySend) {
+            onLog("目标只要求输入不发送：将进入聊天并输入，但不点发送")
+        }
+        val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev, profile, onLog) { text ->
+            if (!reallySend) false else onConfirm(text)
+        }
+        val out = flow.run(contact, message)
+        if (!reallySend && out.cancelled) return Result(true, 1, "已在「$contact」聊天中输入：$message（未发送）")
+        return Result(out.ok, 1, out.summary)
+    }
+
+    private fun itemByText(a11y: AgentAccessibilityService, text: String) =
+        a11y.lastItems.firstOrNull { com.runasakura.phoneagent.flow.Text.eq(it.label, text) }
+            ?: a11y.lastItems.filter { it.label.contains(text) }.minByOrNull { it.label.length }
+
     private fun tapTargetMissing(a11y: AgentAccessibilityService, tap: AgentAction.Tap): Boolean {
         val id = tap.nodeId
-        if (!id.isNullOrBlank()) return a11y.findNodeById(id) == null && tap.x == null
+        if (!id.isNullOrBlank()) return a11y.lastItems.none { it.id == id } && tap.x == null
         val txt = tap.text
-        if (!txt.isNullOrBlank()) return a11y.findVisibleByText(txt) == null
+        if (!txt.isNullOrBlank()) return itemByText(a11y, txt) == null
         return false
     }
 
@@ -497,12 +529,12 @@ class AgentLoop(
                 is AgentAction.Tap -> {
                     when {
                         !action.nodeId.isNullOrBlank() -> {
-                            val n = a11y.findNodeById(action.nodeId!!) ?: return false
-                            a11y.tapNode(n)
+                            val it = a11y.lastItems.firstOrNull { i -> i.id == action.nodeId } ?: return false
+                            a11y.tap(it.cx, it.cy)
                         }
                         !action.text.isNullOrBlank() -> {
-                            val n = a11y.findByText(action.text!!) ?: return false
-                            a11y.tapNode(n)
+                            val it = itemByText(a11y, action.text!!) ?: return false
+                            a11y.tap(it.cx, it.cy)
                         }
                         action.x != null && action.y != null -> a11y.tap(action.x!!, action.y!!)
                         else -> false
@@ -511,8 +543,8 @@ class AgentLoop(
                 is AgentAction.LongPress -> {
                     when {
                         !action.nodeId.isNullOrBlank() -> {
-                            val n = a11y.findNodeById(action.nodeId!!) ?: return false
-                            a11y.longPressNode(n)
+                            val it = a11y.lastItems.firstOrNull { i -> i.id == action.nodeId } ?: return false
+                            a11y.longPress(it.cx, it.cy)
                         }
                         action.x != null && action.y != null -> a11y.longPress(action.x!!, action.y!!)
                         else -> false

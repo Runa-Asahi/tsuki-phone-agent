@@ -106,5 +106,31 @@ object ScreenItems {
         return items
     }
 
+    /**
+     * One item per visible text leaf (text or desc) and per editable field — no merging, no caps
+     * beyond [maxItems]. Used by deterministic flows that need exact labels (like OCR lines).
+     * [ScreenItem.tap] is true when the node or an ancestor is clickable.
+     */
+    fun leaves(roots: List<RawNode>, w: Int, h: Int, maxItems: Int = 300): List<ScreenItem> {
+        val out = mutableListOf<Pair<RawNode, Boolean>>()
+        fun walk(n: RawNode, clickableAncestor: Boolean, depth: Int) {
+            if (depth > 45 || out.size >= maxItems) return
+            val clickable = clickableAncestor || n.clickable
+            if (visible(n, w, h) && (ownLabel(n).isNotBlank() || n.editable)) out += n to clickable
+            n.children.forEach { walk(it, clickable, depth + 1) }
+        }
+        roots.forEach { walk(it, false, 0) }
+        val seen = HashSet<String>()
+        return out.sortedWith(compareBy({ (it.first.t + it.first.b) / 2 }, { it.first.l }))
+            .mapNotNull { (n, c) ->
+                val cx = (maxOf(n.l, 0) + minOf(n.r, w)) / 2
+                val cy = (maxOf(n.t, 0) + minOf(n.b, h)) / 2
+                val label = if (n.editable) cleanLabel(n.text) else ownLabel(n)
+                if (!seen.add("$label@$cx,$cy")) null
+                else ScreenItem("", label, cx, cy, c, n.editable, n.scrollable, n.ref)
+            }
+            .mapIndexed { i, it -> it.copy(id = "e${i + 1}") }
+    }
+
     fun textCount(items: List<ScreenItem>) = items.count { it.label.isNotBlank() }
 }

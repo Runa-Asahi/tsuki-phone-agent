@@ -7,4 +7,10 @@
         <item name="colorSecondary">@color/teal_200</item>
         <item name="android:statusBarColor">@color/purple_700</item>
     </style>
+    <style name="Theme.HonorPhoneAgent.Translucent" parent="Theme.HonorPhoneAgent">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
 </resources>

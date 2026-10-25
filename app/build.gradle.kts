@@ -65,5 +65,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.json:json:20240303")
+    // Bundled (offline, no GMS) Chinese OCR for apps that hide their accessibility tree (e.g. WeChat)
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("junit:junit:4.13.2")
 }

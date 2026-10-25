@@ -1,111 +1,91 @@
 package com.runasakura.phoneagent.agent
 
-import com.runasakura.phoneagent.a11y.AgentAccessibilityService
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
-import kotlin.coroutines.coroutineContext
+import com.runasakura.phoneagent.flow.Device
+import com.runasakura.phoneagent.flow.Screen
+import com.runasakura.phoneagent.flow.Text
+import com.runasakura.phoneagent.screen.ScreenItem
 
 /**
- * Deterministic executor for split subgoals: 进入/打开/点击 X, 发送/输入 Y.
- * Order: 文字匹配 → 滚动 → 应用内搜索; returns false so the caller can use the model.
+ * Deterministic executor for split subgoals (进入/打开/点击 X, 发送/输入 Y) over [Device]
+ * (tree or OCR). Order: 文字匹配 → 滚动(≤3) → 应用内搜索. Returns FAILED so the caller
+ * may use the model as a last resort.
  */
 class SubgoalExecutor(
-    private val a11y: AgentAccessibilityService,
+    private val d: Device,
     private val onLog: (String) -> Unit,
     private val onConfirm: suspend (String) -> Boolean
 ) {
     enum class Status { OK, FAILED, CANCELLED }
 
-    suspend fun waitSettle(quietMs: Long = 400, maxMs: Long = 1500) {
-        val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < maxMs) {
-            if (System.currentTimeMillis() - a11y.lastEventAt >= quietMs) return
-            delay(100)
-        }
-    }
-
-    /** Wait (≤2s) for a non-trivial tree, e.g. right after launching WeChat. */
-    suspend fun waitForTree(minText: Int = 3, maxMs: Long = 2000): Int {
-        val start = System.currentTimeMillis()
-        var n = 0
-        while (System.currentTimeMillis() - start < maxMs) {
-            n = a11y.screenItems().count { it.label.isNotBlank() }
-            if (n >= minText) break
-            delay(250)
-        }
-        onLog("界面文本节点数=$n")
-        return n
-    }
-
-    suspend fun run(sub: Subgoal, goal: String): Status = when (sub) {
+    suspend fun run(sub: Subgoal): Status = when (sub) {
         is Subgoal.Open -> if (open(sub.target)) Status.OK else Status.FAILED
         is Subgoal.Send -> send(sub.text, sub.send)
         is Subgoal.Unknown -> Status.FAILED
     }
 
+    /** Pick the best on-screen item for [target]: exact first, else shortest containing label. */
+    fun pick(s: Screen, target: String, below: Int = 0): ScreenItem? {
+        val pool = s.items.filter { !it.edit && it.cy > below && (s.imeTop == null || it.cy < s.imeTop) }
+        val t = Text.norm(target)
+        pool.firstOrNull { Text.norm(it.label) == t }?.let { return it }
+        return pool.filter { Text.norm(it.label).contains(t) && it.label.length <= target.length + 8 }
+            .minByOrNull { it.label.length }
+    }
+
     suspend fun open(target: String): Boolean {
-        waitSettle()
         onLog("子目标：进入「$target」")
-        if (tapText(target)) { onLog("✓ 文字匹配"); return true }
-        val (w, h) = a11y.screenSize()
-        for (i in 1..3) {
-            coroutineContext.ensureActive()
-            a11y.swipe(w / 2, (h * 0.72).toInt(), w / 2, (h * 0.32).toInt(), 350)
-            delay(500); waitSettle()
-            if (tapText(target)) { onLog("✓ 滚动 $i 次后找到"); return true }
+        for (i in 0..3) {
+            val s = d.screen()
+            if (s.isEmpty()) { onLog("✗ 界面为空（树/OCR 都读不到）"); return false }
+            val hit = pick(s, target, below = (s.h * 0.04).toInt())
+            if (hit != null) {
+                d.tap(hit); d.sleep(900)
+                onLog(if (i == 0) "✓ 文字匹配（${s.source}）：${hit.label}" else "✓ 滚动 $i 次后找到：${hit.label}")
+                return true
+            }
+            if (i < 3) d.scroll(true)
         }
-        // scroll back near the top before searching
-        repeat(3) { a11y.swipe(w / 2, (h * 0.32).toInt(), w / 2, (h * 0.78).toInt(), 250); delay(250) }
+        repeat(3) { d.scroll(false) }
         if (searchAndOpen(target)) { onLog("✓ 应用内搜索"); return true }
         onLog("✗ 未找到「$target」")
         return false
     }
 
-    private suspend fun tapText(target: String): Boolean {
-        val n = a11y.findVisibleByText(target) ?: return false
-        val ok = a11y.tapNode(n)
-        if (ok) { delay(600); waitSettle() }
-        return ok
-    }
-
     private suspend fun searchAndOpen(target: String): Boolean {
-        val (w, h) = a11y.screenSize()
-        val search = a11y.findVisibleByText("搜索", allowEditable = true)
-            ?: a11y.findByContentDesc("搜索")
-        val opened = if (search != null) a11y.tapNode(search) else {
-            // top-right search icon heuristic (WeChat ~ x=1057,y≈200 on 1264x2800)
-            onLog("未见搜索节点，点右上角搜索位")
-            a11y.tap((w * 0.836).toInt(), (h * 0.071).toInt())
-        }
-        if (!opened) return false
-        delay(700); waitSettle()
-        if (!a11y.typeText(target, a11y.firstVisibleEditable())) {
-            onLog("搜索框输入失败"); return false
-        }
-        delay(1000); waitSettle()
-        val hit = a11y.screenItems().firstOrNull { !it.edit && it.label.contains(target, true) }
-        val node = hit?.ref as? android.view.accessibility.AccessibilityNodeInfo ?: return false
-        val ok = a11y.tapNode(node)
-        if (ok) { delay(700); waitSettle() }
-        return ok
+        var s = d.screen()
+        val search = s.items.firstOrNull { it.cy < s.h * 0.2 && (Text.eq(it.label, "搜索") || it.label.startsWith("搜索")) }
+            ?: return false
+        d.tap(search); d.sleep(900)
+        s = d.screen()
+        val edit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.2 }
+        if (!d.type(target, edit?.cx, edit?.cy)) { onLog("搜索框输入失败"); return false }
+        d.sleep(1300)
+        s = d.screen()
+        val hit = pick(s, target, below = (s.h * 0.11).toInt()) ?: return false
+        d.tap(hit); d.sleep(900)
+        return true
     }
 
     suspend fun send(text: String, reallySend: Boolean): Status {
-        waitSettle()
         onLog("子目标：${if (reallySend) "发送" else "输入"}「$text」")
-        val edit = a11y.firstVisibleEditable()
-        if (edit == null) { onLog("✗ 未找到输入框"); return Status.FAILED }
-        if (!a11y.typeText(text, edit)) { onLog("✗ 输入失败"); return Status.FAILED }
+        var s = d.screen()
+        val edit = s.items.lastOrNull { it.edit }
+        if (!d.type(text, edit?.cx ?: (s.w * 0.45).toInt(), edit?.cy ?: (s.h * 0.952).toInt())) {
+            onLog("✗ 输入失败"); return Status.FAILED
+        }
         onLog("✓ 已输入（尚未发送）")
         if (!reallySend) return Status.OK
-        delay(400); waitSettle()
-        if (!onConfirm("即将发送：「$text」\n前台：${a11y.foregroundPackage()}\n确认后才会点击发送。")) {
+        d.sleep(600)
+        s = d.screen()
+        val btn = s.items.filter { Text.eq(it.label, "发送") && (s.imeTop == null || it.cy < s.imeTop) }.maxByOrNull { it.cy }
+            ?: run { onLog("✗ 未找到发送按钮，未发送"); return Status.FAILED }
+        val title = s.items.filter { it.cy < s.h * 0.12 }.joinToString(" ") { it.label }.ifBlank { "未知" }
+        if (!onConfirm("即将发送：「$text」\n当前页面标题：$title\n应用：${s.pkg}\n确认后才会点击发送。")) {
             onLog("用户取消发送"); return Status.CANCELLED
         }
-        val btn = a11y.findVisibleByText("发送") ?: a11y.findByContentDesc("发送")
-        if (btn == null || !a11y.tapNode(btn)) { onLog("✗ 未找到发送按钮"); return Status.FAILED }
+        d.tap(btn)
         onLog("✓ 已点击发送")
-        delay(500)
+        d.sleep(600)
         return Status.OK
     }
 }

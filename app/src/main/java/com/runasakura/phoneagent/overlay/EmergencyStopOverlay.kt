@@ -39,12 +39,14 @@ class EmergencyStopOverlay(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             type,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.END
-            x = 24
-            y = 200
+            // Left edge, ~40% height: away from title bars, search icons (WeChat ~x1057,y200),
+            // chat input bars and the gesture-navigation area at the bottom.
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = (context.resources.displayMetrics.heightPixels * 0.40).toInt()
         }
         try {
             wm.addView(btn, params)
