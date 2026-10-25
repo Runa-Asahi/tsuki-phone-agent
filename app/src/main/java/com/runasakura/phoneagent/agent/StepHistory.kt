@@ -1,0 +1,44 @@
+package com.runasakura.phoneagent.agent
+
+/**
+ * Pure step history for the model fallback: remembers the last action and the previous
+ * screen's labels, and renders a short screen-diff note so a 1–2B model can tell whether
+ * its last action did anything (and stop repeating no-op taps).
+ */
+class StepHistory(private val maxLabels: Int = 6) {
+    private var prev: Set<String>? = null
+    private var lastAction: String? = null
+    private var sameNoChange = 0
+    private val actions = ArrayDeque<String>()
+
+    val stuckCount: Int get() = sameNoChange
+
+    fun recordAction(desc: String) {
+        val d = desc.take(80)
+        lastAction = d
+        actions.addLast(d); while (actions.size > 8) actions.removeFirst()
+    }
+
+    /** Call once per observation; returns a note for the prompt (null on the first step). */
+    fun observe(labels: List<String>): String? {
+        val cur = labels.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        val p = prev; prev = cur
+        val act = lastAction ?: return null
+        lastAction = null
+        if (p == null) return "上一步：$act"
+        val added = (cur - p).take(maxLabels)
+        val removed = (p - cur).take(maxLabels)
+        return if (added.isEmpty() && removed.isEmpty()) {
+            val n = actions.size
+            sameNoChange = if (n >= 2 && actions[n - 1] == actions[n - 2]) sameNoChange + 1 else 1
+            "上一步：$act → 界面无变化" + if (sameNoChange >= 2) "（已重复无效，换别的元素/滚动/返回）" else "，不要重复同一动作"
+        } else {
+            sameNoChange = 0
+            buildString {
+                append("上一步：").append(act).append(" → 界面变化")
+                if (added.isNotEmpty()) append(" 新增:").append(added.joinToString("、") { it.take(10) })
+                if (removed.isNotEmpty()) append(" 消失:").append(removed.joinToString("、") { it.take(10) })
+            }
+        }
+    }
+}

@@ -37,6 +37,7 @@ class AgentLoop(
         a11y.resetTaskState()
         val history = mutableListOf<ChatMessage>()
         history += ChatMessage("system", SystemPrompt.TEXT)
+        val steps = StepHistory()
         history += ChatMessage("user", "用户目标：$goal")
 
         if (safety.goalNeedsConfirm(goal)) {
@@ -145,6 +146,9 @@ class AgentLoop(
                 lowConfidence = sc.source != "tree"
             )
             onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
+            val diffNote = steps.observe(sc.items.map { it.label })
+            diffNote?.let { onLog(it) }
+            if (steps.stuckCount >= 3) return Result(false, step, "连续多次动作后界面无变化，已停止以免乱点")
             if (sc.isEmpty() && !AppResolver.isAgentOrBrain(sc.pkg)) {
                 return Result(false, step, "读不到界面（无障碍树与 OCR 均为空），为避免盲猜不调用模型")
             }
@@ -180,13 +184,13 @@ class AgentLoop(
             val msgs = if (useFocused) {
                 // system + first user + last assistant turn only
                 history.take(2) + history.drop(2).takeLast(1) +
-                    ChatMessage("user", buildObserveMessage(goal, snap, step), shot)
+                    ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote), shot)
             } else {
                 // Keep history short for VL: system SHORT + last user observe only
                 listOf(
                     ChatMessage("system", SystemPrompt.SHORT),
                     ChatMessage("user", "目标：$goal"),
-                    ChatMessage("user", buildObserveMessage(goal, snap, step), shot)
+                    ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote), shot)
                 )
             }
             var resp = planWithTimeout(msgs, forceCloud = false)
@@ -280,6 +284,7 @@ class AgentLoop(
                 else -> {
                     val before = a11y.foregroundPackage()
                     val ok = execute(a11y, action, snap)
+                    steps.recordAction(action.toString())
                     onLog(if (ok) "执行成功" else "执行失败/部分失败")
                     if (action is AgentAction.Launch && ok) {
                         val fg = waitForeground(a11y, 3000) { it != before }
@@ -487,7 +492,7 @@ class AgentLoop(
         return false
     }
 
-    private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int): String {
+    private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int, diffNote: String? = null): String {
         // Prefer interactive-only dump for 2B VL latency
         val compact = try {
             AgentAccessibilityService.require()?.dumpInteractiveCompact() ?: snap
@@ -496,6 +501,7 @@ class AgentLoop(
             appendLine("/no_think")
             appendLine("步骤:$step 目标:$goal")
             appendLine("屏:${compact.screenWidth}x${compact.screenHeight} 包:${compact.packageName}")
+            diffNote?.let { appendLine(it) }
             appendLine("要点(可点/可输入):")
             appendLine(compact.compressedText.take(1600).ifBlank { "(空)" })
             appendLine("只输出一个 JSON action。发送前 ask_confirm。")
