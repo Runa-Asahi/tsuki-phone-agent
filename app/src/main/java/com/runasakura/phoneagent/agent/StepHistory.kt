@@ -13,6 +13,15 @@ class StepHistory(private val maxLabels: Int = 6) {
 
     val stuckCount: Int get() = sameNoChange
 
+    /** Stop threshold: no-change repeats needed before the loop gives up. */
+    val stuck: Boolean get() = sameNoChange >= STUCK_LIMIT
+
+    companion object {
+        const val STUCK_LIMIT = 4
+        private val LOADING = Regex("加载中|正在加载|载入中|请稍候|请稍等|正在刷新|刷新中|Loading|loading|努力加载|拼命加载")
+        fun isLoading(labels: Collection<String>) = labels.any { LOADING.containsMatchIn(it.trim()) && it.trim().length <= 12 }
+    }
+
     fun recordAction(desc: String) {
         val d = desc.take(80)
         lastAction = d
@@ -20,14 +29,19 @@ class StepHistory(private val maxLabels: Int = 6) {
     }
 
     /** Call once per observation; returns a note for the prompt (null on the first step). */
+    var isLoadingNow = false
+        private set
+
     fun observe(labels: List<String>): String? {
         val cur = labels.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        isLoadingNow = isLoading(cur)
         val p = prev; prev = cur
         val act = lastAction ?: return null
         lastAction = null
         if (p == null) return "上一步：$act"
         val added = (cur - p).take(maxLabels)
         val removed = (p - cur).take(maxLabels)
+        if (isLoading(cur)) return "上一步：$act → 页面加载中（不计入无效次数）"
         return if (added.isEmpty() && removed.isEmpty()) {
             val n = actions.size
             sameNoChange = if (n >= 2 && actions[n - 1] == actions[n - 2]) sameNoChange + 1 else 1

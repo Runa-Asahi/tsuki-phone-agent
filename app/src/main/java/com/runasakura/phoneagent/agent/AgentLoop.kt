@@ -154,7 +154,8 @@ class AgentLoop(
             onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
             val diffNote = steps.observe(sc.items.map { it.label })
             diffNote?.let { onLog(it) }
-            if (steps.stuckCount >= 3) return Result(false, step, "连续多次动作后界面无变化，已停止以免乱点")
+            if (steps.isLoadingNow) { onLog("页面加载中，额外等待"); delay(1500) }
+            if (steps.stuck) return Result(false, step, "连续多次动作后界面无变化，已停止以免乱点")
             if (sc.isEmpty() && !AppResolver.isAgentOrBrain(sc.pkg)) {
                 return Result(false, step, "读不到界面（无障碍树与 OCR 均为空），为避免盲猜不调用模型")
             }
