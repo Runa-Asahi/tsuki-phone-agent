@@ -67,7 +67,7 @@ class AgentPreferences(context: Context) {
 
         val DEFAULT_SENSITIVE = setOf(
             "com.eg.android.AlipayGphone",
-            "com.tencent.mm",
+            // WeChat: allow UI automation; send still needs confirm (SafetyGate)
             "com.unionpay",
             "cmb.pb",
             "com.chinamworld.main",

@@ -12,6 +12,8 @@ import com.runasakura.phoneagent.prefs.AgentPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 
@@ -65,6 +67,21 @@ class AgentLoop(
             }
         }
 
+        // Fast-path: WeChat open / message (no LLM for step-1 launch)
+        val msgGoal = MessagingGoals.parse(goal)
+        if (msgGoal != null) {
+            val wx = WeChatFastPath(a11y, onLog, onConfirm, isStopped)
+            val out = wx.run(msgGoal)
+            if (out.done) return Result(true, out.steps, out.summary)
+            if (out.summary == "用户取消发送") return Result(false, out.steps, out.summary)
+            onLog("微信快路径未完成：${out.summary}，改用短提示 LLM")
+            if (out.fallbackHint != null) {
+                history.clear()
+                history += ChatMessage("system", SystemPrompt.FOCUSED)
+                history += ChatMessage("user", "用户目标：$goal\n${out.fallbackHint}")
+            }
+        }
+
         var step = 0
         val max = prefs.maxSteps
         while (step < max) {
@@ -82,10 +99,38 @@ class AgentLoop(
                 return Result(true, step, "已在系统设置 (${snap.packageName})")
             }
 
-            onLog("请求本机 MNN（可能需数十秒）…")
+            // If messaging goal but still in our app, retry WeChat launch before LLM
+            if (msgGoal != null && snap.packageName.contains("runasakura.phoneagent")) {
+                onLog("仍在 Agent 前台，再次尝试启动微信（不调用 LLM）")
+                a11y.launchWeChat()
+                val fg = waitForeground(a11y, 3500) { a11y.isWeChatForeground(it) }
+                onLog("重试后前台=$fg")
+                if (a11y.isWeChatForeground(fg)) {
+                    step-- // redo step with WeChat UI
+                    continue
+                }
+            }
+
+            onLog("请求本机 MNN（2B 可能需数十秒，日志会心跳）…")
+            val useFocused = history.firstOrNull()?.content?.contains("只输出一个 JSON") == true ||
+                msgGoal != null
+            val sys = if (useFocused) SystemPrompt.FOCUSED else SystemPrompt.SHORT
+            val msgs = if (useFocused) {
+                listOf(
+                    ChatMessage("system", sys),
+                    ChatMessage("user", buildObserveMessage(goal, snap, step))
+                )
+            } else {
+                // Keep history short for VL: system SHORT + last user observe only
+                listOf(
+                    ChatMessage("system", SystemPrompt.SHORT),
+                    ChatMessage("user", "目标：$goal"),
+                    ChatMessage("user", buildObserveMessage(goal, snap, step))
+                )
+            }
             var resp = planWithTimeout(
-                history + ChatMessage("user", buildObserveMessage(goal, snap, step)),
-                forceCloud = snap.lowConfidence && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY
+                msgs,
+                forceCloud = false // local 2B; avoid cloud for phone GUI unless configured later
             )
             logLlm(resp)
 
@@ -203,15 +248,33 @@ class AgentLoop(
         messages: List<ChatMessage>,
         forceCloud: Boolean,
         temperature: Double = 0.2
-    ): LlmResponse {
-        val r = withTimeoutOrNull(STEP_TIMEOUT_MS) {
+    ): LlmResponse = coroutineScope {
+        onLog("MNN 请求已发出…")
+        val started = System.currentTimeMillis()
+        val deferred = async {
             router.plan(messages, forceCloud = forceCloud, temperature = temperature)
         }
-        if (r == null) {
-            onLog("本步 LLM 超时 ${STEP_TIMEOUT_MS / 1000}s，已取消请求（MNN 若仍在推理，可在 MNN Chat 重启 API 服务清队列）")
-            return LlmResponse("", "mnn_local", STEP_TIMEOUT_MS, "step timeout ${STEP_TIMEOUT_MS}ms")
+        val watcher = async {
+            var n = 0
+            while (!deferred.isCompleted) {
+                delay(10_000)
+                if (deferred.isCompleted) break
+                n++
+                onLog("MNN 仍在推理…已等待 ${n * 10}s（2B VL 可能较慢，可急停）")
+            }
         }
-        return r
+        val r = withTimeoutOrNull(STEP_TIMEOUT_MS) { deferred.await() }
+        watcher.cancel()
+        if (r == null) {
+            deferred.cancel()
+            onLog("本步 LLM 超时 ${STEP_TIMEOUT_MS / 1000}s，已取消请求（请在 MNN Chat 重启 API 清队列）")
+            return@coroutineScope LlmResponse(
+                "", "mnn_local", System.currentTimeMillis() - started,
+                "step timeout ${STEP_TIMEOUT_MS}ms"
+            )
+        }
+        onLog("MNN 响应返回 ${r.latencyMs}ms")
+        r
     }
 
     private suspend fun waitForeground(
@@ -312,16 +375,19 @@ class AgentLoop(
         } || snap.packageName.contains("settings", ignoreCase = true)
     }
 
-    private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int): String = buildString {
-        appendLine("当前步骤: $step")
-        appendLine("目标: $goal")
-        appendLine("屏幕: ${snap.screenWidth}x${snap.screenHeight}")
-        appendLine("前台包名: ${snap.packageName}")
-        appendLine("注意: 当前若在 com.runasakura.phoneagent* ，工具栏「设置」是 Agent 自己的设置页，不是系统设置。打开系统设置请用 launch + app=设置 或 package=com.android.settings。")
-        appendLine("节点树(压缩):")
-        // Trim huge trees for small models
-        appendLine(snap.compressedText.take(4500).ifBlank { "(空)" })
-        appendLine("请输出下一步 JSON action。")
+    private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int): String {
+        // Prefer interactive-only dump for 2B VL latency
+        val compact = try {
+            AgentAccessibilityService.require()?.dumpInteractiveCompact() ?: snap
+        } catch (_: Exception) { snap }
+        return buildString {
+            appendLine("/no_think")
+            appendLine("步骤:$step 目标:$goal")
+            appendLine("屏:${compact.screenWidth}x${compact.screenHeight} 包:${compact.packageName}")
+            appendLine("要点(可点/可输入):")
+            appendLine(compact.compressedText.take(1600).ifBlank { "(空)" })
+            appendLine("只输出一个 JSON action。发送前 ask_confirm。")
+        }
     }
 
     private fun execute(
@@ -340,17 +406,23 @@ class AgentLoop(
                                 }
                             ) {
                                 a11y.launchSystemSettings() || a11y.launchApp(action.packageName!!)
+                            } else if (action.packageName == AgentAccessibilityService.WECHAT_PACKAGE ||
+                                action.packageName!!.startsWith("com.tencent.mm")
+                            ) {
+                                a11y.launchWeChat() || a11y.launchApp(action.packageName!!)
                             } else {
                                 a11y.launchApp(action.packageName!!)
                             }
                         }
                         !action.appName.isNullOrBlank() -> {
-                            if (action.appName!!.contains("设置") ||
-                                action.appName!!.contains("settings", true)
-                            ) {
-                                a11y.launchSystemSettings() || a11y.launchByLabel(action.appName!!)
-                            } else {
-                                a11y.launchByLabel(action.appName!!)
+                            when {
+                                action.appName!!.contains("设置") ||
+                                    action.appName!!.contains("settings", true) ->
+                                    a11y.launchSystemSettings() || a11y.launchByLabel(action.appName!!)
+                                action.appName!!.contains("微信") ||
+                                    action.appName!!.equals("WeChat", true) ->
+                                    a11y.launchWeChat() || a11y.launchByLabel(action.appName!!)
+                                else -> a11y.launchByLabel(action.appName!!)
                             }
                         }
                         else -> a11y.launchSystemSettings()

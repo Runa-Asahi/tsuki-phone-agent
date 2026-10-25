@@ -23,11 +23,26 @@ class SafetyGate(private val prefs: AgentPreferences) {
         "send", "pay", "transfer", "delete", "uninstall", "purchase"
     )
 
+    private val sendButtonLabels = listOf("发送", "Send", "傳送", "发送(S)")
+
     private val otpKeywords = listOf("验证码", "短信验证", "动态码", "OTP", "verification code")
+
+    /** Packages that must never be auto-driven (payments). WeChat is NOT here. */
+    private val hardBlock = setOf(
+        "com.eg.android.AlipayGphone",
+        "com.unionpay",
+        "cmb.pb",
+        "com.chinamworld.main",
+        "com.android.bankabc",
+        "com.icbc",
+        "com.chinamworld.bocmbci"
+    )
 
     fun check(action: AgentAction, snapshot: UiSnapshot?, userGoal: String): SafetyResult {
         val pkg = snapshot?.packageName.orEmpty()
-        if (pkg.isNotBlank() && prefs.sensitivePackages.any { pkg.startsWith(it) || it == pkg }) {
+        val blocked = (prefs.sensitivePackages + hardBlock)
+            .filter { it != "com.tencent.mm" && !it.startsWith("com.tencent.mm") }
+        if (pkg.isNotBlank() && blocked.any { pkg.startsWith(it) || it == pkg }) {
             return SafetyResult(SafetyDecision.BLOCK_HUMAN, "敏感应用包名：$pkg，请人工操作")
         }
 
@@ -37,26 +52,29 @@ class SafetyGate(private val prefs: AgentPreferences) {
         }
 
         when (action) {
-            is AgentAction.AskConfirm -> return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, action.reason)
-            is AgentAction.HumanTakeover -> return SafetyResult(SafetyDecision.BLOCK_HUMAN, action.reason)
-            is AgentAction.Type -> {
-                val g = userGoal + action.text
-                if (confirmKeywords.any { g.contains(it, ignoreCase = true) } &&
-                    (userGoal.contains("发") || userGoal.contains("发送") || userGoal.contains("send", true))
-                ) {
-                    // typing alone ok; send confirmation handled by tap near send
+            is AgentAction.AskConfirm ->
+                return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, action.reason)
+            is AgentAction.HumanTakeover ->
+                return SafetyResult(SafetyDecision.BLOCK_HUMAN, action.reason)
+            is AgentAction.Tap -> {
+                val label = action.text.orEmpty()
+                if (isSendLike(label) || isSendLike(label) && userGoal.contains("发")) {
+                    return SafetyResult(
+                        SafetyDecision.REQUIRE_CONFIRM,
+                        "即将点击「发送」，确认后才会真正发出"
+                    )
                 }
-            }
-            is AgentAction.Tap, is AgentAction.LongPress -> {
-                val label = when (action) {
-                    is AgentAction.Tap -> action.text.orEmpty()
-                    else -> ""
-                }
-                val context = "$userGoal $label $tree".take(2000)
+                val context = "$userGoal $label $tree".take(1500)
                 if (confirmKeywords.any { context.contains(it, ignoreCase = true) } &&
-                    looksLikeCommit(context)
+                    looksLikeCommit(label.ifBlank { context })
                 ) {
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "疑似发送/支付/删除类操作，需确认")
+                }
+            }
+            is AgentAction.LongPress -> {
+                val context = "$userGoal $tree".take(1500)
+                if (looksLikeCommit(context)) {
+                    return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "疑似敏感长按，需确认")
                 }
             }
             else -> Unit
@@ -64,8 +82,11 @@ class SafetyGate(private val prefs: AgentPreferences) {
         return SafetyResult(SafetyDecision.ALLOW)
     }
 
+    fun isSendLike(label: String): Boolean =
+        sendButtonLabels.any { label.equals(it, true) || label.trim() == it }
+
     private fun looksLikeCommit(context: String): Boolean {
-        val triggers = listOf("发送", "付款", "支付", "转账", "删除", "卸载", "确认", "提交", "发布", "send", "pay")
+        val triggers = listOf("发送", "付款", "支付", "转账", "删除", "卸载", "提交", "发布", "send", "pay")
         return triggers.any { context.contains(it, ignoreCase = true) }
     }
 

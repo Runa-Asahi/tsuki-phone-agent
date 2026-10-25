@@ -97,6 +97,71 @@ class AgentAccessibilityService : AccessibilityService() {
         )
     }
 
+    /**
+     * Compact dump for small/VL models: only interactive / labeled nodes, hard char cap.
+     */
+    fun dumpInteractiveCompact(maxLines: Int = 40, maxChars: Int = 1800): UiSnapshot {
+        val full = dumpUiTree(maxNodes = 80)
+        val lines = full.compressedText.lineSequence()
+            .map { it.trimEnd() }
+            .filter { line ->
+                line.contains(" click") || line.contains(" edit") ||
+                    line.contains(" scroll") ||
+                    Regex("""\[[n\d]+\]\s+\S+""").containsMatchIn(line)
+            }
+            .filter { line ->
+                // drop pure layout chrome without label
+                val label = line.substringAfter("] ").substringBefore(" (")
+                label.isNotBlank() && label !in listOf(
+                    "FrameLayout", "LinearLayout", "ViewGroup", "View",
+                    "RelativeLayout", "ContentFrameLayout", "action_bar_root", "content"
+                )
+            }
+            .take(maxLines)
+            .toList()
+        val compact = lines.joinToString("\n").take(maxChars)
+        return full.copy(
+            compressedText = compact.ifBlank { full.compressedText.take(maxChars) },
+            nodeCount = lines.size
+        )
+    }
+
+    fun launchWeChat(): Boolean {
+        val pkg = WECHAT_PACKAGE
+        // Prefer launcher intent; retry by label
+        if (launchApp(pkg)) return true
+        if (launchByLabel("微信")) return true
+        if (launchByLabel("WeChat")) return true
+        return try {
+            val i = packageManager.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (i != null) {
+                startActivity(i)
+                true
+            } else false
+        } catch (e: Exception) {
+            Log.e(TAG, "launchWeChat failed", e)
+            false
+        }
+    }
+
+    fun isWeChatForeground(packageName: String = foregroundPackage()): Boolean =
+        packageName == WECHAT_PACKAGE || packageName.startsWith("$WECHAT_PACKAGE.")
+
+    fun findByContentDesc(desc: String): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow ?: return null
+        return findDesc(root, desc)
+    }
+
+    private fun findDesc(node: AccessibilityNodeInfo, desc: String): AccessibilityNodeInfo? {
+        val d = node.contentDescription?.toString().orEmpty()
+        if (d.contains(desc, ignoreCase = true)) return node
+        for (i in 0 until node.childCount) {
+            val c = node.getChild(i) ?: continue
+            findDesc(c, desc)?.let { return it }
+        }
+        return null
+    }
+
     private fun buildNode(
         node: AccessibilityNodeInfo,
         counter: IntArray,
@@ -482,6 +547,8 @@ class AgentAccessibilityService : AccessibilityService() {
         private const val TAG = "AgentA11y"
         const val ACTION_A11Y_STATE = "com.runasakura.phoneagent.A11Y_STATE"
         const val EXTRA_CONNECTED = "connected"
+
+        const val WECHAT_PACKAGE = "com.tencent.mm"
 
         val SETTINGS_PACKAGES = listOf(
             "com.android.settings",

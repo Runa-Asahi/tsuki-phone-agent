@@ -112,7 +112,7 @@ class LocalMnnClient(
 
     companion object {
         private const val TAG = "LocalMnnClient"
-        const val DEFAULT_MAX_TOKENS = 256
+        const val DEFAULT_MAX_TOKENS = 192
         private val JSON_TYPE = "application/json; charset=utf-8".toMediaType()
 
         fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
