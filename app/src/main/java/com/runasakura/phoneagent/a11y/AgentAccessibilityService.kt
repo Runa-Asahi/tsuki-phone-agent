@@ -695,6 +695,13 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        /** Enabled in system settings (may be rebinding even if no instance is attached yet). */
+        fun isEnabledInSettings(ctx: android.content.Context): Boolean = enabledIn(
+            try { android.provider.Settings.Secure.getString(ctx.contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) } catch (_: Exception) { null },
+            ctx.packageName
+        )
+        fun enabledIn(setting: String?, pkg: String): Boolean =
+            setting?.split(':')?.any { it.substringBefore('/').equals(pkg, true) } == true
         private const val TAG = "AgentA11y"
         const val ACTION_A11Y_STATE = "com.runasakura.phoneagent.A11Y_STATE"
         const val EXTRA_CONNECTED = "connected"

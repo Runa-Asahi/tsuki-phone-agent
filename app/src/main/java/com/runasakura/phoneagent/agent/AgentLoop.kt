@@ -33,7 +33,8 @@ class AgentLoop(
 
     suspend fun run(goal: String): Result {
         val a11y = AgentAccessibilityService.require()
-            ?: return Result(false, 0, "无障碍服务未开启")
+            ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { AgentAccessibilityService.require() } }
+            ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
         a11y.resetTaskState()
         val history = mutableListOf<ChatMessage>()
         history += ChatMessage("system", SystemPrompt.TEXT)
@@ -136,6 +137,11 @@ class AgentLoop(
             coroutineContext.ensureActive()
             if (isStopped()) return Result(false, step, "已急停")
 
+            if (AgentAccessibilityService.require() !== a11y) {
+                onLog("无障碍服务已断开/重启，等待重连…")
+                val again = com.runasakura.phoneagent.util.Await.nonNull(10_000) { AgentAccessibilityService.require() }
+                return Result(false, step, if (again == null) "无障碍服务已断开（10 秒未重连），任务停止" else "无障碍服务已重启，为安全起见停止本次任务，请重试")
+            }
             step++
             onLog("—— 步骤 $step/$max ——")
             val sc = dev.screen()
