@@ -60,6 +60,7 @@ class AgentForegroundService : Service() {
 
     private fun begin(goal: String) {
         com.runasakura.phoneagent.util.Diagnostics.reset(goal)
+        com.runasakura.phoneagent.util.TaskTiming.reset()
         if (com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() == null &&
             !com.runasakura.phoneagent.a11y.AgentAccessibilityService.isEnabledInSettings(this)) {
             log("无障碍服务未连接（更新 APK 后需在系统设置里重新打开本服务）")
@@ -142,6 +143,7 @@ class AgentForegroundService : Service() {
                 AgentLoop.Result(false, 0, if (e is OutOfMemoryError) "内存不足，已停止" else e.message ?: e.toString())
             }
             log("模型统计：${router.summary()}")
+            log("耗时分解：${com.runasakura.phoneagent.util.TaskTiming.summary()}")
             com.runasakura.phoneagent.util.Diagnostics.log("结果: success=${result.success} ${result.summary}")
             broadcastStatus(
                 if (result.success) "done" else "stopped",

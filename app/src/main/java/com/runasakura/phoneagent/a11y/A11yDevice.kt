@@ -1,5 +1,6 @@
 package com.runasakura.phoneagent.a11y
 
+import com.runasakura.phoneagent.util.TaskTiming
 import android.app.ActivityOptions
 import android.app.PendingIntent
 import android.content.Intent
@@ -133,7 +134,7 @@ class A11yDevice(
             return ocrCache
         }
         val (w, h) = s.screenSize()
-        val wait = 400 - (System.currentTimeMillis() - lastShotAt)
+        val wait = 340 - (System.currentTimeMillis() - lastShotAt)
         if (wait > 0) delay(wait)
         coroutineContext.ensureActive()
         val t0 = System.currentTimeMillis()
@@ -156,7 +157,7 @@ class A11yDevice(
         } else crop
         // Mild contrast stretch helps dark-mode WeChat (pure Kotlin, no ColorMatrix GPU needed)
         val ready = enhanceContrast(small)
-        val lines = try { OcrEngine.recognizeLines(ready, 0) } finally {
+        val lines = try { TaskTiming.time("OCR识别") { OcrEngine.recognizeLines(ready, 0) } } finally {
             // Free intermediates promptly (each full-res ARGB frame is ~14 MB on PPG-AN00).
             for (b in listOf(ready, small, crop)) if (b !== bmp && !b.isRecycled) b.recycle()
         }
@@ -224,9 +225,25 @@ class A11yDevice(
     }
 
     /** Settle (≤1.5s), then tree (poll ≤3s, ≤0.6s for known-blind apps), else OCR. */
+    private var lastScreen: Screen? = null
+    private var lastScreenEvent = -1L
+    private var lastScreenGen = -1
+    private var lastScreenAt = 0L
+
     override suspend fun screen(): Screen {
         coroutineContext.ensureActive()
-        s.awaitSettle()
+        // Fast path: no action and no UI event since the last read → same screen; skip settle + re-read.
+        lastScreen?.let { ls ->
+            if (lastScreenGen == actionGen && lastScreenEvent == s.lastEventAt &&
+                System.currentTimeMillis() - lastScreenAt < 3000) { TaskTiming.count("读屏复用"); return ls }
+        }
+        val r = TaskTiming.time("读屏") { screenFresh() }
+        lastScreen = r; lastScreenEvent = s.lastEventAt; lastScreenGen = actionGen; lastScreenAt = System.currentTimeMillis()
+        return r
+    }
+
+    private suspend fun screenFresh(): Screen {
+        TaskTiming.time("等待界面稳定") { s.awaitSettle(300, 1200) }
         val start = System.currentTimeMillis()
         var t = treeScreen()
         val budget = if (t.pkg in blindPkgs) 0L else 1500L
@@ -324,18 +341,20 @@ class A11yDevice(
 
     override suspend fun home() { invalidateOcr("home"); s.home(); delay(150) }
 
-    override suspend fun afterAction(maxMs: Long) {
+    override suspend fun afterAction(maxMs: Long) = TaskTiming.time("动作后等待") { afterActionInner(maxMs) }
+
+    private suspend fun afterActionInner(maxMs: Long) {
         val t0 = System.currentTimeMillis()
         // wait for the first UI event caused by the action…
         while (s.lastEventAt < t0 && System.currentTimeMillis() - t0 < maxMs) delay(50)
         // …then for ~300ms of quiet (bounded by the remaining budget)
         val left = (maxMs - (System.currentTimeMillis() - t0)).coerceAtLeast(150)
-        s.awaitSettle(300, left)
+        s.awaitSettle(250, left)
     }
 
     override suspend fun back() { invalidateOcr("back"); s.back(); delay(150) }
 
-    override suspend fun sleep(ms: Long) = delay(ms)
+    override suspend fun sleep(ms: Long) { lastScreen = null; delay(ms) }
     override suspend fun invalidateObservation() { invalidateOcr("external") }
 
     override suspend fun scroll(forward: Boolean) {

@@ -207,7 +207,11 @@ class SubgoalExecutor(
             it.cy < s.h * 0.18 && it.cx > s.w * 0.75 && it.tap &&
                 SearchEntry.isSearchWord(it.label) && !SearchEntry.isCameraOnly(it.label)
         }
+        // Keyboard 「搜索」 key (OCR-visible on PPG-AN00 as 「搜索」/「搜素」), only inside the IME area.
+        val imeKey = if (submit == null) s.imeTop?.let { top -> s.items.filter { it.cy > top && it.cx > s.w * 0.6 &&
+            SearchEntry.isImeSubmit(it.label) }.maxByOrNull { it.cy } } else null
         if (submit != null) { d.tap(submit); d.afterAction(1500) }
+        else if (imeKey != null) { onLog("点击键盘「${imeKey.label}」键提交"); d.tap(imeKey); d.afterAction(1500) }
         else d.afterAction(800)
         s = d.screen()
         val qn = Text.norm(q)

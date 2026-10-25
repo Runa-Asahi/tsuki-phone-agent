@@ -159,7 +159,7 @@ class AgentAccessibilityService : AccessibilityService() {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < maxMs) {
             if (System.currentTimeMillis() - lastEventAt >= quietMs) return
-            kotlinx.coroutines.delay(100)
+            kotlinx.coroutines.delay(50)
         }
     }
 

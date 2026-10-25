@@ -29,6 +29,7 @@ class LlmRouter(
 
     private fun record(b: String, r: LlmResponse, msgs: List<ChatMessage>) {
         val s = stats.getOrPut(b) { LongArray(5) }
+        com.runasakura.phoneagent.util.TaskTiming.add("模型(" + b + ")", r.latencyMs)
         s[0]++; if (r.error == null && r.content.isNotBlank()) s[1]++; s[2] += r.latencyMs
         s[3] += msgs.sumOf { approxTokens(it.content) }.toLong(); s[4] += approxTokens(r.content).toLong()
     }

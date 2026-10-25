@@ -9,6 +9,12 @@ import com.runasakura.phoneagent.screen.ScreenItem
  * hot-query placeholder ("泡面 拍照搜索") rather than the literal word 「搜索」.
  */
 object SearchEntry {
+    /** IME action key labels: 搜索 (incl. OCR 「搜素」, 「123 搜素」 merges), 前往, Go, Search. */
+    fun isImeSubmit(label: String): Boolean {
+        val n = com.runasakura.phoneagent.flow.Text.norm(label).lowercase()
+        return n in setOf("搜索", "搜素", "前往", "go", "search", "确定") || n.endsWith("搜索") || n.endsWith("搜素")
+    }
+
     private val SEARCH_WORDS = listOf("搜索", "搜一搜", "search", "查找", "searchbox", "search_box")
     private val CAMERA_ONLY = listOf("拍照搜索", "扫一扫", "扫码", "相机搜索", "拍照")
     private val NOT_ENTRY = listOf("首页", "消息", "购物车", "我的", "个人中心", "推荐", "发现", "分类")
