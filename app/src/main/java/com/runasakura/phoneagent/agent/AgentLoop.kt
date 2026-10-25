@@ -67,22 +67,50 @@ class AgentLoop(
             }
         }
 
-        // Fast-path: WeChat open / message (no LLM for step-1 launch)
+        // Fast-path: messaging (微信/QQ, 给/向/跟/对 X 发送/说 Y)
         val msgGoal = MessagingGoals.parse(goal)
+        var targetPkg: String? = null
         if (msgGoal != null) {
-            val wx = WeChatFastPath(a11y, onLog, onConfirm, isStopped)
-            val out = wx.run(msgGoal)
+            targetPkg = msgGoal.packageName
+            val out = WeChatFastPath(a11y, onLog, onConfirm, isStopped).run(msgGoal)
             if (out.done) return Result(true, out.steps, out.summary)
             if (out.summary == "用户取消发送") return Result(false, out.steps, out.summary)
-            onLog("微信快路径未完成：${out.summary}，改用短提示 LLM")
-            if (out.fallbackHint != null) {
+            if (out.fallbackHint == null) return Result(false, out.steps, out.summary)
+            onLog("快路径未完成：${out.summary}，改用短提示 LLM")
+            history.clear()
+            history += ChatMessage("system", SystemPrompt.FOCUSED)
+            history += ChatMessage("user", "用户目标：$goal\n${out.fallbackHint}")
+        } else if (subTarget == null) {
+            // Generic: 打开/启动/进入 <任意已安装 App>[并…]
+            val appName = AppResolver.extractAppName(goal)
+            if (appName != null) {
+                val match = AppResolver.resolve(a11y, appName)
+                if (match == null) {
+                    onLog("未在已安装应用中找到「$appName」")
+                    return Result(false, 0, "未找到应用「$appName」")
+                }
+                onLog("匹配应用：${match.label} (${match.packageName}) score=${match.score}")
+                targetPkg = match.packageName
+                var fg = ""
+                for (attempt in 1..2) {
+                    a11y.launchPackage(match.packageName, match.label)
+                    fg = waitForeground(a11y, 3500) { it == match.packageName }
+                    if (fg == match.packageName) break
+                    onLog("第${attempt}次启动后前台=$fg，重试")
+                }
+                onLog("前台=$fg")
+                if (fg != match.packageName) return Result(false, 1, "无法把「${match.label}」带到前台（$fg）")
+                val remaining = AppResolver.remainingGoal(goal, appName)
+                if (remaining == null) return Result(true, 1, "已打开${match.label}")
+                onLog("剩余子目标：$remaining")
                 history.clear()
                 history += ChatMessage("system", SystemPrompt.FOCUSED)
-                history += ChatMessage("user", "用户目标：$goal\n${out.fallbackHint}")
+                history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$remaining")
             }
         }
 
         var step = 0
+        var refocus = 0
         val max = prefs.maxSteps
         while (step < max) {
             coroutineContext.ensureActive()
@@ -99,27 +127,28 @@ class AgentLoop(
                 return Result(true, step, "已在系统设置 (${snap.packageName})")
             }
 
-            // If messaging goal but still in our app, retry WeChat launch before LLM
-            if (msgGoal != null && snap.packageName.contains("runasakura.phoneagent")) {
-                onLog("仍在 Agent 前台，再次尝试启动微信（不调用 LLM）")
-                a11y.launchWeChat()
-                val fg = waitForeground(a11y, 3500) { a11y.isWeChatForeground(it) }
-                onLog("重试后前台=$fg")
-                if (a11y.isWeChatForeground(fg)) {
-                    step-- // redo step with WeChat UI
-                    continue
-                }
+            // Never let the model see the Agent's / MNN Chat's own UI
+            val tp = targetPkg
+            if (tp != null && snap.packageName != tp) {
+                if (++refocus > 3) return Result(false, step, "多次无法回到目标应用 $tp")
+                onLog("前台(${snap.packageName})不是目标应用，重新启动 $tp（不调用模型）")
+                a11y.launchPackage(tp)
+                val fg = waitForeground(a11y, 3500) { it == tp }
+                if (fg != tp) return Result(false, step, "目标应用无法到前台（$fg）")
+                step--; continue
+            }
+            if (tp == null && AppResolver.isAgentOrBrain(snap.packageName)) {
+                if (++refocus > 3) return Result(false, step, "无法离开 Agent/MNN 界面")
+                onLog("前台是 Agent/MNN 自身，先回桌面再观察")
+                a11y.home(); delay(800)
+                step--; continue
             }
 
             onLog("请求本机 MNN（2B 可能需数十秒，日志会心跳）…")
-            val useFocused = history.firstOrNull()?.content?.contains("只输出一个 JSON") == true ||
-                msgGoal != null
+            val useFocused = history.firstOrNull()?.content == SystemPrompt.FOCUSED
             val sys = if (useFocused) SystemPrompt.FOCUSED else SystemPrompt.SHORT
             val msgs = if (useFocused) {
-                listOf(
-                    ChatMessage("system", sys),
-                    ChatMessage("user", buildObserveMessage(goal, snap, step))
-                )
+                history + ChatMessage("user", buildObserveMessage(goal, snap, step))
             } else {
                 // Keep history short for VL: system SHORT + last user observe only
                 listOf(
@@ -286,7 +315,7 @@ class AgentLoop(
         var fg = a11y.foregroundPackage()
         while (System.currentTimeMillis() < deadline) {
             fg = a11y.foregroundPackage()
-            if (pred(fg) && !fg.contains("runasakura.phoneagent")) return fg
+            if (pred(fg) && !AppResolver.isAgentOrBrain(fg)) return fg
             delay(200)
         }
         return fg

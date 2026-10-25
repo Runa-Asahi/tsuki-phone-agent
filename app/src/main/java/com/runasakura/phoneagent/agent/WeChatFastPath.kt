@@ -24,17 +24,19 @@ class WeChatFastPath(
     )
 
     suspend fun run(goal: MessagingGoal): Outcome {
-        onLog("快路径：启动微信 com.tencent.mm")
-        var launched = a11y.launchWeChat()
+        pkg = goal.packageName
+        val appLabel = goal.app
+        onLog("快路径：启动$appLabel $pkg")
+        var launched = a11y.launchPackage(pkg, appLabel)
         var fg = waitWeChat(3500)
-        if (!a11y.isWeChatForeground(fg)) {
-            onLog("微信未到前台($fg)，重试启动")
-            launched = a11y.launchWeChat() || a11y.launchByLabel("微信")
+        if (!isTarget(fg)) {
+            onLog("$appLabel 未到前台($fg)，重试启动")
+            launched = a11y.launchPackage(pkg, appLabel)
             fg = waitWeChat(4000)
         }
         onLog("前台=$fg launched=$launched")
-        if (!a11y.isWeChatForeground(fg)) {
-            return Outcome(false, 1, "无法打开微信", "请用 launch package=com.tencent.mm")
+        if (!isTarget(fg)) {
+            return Outcome(false, 1, "无法打开$appLabel（未安装或被拦截）", null)
         }
         if (goal.openOnly || goal.contact.isNullOrBlank()) {
             return Outcome(true, 1, "已打开微信 ($fg)")
@@ -63,7 +65,7 @@ class WeChatFastPath(
         }
         delay(400)
 
-        val reason = "即将向微信联系人「$contact」发送：「$message」\n确认后才会点击发送；取消则停止。"
+        val reason = "即将向${goal.app}联系人「$contact」发送：「$message」\n确认后才会点击发送；取消则停止。"
         onLog("安全闸：等待确认发送")
         val ok = onConfirm(reason)
         if (!ok) {
@@ -79,13 +81,16 @@ class WeChatFastPath(
         return Outcome(true, 5, "已向「$contact」发送「$message」")
     }
 
+    private var pkg: String = MessagingGoals.WECHAT
+    private fun isTarget(fg: String) = fg == pkg || fg.startsWith("$pkg:")
+
     private suspend fun waitWeChat(timeoutMs: Long): String {
         val deadline = System.currentTimeMillis() + timeoutMs
         var fg = a11y.foregroundPackage()
         while (System.currentTimeMillis() < deadline) {
             if (isStopped()) break
             fg = a11y.foregroundPackage()
-            if (a11y.isWeChatForeground(fg)) return fg
+            if (isTarget(fg)) return fg
             delay(200)
         }
         return fg

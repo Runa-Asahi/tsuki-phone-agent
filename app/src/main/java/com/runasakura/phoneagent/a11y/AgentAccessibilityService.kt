@@ -126,6 +126,21 @@ class AgentAccessibilityService : AccessibilityService() {
         )
     }
 
+    /** Generic launch of any installed app by package (MagicOS-friendly NEW_TASK + label fallback). */
+    fun launchPackage(pkg: String, label: String? = null): Boolean {
+        val i = packageManager.getLaunchIntentForPackage(pkg)
+        if (i != null) {
+            try {
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                startActivity(i)
+                return true
+            } catch (e: Exception) {
+                Log.w(TAG, "launchPackage $pkg failed: ${e.message}")
+            }
+        }
+        return label != null && launchByLabel(label)
+    }
+
     fun launchWeChat(): Boolean {
         val pkg = WECHAT_PACKAGE
         // Prefer launcher intent; retry by label

@@ -1,53 +1,37 @@
 package com.runasakura.phoneagent.agent
 
-/**
- * Parse WeChat / messaging natural-language goals.
- * Examples:
- *  - 打开微信
- *  - 打开微信给李四风发送你好
- *  - 给李四风发微信说你好
- */
+/** Parsed messaging goal. [app] = "微信" | "QQ" | null (unknown → WeChat default). */
 data class MessagingGoal(
     val openOnly: Boolean,
     val contact: String?,
     val message: String?,
-    val appHint: String = "微信"
-)
+    val app: String = "微信"
+) {
+    val packageName: String get() = if (app.equals("QQ", true)) MessagingGoals.QQ else MessagingGoals.WECHAT
+}
 
 object MessagingGoals {
+    const val WECHAT = "com.tencent.mm"
+    const val QQ = "com.tencent.mobileqq"
+
+    // [打开/用][微信|QQ][，]{给|向|跟|对}X{发送|发消息说|发消息|发|说}[：:]Y
+    private val FULL = Regex(
+        "^(?:请)?(?:帮我)?(?:打开|用|在|去)?\\s*(微信|WeChat|QQ|qq)?\\s*(?:里|上)?[，,、\\s]*(?:并|然后)?\\s*" +
+            "(?:给|向|跟|对)(.+?)(?:发送消息|发消息说|发消息|发送|发微信说|发微信|发QQ说|发QQ|发|说)[：:，,\\s]*(.+)$",
+        RegexOption.IGNORE_CASE
+    )
+
     fun parse(goal: String): MessagingGoal? {
         val g = goal.trim()
-        if (g.isEmpty()) return null
-
-        // 打开微信给X发送Y / 打开微信给X发Y
-        Regex("^打开微信给(.+?)发送(.+)$").find(g)?.let {
-            return MessagingGoal(false, it.groupValues[1].trim(), it.groupValues[2].trim())
-        }
-        Regex("^打开微信给(.+?)发(.+)$").find(g)?.let {
-            return MessagingGoal(false, it.groupValues[1].trim(), it.groupValues[2].trim())
-        }
-        Regex("^打开微信[，,、\\s]*给(.+?)[发送发](.+)$").find(g)?.let {
-            return MessagingGoal(false, it.groupValues[1].trim(), it.groupValues[2].trim())
-        }
-        // 给X发微信说Y / 给X发送微信Y
-        Regex("^给(.+?)发微信说(.+)$").find(g)?.let {
-            return MessagingGoal(false, it.groupValues[1].trim(), it.groupValues[2].trim())
-        }
-        Regex("^给(.+?)发微信[发送发](.+)$").find(g)?.let {
-            return MessagingGoal(false, it.groupValues[1].trim(), it.groupValues[2].trim())
-        }
-        Regex("^用微信给(.+?)发送(.+)$").find(g)?.let {
-            return MessagingGoal(false, it.groupValues[1].trim(), it.groupValues[2].trim())
-        }
-        Regex("^微信给(.+?)发(.+)$").find(g)?.let {
-            return MessagingGoal(false, it.groupValues[1].trim(), it.groupValues[2].trim())
-        }
-
-        if (g == "打开微信" || g == "打开WeChat" || g.equals("open wechat", true)) {
-            return MessagingGoal(true, null, null)
-        }
-        if (g.startsWith("打开微信") && !g.contains("给") && !g.contains("发")) {
-            return MessagingGoal(true, null, null)
+        FULL.find(g)?.let { m ->
+            val appRaw = m.groupValues[1]
+            val app = when {
+                appRaw.equals("QQ", true) || g.contains("QQ", true) -> "QQ"
+                else -> "微信"
+            }
+            val contact = m.groupValues[2].trim().removeSuffix("发")
+            val msg = m.groupValues[3].trim()
+            if (contact.isNotBlank() && msg.isNotBlank()) return MessagingGoal(false, contact, msg, app)
         }
         return null
     }
