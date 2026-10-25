@@ -30,7 +30,9 @@ class SubgoalExecutor(
             Status.FAILED -> {
                 // Wrong-page detection: a failed step that left the app we were in → go back.
                 val now = d.screen()
-                if (before.pkg.isNotEmpty() && now.pkg != before.pkg && sub !is Subgoal.Home) {
+                val rec = recoveryDecision(before, now, sub)
+                if (rec == Recovery.SKIP_LOW_CONFIDENCE) onLog("前台包名仅来自 OCR/低置信度（${now.pkg}），不自动返回")
+                if (rec == Recovery.BACK) {
                     onLog("失败后跑到了 ${now.pkg}，尝试回到 ${before.pkg}")
                     backUntil(ScreenSig.of(before))
                 }
@@ -38,6 +40,17 @@ class SubgoalExecutor(
             else -> Unit
         }
         return r
+    }
+
+    enum class Recovery { NONE, BACK, SKIP_LOW_CONFIDENCE }
+
+    companion object {
+        /** After a failed subgoal: go back only if we provably left the app (both observations from the a11y tree). */
+        fun recoveryDecision(before: Screen, now: Screen, sub: Subgoal): Recovery = when {
+            before.pkg.isEmpty() || now.pkg == before.pkg || sub is Subgoal.Home -> Recovery.NONE
+            before.source != "tree" || now.source != "tree" -> Recovery.SKIP_LOW_CONFIDENCE
+            else -> Recovery.BACK
+        }
     }
 
     private suspend fun undo(): Status {
