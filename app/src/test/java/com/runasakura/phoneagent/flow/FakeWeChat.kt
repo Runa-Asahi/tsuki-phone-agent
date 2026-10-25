@@ -7,7 +7,7 @@ import com.runasakura.phoneagent.screen.ScreenItem
  * [resultRows] = search result rows (section headers included) shown after typing.
  * [chatTitleFor] maps tapped result label → title of the chat that opens (to simulate wrong chat).
  */
-class FakeWeChat(
+open class FakeWeChat(
     var state: String = "main",
     val resultRows: List<String> = listOf("联系人", "王小明2", "王小明", "王小"),
     val chatTitleFor: (String) -> String = { it },
@@ -74,7 +74,8 @@ class FakeWeChat(
     private fun item(label: String, cx: Int, cy: Int, edit: Boolean = false) =
         ScreenItem("", label, cx, cy, true, edit, false, label)
 
-    override suspend fun screen(): Screen {
+    override suspend fun screen(): Screen = rawScreen()
+    open suspend fun rawScreen(): Screen {
         if (state == "main" && scrolls > 0 && loadingObservations > 0) {
             loadingObservations--
             return Screen(pkg, 1264, 2800, listOf(item("加载中", 632, 1400)), "tree")

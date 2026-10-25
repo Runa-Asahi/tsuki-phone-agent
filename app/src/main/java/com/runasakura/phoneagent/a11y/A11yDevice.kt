@@ -168,17 +168,12 @@ class A11yDevice(
             com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * inv).toInt(), (it.t * inv).toInt() + off,
                 (it.r * inv).toInt(), (it.b * inv).toInt() + off)
         }
-        // Near-native detail passes on title bar + bottom area (panel / sheets / input bar / IME keys).
-        val detail = LinkedHashMap<Pair<Int, Int>, List<com.runasakura.phoneagent.ocr.OcrLine>>()
-        for (band in com.runasakura.phoneagent.ocr.OcrBands.detailBands(top, bottom)) {
-            coroutineContext.ensureActive()
-            detail[band] = ocrRegion(bmp, band.first, band.second) ?: emptyList()
-        }
-        bmp.recycle()
-        val merged = com.runasakura.phoneagent.ocr.OcrBands.merge(globalBmp, detail)
+        // Detail bands are NOT run here (speed): flows call refineScreen() only when a key target is missing.
+        keepShot(bmp, globalBmp, top, bottom, pkg)
+        val detail = emptyMap<Pair<Int, Int>, List<com.runasakura.phoneagent.ocr.OcrLine>>()
         val sx = w.toFloat() / bw
         val sy = h.toFloat() / bh
-        val scaled = merged.map {
+        val scaled = globalBmp.map {
             com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * sx).toInt(), (it.t * sy).toInt(), (it.r * sx).toInt(), (it.b * sy).toInt())
         }
         val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
@@ -186,9 +181,50 @@ class A11yDevice(
             scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore
         )
         val ms = System.currentTimeMillis() - t0
-        log("OCR ${ms}ms（截图${bw}x${bh}→全局${swd}x${sht}+细节区${detail.size}个）文字=${items.size}")
+        log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}）文字=${items.size}")
         val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
         ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg; ocrCacheGen = actionGen
+        return out
+    }
+
+    // Last screenshot kept (one frame) so refineScreen() can re-OCR bands without a new capture.
+    private var shotBmp: android.graphics.Bitmap? = null
+    private var shotLines: List<com.runasakura.phoneagent.ocr.OcrLine> = emptyList()
+    private var shotTop = 0; private var shotBottom = 0; private var shotPkg = ""
+    private var shotGen = -1; private var shotEvent = -1L
+    private var refined: Screen? = null
+
+    private fun keepShot(bmp: android.graphics.Bitmap, lines: List<com.runasakura.phoneagent.ocr.OcrLine>, top: Int, bottom: Int, pkg: String) {
+        shotBmp?.let { if (it !== bmp && !it.isRecycled) it.recycle() }
+        shotBmp = bmp; shotLines = lines; shotTop = top; shotBottom = bottom; shotPkg = pkg
+        shotGen = actionGen; shotEvent = s.lastEventAt; refined = null
+    }
+
+    /**
+     * Near-native re-OCR of the title bar + bottom area of the CURRENT frame, merged into the global pass.
+     * Only called by flows when a key target (call entry, sheet option, 发送, +, tabs…) was not found.
+     */
+    override suspend fun refineScreen(): Screen {
+        val cur = screen()
+        if (cur.source != "ocr") return cur
+        refined?.let { if (shotGen == actionGen && shotEvent == s.lastEventAt) return it }
+        val bmp = shotBmp
+        if (bmp == null || bmp.isRecycled || shotGen != actionGen || shotEvent != s.lastEventAt) return cur
+        val t0 = System.currentTimeMillis()
+        val detail = LinkedHashMap<Pair<Int, Int>, List<com.runasakura.phoneagent.ocr.OcrLine>>()
+        for (band in com.runasakura.phoneagent.ocr.OcrBands.detailBands(shotTop, shotBottom)) {
+            coroutineContext.ensureActive()
+            detail[band] = ocrRegion(bmp, band.first, band.second) ?: emptyList()
+        }
+        val merged = com.runasakura.phoneagent.ocr.OcrBands.merge(shotLines, detail)
+        val (w, h) = s.screenSize()
+        val sx = w.toFloat() / bmp.width; val sy = h.toFloat() / bmp.height
+        val scaled = merged.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * sx).toInt(), (it.t * sy).toInt(), (it.r * sx).toInt(), (it.b * sy).toInt()) }
+        val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
+        val items = com.runasakura.phoneagent.ocr.OcrPost.process(scaled, (shotTop * sy).toInt(), (shotBottom * sy).toInt() + 1, ignore)
+        log("OCR 细节区重识别 ${System.currentTimeMillis() - t0}ms 文字=${items.size}")
+        val out = Screen(shotPkg, w, h, items, "ocr", imeTop())
+        refined = out; ocrCache = out; lastScreen = out
         return out
     }
 

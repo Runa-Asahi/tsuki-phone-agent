@@ -20,6 +20,8 @@ data class Screen(
 /** Abstraction over the phone so flows are unit-testable on the JVM. */
 interface Device {
     suspend fun screen(): Screen
+    /** Same screen with key regions re-OCR'd at higher resolution (no-op for tree / fakes). */
+    suspend fun refineScreen(): Screen = screen()
     suspend fun tap(item: ScreenItem): Boolean
     suspend fun tapXY(x: Int, y: Int): Boolean
     suspend fun longPress(item: ScreenItem): Boolean

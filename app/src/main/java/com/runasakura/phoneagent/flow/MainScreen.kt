@@ -18,7 +18,9 @@ object MainScreen {
                 val hit = b == k ||
                     (b.startsWith(k) && BADGE.matches(b.removePrefix(k))) ||
                     // merged row: only trust containment when ≥2 tab names share the label
-                    (b.length > k.length && b.contains(k) && app.mainTabs.count { o -> o != tab && b.contains(Text.nameKey(o)) } >= 1)
+                    (b.length > k.length && b.contains(k) && app.mainTabs.count { o -> o != tab && b.contains(Text.nameKey(o)) } >= 1) ||
+                    // OCR misread of a single tab label (「通讯彔」「发視」), badge stripped; 1-char tabs stay exact
+                    (k.length >= 2 && KeyMatch.isKey(b.replace(Regex("\\(?\\d{1,3}\\)?\\+?$"), ""), tab, allowContains = false))
                 if (hit) { seen += tab; break }
             }
         }

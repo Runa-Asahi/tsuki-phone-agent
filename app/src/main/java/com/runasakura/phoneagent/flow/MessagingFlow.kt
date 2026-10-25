@@ -111,7 +111,8 @@ class MessagingFlow(
             bar = InputVerify.barY(s, hy)
             dump("输入后${attempt + 1}", s)
             val v = InputCheck.judge(d.fieldText(), message)
-            val sb = findSend(s)
+            var sb = findSend(s)
+            if (sb == null && s.source == "ocr") { s = d.refineScreen(); sb = findSend(s) }
             when (v) {
                 InputCheck.Verdict.EXACT -> {
                     log("✓ 输入框内容（输入法通道读取）=「$message」")
@@ -209,13 +210,16 @@ class MessagingFlow(
         var waits = 0
         val maxBacks = 4
         for (i in 0 until 12) {
-            val s = d.screen()
+            var s = d.screen()
             if (s.source == "none" && s.pkg == app.pkg) log("界面读取为空（树与 OCR 均无文字）")
             if (s.pkg != app.pkg) {
                 if (relaunches++ >= 3) return false
                 log("前台=${s.pkg}，将${app.label}带到前台（第${relaunches}次）")
                 d.bringToFront(app.pkg, app.label, force = relaunches > 1); d.afterAction(1500)
                 backs = 0; continue
+            }
+            if (!isMain(s) && s.source == "ocr" && s.pkg == app.pkg) {
+                val r = d.refineScreen(); if (isMain(r)) s = r
             }
             if (isMain(s)) {
                 tapChatTab(s)
@@ -397,6 +401,7 @@ class MessagingFlow(
             }
             d.afterAction(900); s = d.screen()
         }
+        if (findCallEntry(s) == null) s = d.refineScreen()
         dump("更多面板", s)
         val entry = findCallEntry(s)
         if (entry != null) { log("通话入口：「${entry.label}」"); d.tap(entry) } else {
@@ -406,6 +411,7 @@ class MessagingFlow(
             d.tapXY(gx, gy)
         }
         d.afterAction(900); s = d.screen()
+        if (findCallOption(s, video) == null) s = d.refineScreen()
         dump("通话类型", s)
         val opt = findCallOption(s, video)
             ?: return fail("未找到「$kind」选项，未拨打").also { d.back() }
