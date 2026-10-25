@@ -17,7 +17,7 @@ class ConfirmActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val msg = intent.getStringExtra(EXTRA_MSG).orEmpty()
-        AlertDialog.Builder(this)
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
             .setTitle(R.string.confirm_title)
             .setMessage(msg)
             .setCancelable(false)

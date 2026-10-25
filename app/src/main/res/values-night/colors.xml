@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#FF141218</color>
+    <color name="card_bg">#FF211F26</color>
+    <color name="text_primary">#FFE6E0E9</color>
+    <color name="text_secondary">#FFCAC4D0</color>
+    <color name="log_bg">#FF1D1B20</color>
+    <color name="log_text">#FFE6E0E9</color>
+    <color name="ok_green">#FF81C784</color>
+    <color name="warn_amber">#FFFFCC80</color>
+    <color name="err_red">#FFEF9A9A</color>
+    <color name="step_accent">#FFD0BCFF</color>
+    <color name="purple_500">#FFD0BCFF</color>
+    <color name="purple_700">#FF381E72</color>
+</resources>

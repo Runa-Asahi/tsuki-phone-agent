@@ -7,5 +7,13 @@
     <color name="white">#FFFFFFFF</color>
     <color name="stop_red">#C62828</color>
     <color name="bg">#FFF7F2FA</color>
-    <color name="log_bg">#FF1C1B1F</color>
+    <color name="card_bg">#FFFFFFFF</color>
+    <color name="text_primary">#FF1C1B1F</color>
+    <color name="text_secondary">#FF625B71</color>
+    <color name="log_bg">#FFF3EDF7</color>
+    <color name="log_text">#FF1C1B1F</color>
+    <color name="ok_green">#FF2E7D32</color>
+    <color name="warn_amber">#FFB26A00</color>
+    <color name="err_red">#FFC62828</color>
+    <color name="step_accent">#FF6750A4</color>
 </resources>

@@ -1,149 +1,146 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:orientation="vertical"
+    android:background="@color/bg"
+    android:fitsSystemWindows="true">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="@color/purple_500"
         app:title="@string/app_name"
-        app:titleTextColor="@color/white"
-        app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        app:subtitle="本机 MNN · 无障碍 · 离线 OCR"
+        app:titleTextColor="@color/text_primary"
+        app:subtitleTextColor="@color/text_secondary" />
 
-    <TextView
-        android:id="@+id/a11yStatus"
-        android:layout_width="0dp"
+    <!-- Status cards -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="12dp"
-        android:text="@string/a11y_off"
-        app:layout_constraintTop_toBottomOf="@id/toolbar"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
-
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
+        android:orientation="horizontal"
         android:paddingStart="12dp"
-        android:paddingEnd="12dp"
-        android:text="@string/status_idle"
-        app:layout_constraintTop_toBottomOf="@id/a11yStatus"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent" />
+        android:paddingEnd="12dp">
 
-    <com.google.android.material.textfield.TextInputLayout
-        android:id="@+id/goalLayout"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_margin="12dp"
-        app:layout_constraintTop_toBottomOf="@id/statusText"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardA11y" style="@style/StatusCard"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="无障碍" />
+                <TextView android:id="@+id/a11yStatus" style="@style/StatusValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="检测中…" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/goalInput"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/goal_hint"
-            android:minLines="2"
-            android:inputType="textMultiLine" />
-    </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardMnn" style="@style/StatusCard"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:layout_marginStart="6dp" android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MNN 模型" />
+                <TextView android:id="@+id/mnnStatus" style="@style/StatusValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:text="检测中…" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-    <LinearLayout
-        android:id="@+id/btnRow"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        app:layout_constraintTop_toBottomOf="@id/goalLayout"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnStart"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/btn_start" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnStop"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="@string/btn_stop" />
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardOcr" style="@style/StatusCard"
+            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:layout_marginStart="6dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="OCR" />
+                <TextView android:id="@+id/ocrStatus" style="@style/StatusValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="离线中文" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 
-    <LinearLayout
-        android:id="@+id/btnRow2"
-        android:layout_width="0dp"
+    <!-- Task card -->
+    <com.google.android.material.card.MaterialCardView
+        style="@style/StatusCard"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        app:layout_constraintTop_toBottomOf="@id/btnRow"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
+        android:layout_margin="12dp">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView style="@style/StatusTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="任务" />
+                <com.google.android.material.chip.Chip
+                    android:id="@+id/statusText"
+                    style="@style/Widget.Material3.Chip.Assist"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:clickable="false" android:text="@string/status_idle" />
+            </LinearLayout>
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/goalLayout"
+                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                app:endIconMode="clear_text">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/goalInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/goal_hint"
+                    android:minLines="2"
+                    android:maxLines="4"
+                    android:inputType="textMultiLine" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none">
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/exampleChips"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    app:singleLine="true" />
+            </HorizontalScrollView>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="4dp">
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnStart"
+                    android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="2"
+                    android:text="@string/btn_start" app:icon="@android:drawable/ic_media_play" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnStop"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:textColor="@color/err_red" app:strokeColor="@color/err_red"
+                    android:text="@string/btn_stop" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnOpenA11y"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/btn_a11y" />
+    <!-- Tools -->
+    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="12dp" android:paddingEnd="12dp" android:scrollbars="none">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnSelfTest" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="自检" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnExport" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="导出诊断日志" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenA11y" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="@string/btn_a11y" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnOverlay" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/btn_overlay" />
+        </LinearLayout>
+    </HorizontalScrollView>
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnOverlay"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/btn_overlay" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnExport"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="导出诊断日志" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSelfTest"
-            style="@style/Widget.MaterialComponents.Button.TextButton"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="自检" />
-    </LinearLayout>
-
-    <ScrollView
-        android:id="@+id/scrollLog"
-        android:layout_width="0dp"
+    <!-- Step log -->
+    <com.google.android.material.card.MaterialCardView
+        style="@style/StatusCard"
+        android:layout_width="match_parent"
         android:layout_height="0dp"
+        android:layout_weight="1"
         android:layout_margin="12dp"
-        android:background="@color/log_bg"
-        android:padding="8dp"
-        app:layout_constraintTop_toBottomOf="@id/btnRow2"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintEnd_toEndOf="parent">
-
-        <TextView
-            android:id="@+id/logView"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/teal_200"
-            android:textSize="12sp"
-            android:typeface="monospace"
-            android:textIsSelectable="true" />
-    </ScrollView>
-</androidx.constraintlayout.widget.ConstraintLayout>
+        app:cardBackgroundColor="@color/log_bg">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView style="@style/StatusTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="执行日志" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearLog" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="36dp" android:text="清空" />
+            </LinearLayout>
+            <ScrollView android:id="@+id/scrollLog" android:layout_width="match_parent" android:layout_height="match_parent">
+                <TextView
+                    android:id="@+id/logView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/log_text"
+                    android:textSize="13sp"
+                    android:lineSpacingExtra="3dp"
+                    android:textIsSelectable="true" />
+            </ScrollView>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+</LinearLayout>

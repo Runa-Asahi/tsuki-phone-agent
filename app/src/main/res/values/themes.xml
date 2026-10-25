@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.HonorPhoneAgent" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+    <style name="Theme.HonorPhoneAgent" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorPrimaryVariant">@color/purple_700</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSecondary">@color/teal_200</item>
-        <item name="android:statusBarColor">@color/purple_700</item>
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:statusBarColor">@color/bg</item>
+        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
     </style>
     <style name="Theme.HonorPhoneAgent.Translucent" parent="Theme.HonorPhoneAgent">
         <item name="android:windowIsTranslucent">true</item>
@@ -13,4 +13,11 @@
         <item name="android:windowNoTitle">true</item>
         <item name="android:backgroundDimEnabled">true</item>
     </style>
+    <style name="StatusCard" parent="Widget.Material3.CardView.Filled">
+        <item name="cardBackgroundColor">@color/card_bg</item>
+        <item name="cardCornerRadius">16dp</item>
+        <item name="contentPadding">12dp</item>
+    </style>
+    <style name="StatusTitle"><item name="android:textSize">12sp</item><item name="android:textColor">@color/text_secondary</item></style>
+    <style name="StatusValue"><item name="android:textSize">14sp</item><item name="android:textStyle">bold</item><item name="android:textColor">@color/text_primary</item><item name="android:layout_marginTop">4dp</item></style>
 </resources>

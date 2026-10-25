@@ -233,6 +233,7 @@ class AgentForegroundService : Service() {
     }
 
     private fun broadcastStatus(type: String, message: String) {
+        when (type) { "running" -> running = true; "done", "stopped" -> running = false }
         sendBroadcast(
             Intent(ACTION_STATUS)
                 .setPackage(packageName)
@@ -242,6 +243,7 @@ class AgentForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
         stopFlag.set(true)
         job?.cancel()
         scope.cancel()
@@ -250,6 +252,8 @@ class AgentForegroundService : Service() {
     }
 
     companion object {
+        @Volatile private var running = false
+        fun isRunning() = running
         const val TASK_TIMEOUT_MS = 8 * 60_000L
         private const val TAG = "AgentFgs"
         const val NOTIF_ID = 42
