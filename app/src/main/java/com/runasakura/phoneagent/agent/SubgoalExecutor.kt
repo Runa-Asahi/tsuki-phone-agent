@@ -60,12 +60,19 @@ class SubgoalExecutor(
         else { onLog("✗ 返回后未能确认回到上一步界面"); Status.FAILED }
     }
 
-    /** Press back (≤3) until the screen resembles [target]. */
+    /** Press back (≤2) until the screen resembles [target]. */
     private suspend fun backUntil(target: ScreenSig): Boolean {
-        if (ScreenSig.similar(ScreenSig.of(d.screen()), target)) return true
-        repeat(3) {
+        var cur = ScreenSig.of(d.screen())
+        if (ScreenSig.similar(cur, target)) return true
+        val startPkg = cur.pkg
+        repeat(2) {
             d.back(); d.afterAction(1200)
-            if (ScreenSig.similar(ScreenSig.of(d.screen()), target)) return true
+            val next = ScreenSig.of(d.screen())
+            if (ScreenSig.similar(next, target)) return true
+            // Overshoot guard: left both the start app and the target app → stop pressing back.
+            if (next.pkg != target.pkg && next.pkg != startPkg) { onLog("返回后离开了目标应用（${next.pkg}），停止返回"); return false }
+            if (next == cur) { onLog("返回无效果，停止"); return false }
+            cur = next
         }
         return false
     }
