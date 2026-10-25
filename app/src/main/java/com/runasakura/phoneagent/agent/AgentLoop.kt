@@ -439,6 +439,7 @@ class AgentLoop(
         for ((i, sg) in subs.withIndex()) {
             coroutineContext.ensureActive()
             if (isStopped()) return Result(false, i, "已急停") to null
+            PermissionDialog.dismissIfPresent(dev, onLog)
             when (exec.run(sg)) {
                 SubgoalExecutor.Status.OK -> Unit
                 SubgoalExecutor.Status.CANCELLED -> return Result(false, i, "用户取消发送") to null

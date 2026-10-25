@@ -147,10 +147,16 @@ class A11yDevice(
         } else crop
         // Mild contrast stretch helps dark-mode WeChat (pure Kotlin, no ColorMatrix GPU needed)
         val ready = enhanceContrast(small)
-        val lines = OcrEngine.recognizeLines(ready, 0) ?: return null
+        val lines = try { OcrEngine.recognizeLines(ready, 0) } finally {
+            // Free intermediates promptly (each full-res ARGB frame is ~14 MB on PPG-AN00).
+            for (b in listOf(ready, small, crop)) if (b !== bmp && !b.isRecycled) b.recycle()
+        }
+        val bw = bmp.width; val bh = bmp.height; val swd = small.width; val sht = small.height
+        bmp.recycle()
+        if (lines == null) return null
         // Map OCR pixels → screen: first undo scaleDown, then undo crop offset, then bmp→screen
-        val sx = w.toFloat() / bmp.width
-        val sy = h.toFloat() / bmp.height
+        val sx = w.toFloat() / bw
+        val sy = h.toFloat() / bh
         val inv = if (scaleDown < 0.99f) 1f / scaleDown else 1f
         val scaled = lines.map {
             val l = ((it.l * inv)).toInt()
@@ -164,7 +170,7 @@ class A11yDevice(
             scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore
         )
         val ms = System.currentTimeMillis() - t0
-        log("OCR ${ms}ms（截图${bmp.width}x${bmp.height}→识别${small.width}x${small.height}）文字=${items.size}")
+        log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}）文字=${items.size}")
         val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
         ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg; ocrCacheGen = actionGen
         return out

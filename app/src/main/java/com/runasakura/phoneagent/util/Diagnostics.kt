@@ -21,8 +21,12 @@ object Diagnostics {
 
     @Synchronized fun log(msg: String) {
         if (lines.size > 3000) lines.subList(0, 500).clear()
-        lines += "${fmt.format(Date())} $msg"
+        lines += "${fmt.format(Date())} ${clip(msg)}"
     }
+
+    /** Per-line cap so model dumps can't blow the export past a few MB (3000 × 2000 chars max). */
+    fun clip(msg: String, max: Int = 2000): String =
+        if (msg.length <= max) msg else msg.take(max) + "…(+${msg.length - max} 字)"
 
     @Synchronized fun observe(pkg: String, source: String, texts: Int) {
         if (source.startsWith("ocr")) ocrCount++ else treeCount++

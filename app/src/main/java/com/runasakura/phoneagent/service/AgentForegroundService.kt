@@ -31,7 +31,8 @@ import kotlin.coroutines.coroutineContext
 
 class AgentForegroundService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Log.e(TAG, "uncaught in agent scope", e); com.runasakura.phoneagent.util.Diagnostics.log("未捕获异常：$e") })
     private var job: Job? = null
     private val stopFlag = AtomicBoolean(false)
     private val starting = AtomicBoolean(false)
@@ -131,9 +132,9 @@ class AgentForegroundService : Service() {
                     ?: AgentLoop.Result(false, 0, "任务超时（${TASK_TIMEOUT_MS / 60000} 分钟），已停止")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 AgentLoop.Result(false, 0, "已取消")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "loop error", e)
-                AgentLoop.Result(false, 0, e.message ?: "error")
+                AgentLoop.Result(false, 0, if (e is OutOfMemoryError) "内存不足，已停止" else e.message ?: e.toString())
             }
             com.runasakura.phoneagent.util.Diagnostics.log("结果: success=${result.success} ${result.summary}")
             broadcastStatus(

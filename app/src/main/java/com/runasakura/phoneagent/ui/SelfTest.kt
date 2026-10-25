@@ -39,6 +39,7 @@ class SelfTest(private val ctx: Context, private val progress: (String) -> Unit)
                 val ms = System.currentTimeMillis() - t0
                 add("端侧 OCR（ML Kit 中文，离线）", !lines.isNullOrEmpty(),
                     if (lines == null) "失败/超时" else "识别 ${lines.size} 行，${ms}ms，例：${lines.take(3).joinToString("、") { it.text }}")
+                bmp.recycle()
             }
         }
         val (mnnOk, mnnDetail) = withContext(Dispatchers.IO) { probeMnn() }
