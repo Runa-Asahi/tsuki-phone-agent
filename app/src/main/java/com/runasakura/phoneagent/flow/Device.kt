@@ -34,8 +34,10 @@ interface Device {
     suspend fun afterAction(maxMs: Long = 1500)
     /** Scroll content: forward = reveal content further down. */
     suspend fun scroll(forward: Boolean = true)
-    suspend fun bringToFront(pkg: String, label: String): Boolean
+    suspend fun bringToFront(pkg: String, label: String, force: Boolean = false): Boolean
     suspend fun sleep(ms: Long)
+    /** Drop any cached observation (call after overlays that didn't emit a11y events). */
+    suspend fun invalidateObservation()
 }
 
 object Text {

@@ -18,7 +18,6 @@ import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import com.runasakura.phoneagent.model.UiNode
 import com.runasakura.phoneagent.model.UiSnapshot
 import com.runasakura.phoneagent.screen.RawNode
 import com.runasakura.phoneagent.screen.ScreenItem
@@ -180,7 +179,13 @@ class AgentAccessibilityService : AccessibilityService() {
         val main = Handler(Looper.getMainLooper())
         val wm = getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
         var view: android.view.View? = null
+        val answered = AtomicBoolean(false)
         fun remove() { view?.let { v -> main.post { try { wm.removeView(v) } catch (_: Exception) {} } }; view = null }
+        fun finish(ok: Boolean?) {
+            if (!answered.compareAndSet(false, true)) return
+            remove()
+            if (cont.isActive) cont.resume(ok) {}
+        }
         main.post {
             try {
                 val d = resources.displayMetrics.density
@@ -203,7 +208,7 @@ class AgentAccessibilityService : AccessibilityService() {
                 val row = android.widget.LinearLayout(this).apply { gravity = android.view.Gravity.END }
                 fun btn(label: Int, ok: Boolean) = android.widget.Button(this).apply {
                     text = getString(label)
-                    setOnClickListener { remove(); if (cont.isActive) cont.resume(ok) {} }
+                    setOnClickListener { finish(ok) }
                 }
                 row.addView(btn(com.runasakura.phoneagent.R.string.confirm_no, false))
                 row.addView(btn(com.runasakura.phoneagent.R.string.confirm_yes, true))
@@ -220,10 +225,10 @@ class AgentAccessibilityService : AccessibilityService() {
                 view = box
             } catch (e: Exception) {
                 Log.w(TAG, "confirm overlay failed: ${e.message}")
-                if (cont.isActive) cont.resume(null) {}
+                finish(null)
             }
         }
-        cont.invokeOnCancellation { remove() }
+        cont.invokeOnCancellation { answered.set(true); remove() }
     }
 
     /** Self-test helper: can we add/remove an accessibility overlay window? */
@@ -352,58 +357,6 @@ class AgentAccessibilityService : AccessibilityService() {
         return null
     }
 
-    private fun buildNode(
-        node: AccessibilityNodeInfo,
-        counter: IntArray,
-        maxNodes: Int,
-        depth: Int
-    ): UiNode? {
-        if (counter[0] >= maxNodes || depth > 18) return null
-        val id = "n${counter[0]}"
-        counter[0]++
-        val bounds = Rect()
-        node.getBoundsInScreen(bounds)
-        val children = mutableListOf<UiNode>()
-        for (i in 0 until node.childCount) {
-            if (counter[0] >= maxNodes) break
-            val child = node.getChild(i) ?: continue
-            try {
-                buildNode(child, counter, maxNodes, depth + 1)?.let { children.add(it) }
-            } finally {
-                // child recycled by framework on newer APIs; avoid double recycle
-            }
-        }
-        return UiNode(
-            id = id,
-            text = node.text?.toString().orEmpty().take(80),
-            contentDesc = node.contentDescription?.toString().orEmpty().take(80),
-            className = node.className?.toString()?.substringAfterLast('.').orEmpty(),
-            viewId = node.viewIdResourceName.orEmpty().substringAfterLast('/'),
-            bounds = "${bounds.left},${bounds.top},${bounds.right},${bounds.bottom}",
-            clickable = node.isClickable,
-            editable = node.isEditable,
-            scrollable = node.isScrollable,
-            checked = if (node.isCheckable) node.isChecked else null,
-            children = children
-        )
-    }
-
-    private fun flatten(node: UiNode?, sb: StringBuilder, depth: Int) {
-        if (node == null) return
-        val indent = "  ".repeat(depth)
-        val label = listOf(node.text, node.contentDesc, node.viewId)
-            .firstOrNull { it.isNotBlank() } ?: node.className
-        val flags = buildString {
-            if (node.clickable) append(" click")
-            if (node.editable) append(" edit")
-            if (node.scrollable) append(" scroll")
-            node.checked?.let { append(if (it) " checked" else " unchecked") }
-        }
-        sb.append(indent).append("[").append(node.id).append("] ")
-            .append(label).append(" (").append(node.bounds).append(")")
-            .append(flags).append('\n')
-        node.children.forEach { flatten(it, sb, depth + 1) }
-    }
 
     fun findNodeById(id: String): AccessibilityNodeInfo? {
         if (id.startsWith("e")) {

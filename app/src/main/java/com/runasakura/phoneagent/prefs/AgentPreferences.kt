@@ -20,7 +20,7 @@ class AgentPreferences(context: Context) {
         set(v) = sp.edit().putString(KEY_MNN_MODEL, v).apply()
 
     var routeMode: String
-        get() = sp.getString(KEY_ROUTE, ROUTE_HYBRID) ?: ROUTE_HYBRID
+        get() = sp.getString(KEY_ROUTE, ROUTE_LOCAL_ONLY) ?: ROUTE_LOCAL_ONLY
         set(v) = sp.edit().putString(KEY_ROUTE, v).apply()
 
     var cloudBaseUrl: String

@@ -31,9 +31,9 @@ class SettingsActivity : AppCompatActivity() {
         binding.cloudShot.isChecked = prefs.allowCloudScreenshot
 
         val modes = listOf(
-            AgentPreferences.ROUTE_HYBRID,
+            AgentPreferences.ROUTE_LOCAL_ONLY,
             AgentPreferences.ROUTE_LOCAL_FIRST,
-            AgentPreferences.ROUTE_LOCAL_ONLY
+            AgentPreferences.ROUTE_HYBRID
         )
         binding.routeMode.adapter = ArrayAdapter(
             this, android.R.layout.simple_spinner_dropdown_item, modes

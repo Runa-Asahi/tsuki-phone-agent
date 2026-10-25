@@ -39,6 +39,17 @@ class A11yDevice(
     private var ocrCache: Screen? = null
     private var ocrCacheEventAt = -1L
     private var ocrCachePkg = ""
+    /** Bumped on every mutating action so OCR cache cannot outlive a gesture WeChat didn't emit events for. */
+    private var actionGen = 0
+    private var ocrCacheGen = -1
+
+    private fun invalidateOcr(reason: String = "") {
+        if (ocrCache != null) {
+            ocrCache = null; ocrCacheGen = -1
+            if (reason.isNotBlank()) Log.d(TAG, "OCR cache invalidated: $reason")
+        }
+        actionGen++
+    }
 
     // ---------- observation ----------
 
@@ -106,7 +117,9 @@ class A11yDevice(
 
     private suspend fun ocrScreen(pkg: String): Screen? {
         // Reuse OCR until a new accessibility event (UI change) arrives
-        if (ocrCache != null && ocrCachePkg == pkg && ocrCacheEventAt == s.lastEventAt) {
+        if (ocrCache != null && ocrCachePkg == pkg &&
+            ocrCacheEventAt == s.lastEventAt && ocrCacheGen == actionGen
+        ) {
             log("OCR 缓存命中（界面未变）")
             return ocrCache
         }
@@ -153,7 +166,7 @@ class A11yDevice(
         val ms = System.currentTimeMillis() - t0
         log("OCR ${ms}ms（截图${bmp.width}x${bmp.height}→识别${small.width}x${small.height}）文字=${items.size}")
         val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
-        ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg
+        ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg; ocrCacheGen = actionGen
         return out
     }
 
@@ -230,6 +243,7 @@ class A11yDevice(
     }
 
     override suspend fun tap(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
+        invalidateOcr("tap")
         coroutineContext.ensureActive()
         val n = item.ref as? AccessibilityNodeInfo
         val (x, y) = avoidOverlay(item.cx, item.cy)
@@ -238,11 +252,13 @@ class A11yDevice(
     }
 
     override suspend fun tapXY(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
+        invalidateOcr("tapXY")
         coroutineContext.ensureActive()
         val (ax, ay) = avoidOverlay(x, y); s.tap(ax, ay)
     }
 
     override suspend fun type(text: String, hintX: Int?, hintY: Int?, attempt: Int): Boolean {
+        invalidateOcr("type")
         coroutineContext.ensureActive()
         var node = s.focusedInput()
         if (node == null && hintX != null && hintY != null) {
@@ -269,7 +285,7 @@ class A11yDevice(
         }
     }
 
-    override suspend fun home() { s.home(); delay(150) }
+    override suspend fun home() { invalidateOcr("home"); s.home(); delay(150) }
 
     override suspend fun afterAction(maxMs: Long) {
         val t0 = System.currentTimeMillis()
@@ -280,11 +296,13 @@ class A11yDevice(
         s.awaitSettle(300, left)
     }
 
-    override suspend fun back() { s.back(); delay(150) }
+    override suspend fun back() { invalidateOcr("back"); s.back(); delay(150) }
 
     override suspend fun sleep(ms: Long) = delay(ms)
+    override suspend fun invalidateObservation() { invalidateOcr("external") }
 
     override suspend fun scroll(forward: Boolean) {
+        invalidateOcr("scroll")
         val (w, h) = s.screenSize()
         // stay well away from the bottom gesture-navigation strip and the top status bar
         val a = (h * 0.70).toInt(); val b = (h * 0.30).toInt()
@@ -302,15 +320,22 @@ class A11yDevice(
     }
 
     /** Always brings [pkg] to front (even if running in background), verifying via windows. */
-    override suspend fun bringToFront(pkg: String, label: String): Boolean {
-        if (foregroundPackage() == pkg) return true
+    override suspend fun bringToFront(pkg: String, label: String, force: Boolean): Boolean {
+        invalidateOcr("bringToFront")
+        if (!force && foregroundPackage() == pkg) {
+            log("已在前台：$pkg")
+            return true
+        }
+        if (force) log("强制重新打开 $label（重置任务栈）")
         val pm = s.packageManager
         val launch = pm.getLaunchIntentForPackage(pkg)
         if (launch == null) { log("未安装或无启动入口：$pkg"); }
         // 1) launcher intent, bring existing task forward
         launch?.let {
             try {
-                s.startActivity(Intent(it).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED))
+                var flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                if (force) flags = flags or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                s.startActivity(Intent(it).addFlags(flags))
                 if (waitFg(pkg, 3500)) { log("启动方式：Intent"); return true }
             } catch (e: Exception) { Log.w(TAG, "start intent: ${e.message}") }
         }

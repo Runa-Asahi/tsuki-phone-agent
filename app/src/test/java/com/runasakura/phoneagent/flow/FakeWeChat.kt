@@ -20,7 +20,9 @@ class FakeWeChat(
     val resultTapWorks: Boolean = true,
     /** type() attempts that silently do nothing (simulates WeChat ignoring SET_TEXT). */
     val silentTypeAttempts: Set<Int> = emptySet(),
-    var voiceMode: Boolean = false
+    var voiceMode: Boolean = false,
+    /** Extra search-result pages revealed by scroll (pagination). */
+    var extraResultPages: List<List<String>> = emptyList()
 ) : Device {
     val W = 1264; val H = 2800
     val taps = mutableListOf<String>()
@@ -54,7 +56,8 @@ class FakeWeChat(
                 items += item(searchText.ifBlank { "搜索" }, 560, 200, edit = source == "tree")
                 items += item("取消", 1180, 200)
                 if (searchText.isNotBlank()) {
-                    resultRows.forEachIndexed { i, r -> items += item(r, 500, 380 + i * 200) }
+                    val rows = currentSearchRows()
+                    rows.forEachIndexed { i, r -> items += item(r, 500, 380 + i * 200) }
                     imeTop = 1700
                     keyboardCandidates.forEach { items += item(it, 300, 1760) }
                 }
@@ -97,8 +100,8 @@ class FakeWeChat(
             state == "main" && y in 120..280 && x > 1000 -> { state = "search"; searchText = "" }
             state == "main" && label in listRows -> { state = "chat:" + chatTitleFor(label); inputText = "" }
             state == "search" && label == "取消" -> state = "main"
-            state == "search" && label in resultRows && !resultTapWorks -> Unit
-            state == "search" && label in resultRows -> { state = "chat:" + chatTitleFor(label); inputText = "" }
+            state == "search" && label in currentSearchRows() && !resultTapWorks -> Unit
+            state == "search" && label in currentSearchRows() -> { state = "chat:" + chatTitleFor(label); inputText = ""; resultPage = 0 }
             state.startsWith("chat:") && label == "发送" -> { sent += state to inputText; inputText = "" }
             state.startsWith("chat:") && voiceMode && (x < 150 || label.contains("键盘")) -> { voiceMode = false }
         }
@@ -132,9 +135,16 @@ class FakeWeChat(
         }
     }
 
-    override suspend fun bringToFront(pkg: String, label: String): Boolean { launches++; state = "main"; return true }
+    var forceLaunches = 0
+    private var resultPage = 0
+    private fun currentSearchRows(): List<String> =
+        if (resultPage == 0) resultRows else extraResultPages.getOrNull(resultPage - 1).orEmpty()
+    override suspend fun bringToFront(pkg: String, label: String, force: Boolean): Boolean {
+        launches++; if (force) forceLaunches++; state = "main"; return true
+    }
+    override suspend fun invalidateObservation() {}
     var scrolls = 0
-    override suspend fun scroll(forward: Boolean) { scrolls++ }
+    override suspend fun scroll(forward: Boolean) { scrolls++; if (state == "search" && forward) resultPage++ }
     override suspend fun sleep(ms: Long) {}
     override suspend fun home() { state = "home" }
     override suspend fun afterAction(maxMs: Long) {}

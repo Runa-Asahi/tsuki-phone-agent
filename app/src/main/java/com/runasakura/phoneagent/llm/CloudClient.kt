@@ -42,7 +42,20 @@ class CloudClient(
                     put("max_tokens", 256)
                     put("messages", JSONArray().apply {
                         messages.forEach { m ->
-                            put(JSONObject().put("role", m.role).put("content", m.content))
+                            val img = m.imageBase64
+                            if (img != null) {
+                                val parts = JSONArray()
+                                    .put(JSONObject().put("type", "text").put("text", m.content))
+                                    .put(
+                                        JSONObject().put("type", "image_url").put(
+                                            "image_url",
+                                            JSONObject().put("url", "data:image/jpeg;base64,$img")
+                                        )
+                                    )
+                                put(JSONObject().put("role", m.role).put("content", parts))
+                            } else {
+                                put(JSONObject().put("role", m.role).put("content", m.content))
+                            }
                         }
                     })
                 }

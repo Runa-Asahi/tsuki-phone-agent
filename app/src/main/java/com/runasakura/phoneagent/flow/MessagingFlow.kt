@@ -113,8 +113,9 @@ class MessagingFlow(
             log("用户取消发送")
             return Outcome(false, "用户取消发送", cancelled = true)
         }
-        // re-check we are still in the same chat (the confirm dialog briefly covers the app)
-        d.sleep(800)
+        // Confirm overlay may not emit app a11y events — drop OCR cache before re-reading
+        d.invalidateObservation()
+        d.sleep(500)
         s = d.screen()
         if (s.pkg != app.pkg) {
             log("确认框关闭后前台=${s.pkg}，回到${app.label}")
@@ -149,20 +150,31 @@ class MessagingFlow(
 
     private suspend fun ensureMain(): Boolean {
         var relaunches = 0
-        for (i in 0 until 7) {
+        var backs = 0
+        val maxBacks = 5
+        for (i in 0 until 10) {
             val s = d.screen()
             if (s.source == "none" && s.pkg == app.pkg) log("界面读取为空（树与 OCR 均无文字）")
             if (s.pkg != app.pkg) {
-                if (relaunches++ >= 2) return false
-                log("前台=${s.pkg}，将${app.label}带到前台")
-                d.bringToFront(app.pkg, app.label); d.afterAction(1500); continue
+                if (relaunches++ >= 3) return false
+                log("前台=${s.pkg}，将${app.label}带到前台（第${relaunches}次）")
+                // force=true: even if package briefly matches, reset task to root
+                d.bringToFront(app.pkg, app.label, force = relaunches > 1); d.afterAction(1500)
+                backs = 0; continue
             }
             if (isMain(s)) {
                 s.items.firstOrNull { it.cy > s.h * 0.85 && Text.eq(it.label, app.chatTab) }?.let { d.tap(it); d.afterAction(800) }
                 log("✓ 已在${app.label}主界面")
                 return true
             }
-            log("不在主界面，返回一步")
+            if (backs >= maxBacks) {
+                if (relaunches++ >= 3) return false
+                log("连续返回 ${maxBacks} 次仍非主界面，强制重新打开${app.label}")
+                d.bringToFront(app.pkg, app.label, force = true); d.afterAction(1500)
+                backs = 0; continue
+            }
+            backs++
+            log("不在主界面，返回一步（$backs/$maxBacks）")
             d.back(); d.afterAction(1200)
         }
         return false
@@ -207,16 +219,33 @@ class MessagingFlow(
         d.afterAction(1200)
         s = d.screen()
         val barBottom = maxOf(cancel?.cy ?: 0, searchEdit?.cy ?: 0, (s.h * 0.08).toInt()) + (s.h * 0.025).toInt()
-        val (hits0, sections) = exactMatchesWithSections(s, contact, top = barBottom, excludeSections = true)
-        val hits = InputVerify.preferContactSection(hits0, sections)
-        if (hits.size == 1 && hits0.size > 1) log("同名多项中优先选择「${sections[hits[0]] ?: "联系人"}」分区的「$contact」")
-        return when (hits.size) {
-            0 -> {
-                val near = s.items.filter { it.cy > barBottom && it.label.contains(contact) }.take(4).joinToString("、") { it.label }
-                "搜索结果中没有与「$contact」完全一致的联系人" + (if (near.isNotBlank()) "（相近：$near）" else "") + "，为安全起见未点击，请提供准确备注名"
+        var page = 0
+        while (true) {
+            val (hits0, sections) = exactMatchesWithSections(s, contact, top = barBottom, excludeSections = true)
+            val hits = InputVerify.preferContactSection(hits0, sections)
+            if (hits.size == 1 && hits0.size > 1) log("同名多项中优先选择「${sections[hits[0]] ?: "联系人"}」分区的「$contact」")
+            when {
+                hits.size == 1 -> {
+                    log("✓ 唯一精确匹配：${hits[0].label}")
+                    d.tap(hits[0]); d.afterAction(2000)
+                    val after = d.screen()
+                    if (after.items.any { it.cy < after.h * 0.15 && Text.eq(it.label, "取消") }) {
+                        return "点击了「${hits[0].label}」但仍停在搜索页，未进入聊天"
+                    }
+                    return null
+                }
+                hits.size > 1 ->
+                    return "搜索结果中有 ${hits.size} 个同名「$contact」，无法确定是哪一位，已停止，请改用唯一备注名"
+                page < SearchScroll.MAX_PAGES -> {
+                    page++
+                    log("当前页无精确匹配，搜索结果上滑第 ${page}/${SearchScroll.MAX_PAGES} 页")
+                    d.scroll(true); d.afterAction(1200); s = d.screen()
+                }
+                else -> {
+                    val near = s.items.filter { it.cy > barBottom && it.label.contains(contact) }.take(4).joinToString("、") { it.label }
+                    return "搜索结果中没有与「$contact」完全一致的联系人" + (if (near.isNotBlank()) "（相近：$near）" else "") + "，为安全起见未点击，请提供准确备注名"
+                }
             }
-            1 -> { log("✓ 唯一精确匹配：${hits[0].label}"); d.tap(hits[0]); d.afterAction(2000); null }
-            else -> "搜索结果中有 ${hits.size} 个同名「$contact」，无法确定是哪一位，已停止，请改用唯一备注名"
         }
     }
 
@@ -246,13 +275,10 @@ class MessagingFlow(
 
     fun titleMatches(s: Screen, contact: String): Boolean {
         if (s.pkg != app.pkg) return false
-        val c = Text.norm(contact)
-        val groupRe = Regex("^" + Regex.escape(c) + "\\(\\d+\\)$")
         // Still on the search page (search box holds the same text) is NOT a chat
         if (s.items.any { it.cy < s.h * 0.12 && (it.edit || Text.eq(it.label, "取消")) }) return false
-        return s.items.any {
-            it.cy < s.h * 0.12 && !it.edit && Text.norm(it.label).let { n -> n == c || groupRe.matches(n) }
-        }
+        val titles = s.items.filter { it.cy < s.h * 0.14 && !it.edit }.map { it.label }
+        return TitleMatch.findMatching(titles, contact) != null
     }
 
     fun findSend(s: Screen): ScreenItem? = s.items

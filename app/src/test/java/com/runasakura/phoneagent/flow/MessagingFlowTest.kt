@@ -104,7 +104,7 @@ class MessagingFlowTest {
         val d = FakeWeChat(resultTapWorks = false)
         val r = flow(d).run("王小明", "你好")
         assertFalse(r.ok)
-        assertTrue(r.summary, r.summary.contains("标题"))
+        assertTrue(r.summary, r.summary.contains("标题") || r.summary.contains("搜索页"))
         assertTrue(d.typed.none { it == "你好" })
     }
 

@@ -9,6 +9,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.runasakura.phoneagent.PhoneAgentApp
+import com.runasakura.phoneagent.prefs.AgentPreferences
 import com.runasakura.phoneagent.R
 import com.runasakura.phoneagent.agent.AgentLoop
 import com.runasakura.phoneagent.agent.SafetyGate
@@ -93,9 +94,12 @@ class AgentForegroundService : Service() {
         overlay = EmergencyStopOverlay(overlayCtx) { requestStop() }.also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
-        val cloud = if (prefs.cloudBaseUrl.isNotBlank()) {
+        val cloud = if (prefs.cloudBaseUrl.isNotBlank() && prefs.cloudApiKey.isNotBlank()) {
             CloudClient(prefs.cloudBaseUrl, prefs.cloudApiKey, prefs.cloudModel)
         } else null
+        if (prefs.routeMode == AgentPreferences.ROUTE_HYBRID && cloud == null) {
+            log("路由=hybrid 但未配置云端，实际等同 local_only")
+        }
         val router = LlmRouter(prefs, local, cloud)
         val loop = AgentLoop(
             prefs = prefs,

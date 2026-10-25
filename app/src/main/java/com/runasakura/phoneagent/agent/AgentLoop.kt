@@ -189,12 +189,19 @@ class AgentLoop(
                     ChatMessage("user", buildObserveMessage(goal, snap, step), shot)
                 )
             }
-            var resp = planWithTimeout(
-                msgs,
-                forceCloud = false // local 2B; avoid cloud for phone GUI unless configured later
-            )
+            var resp = planWithTimeout(msgs, forceCloud = false)
             logLlm(resp)
-
+            // Hybrid: if local failed and cloud is configured, one cloud retry (optional screenshot)
+            if (resp.error != null && resp.content.isBlank() && prefs.routeMode == AgentPreferences.ROUTE_HYBRID && prefs.cloudBaseUrl.isNotBlank()) {
+                onLog("本机 LLM 失败，hybrid 尝试云端一次…")
+                val cloudMsgs = if (prefs.allowCloudScreenshot && sc.source != "tree") {
+                    val shot = try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
+                    if (shot != null) msgs.map { if (it.role == "user" && it == msgs.last()) it.copy(imageBase64 = shot) else it }
+                    else msgs
+                } else msgs
+                resp = planWithTimeout(cloudMsgs, forceCloud = true)
+                logLlm(resp)
+            }
             if (resp.error != null && resp.content.isBlank()) {
                 onLog("LLM 错误(${resp.backend}): ${resp.error}")
                 return Result(false, step, "LLM 不可用: ${resp.error}")
@@ -296,7 +303,7 @@ class AgentLoop(
         forceCloud: Boolean,
         temperature: Double = 0.2
     ): LlmResponse = coroutineScope {
-        onLog("MNN 请求已发出…")
+        onLog(if (forceCloud) "云端请求已发出…" else "MNN 请求已发出…")
         val started = System.currentTimeMillis()
         val deferred = async {
             router.plan(messages, forceCloud = forceCloud, temperature = temperature)
