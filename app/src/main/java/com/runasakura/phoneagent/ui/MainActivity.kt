@@ -70,6 +70,7 @@ class MainActivity : AppCompatActivity() {
             } else false
         }
         binding.toolbar.inflateMenu(R.menu.main_menu)
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) { com.runasakura.phoneagent.ocr.OcrEngine.warmUp() }
         ContextCompat.registerReceiver(
             this, statusReceiver, IntentFilter(AgentForegroundService.ACTION_STATUS), ContextCompat.RECEIVER_NOT_EXPORTED
         )

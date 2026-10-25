@@ -117,6 +117,9 @@ class AgentForegroundService : Service() {
         val previous = job
         job = scope.launch(Dispatchers.Default) {
             previous?.join()
+            val tw = System.currentTimeMillis()
+            com.runasakura.phoneagent.ocr.OcrEngine.warmUp()
+            (System.currentTimeMillis() - tw).let { if (it > 300) log("OCR 预热 ${it}ms") }
             broadcastStatus("running", "开始：$goal")
             try {
                 val live = local.probe()

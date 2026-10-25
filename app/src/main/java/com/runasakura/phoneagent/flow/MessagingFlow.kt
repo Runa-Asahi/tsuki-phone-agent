@@ -194,30 +194,53 @@ class MessagingFlow(
 
     private fun fail(msg: String): Outcome { log("✗ $msg"); return Outcome(false, msg) }
 
-    fun isMain(s: Screen): Boolean {
-        if (s.pkg != app.pkg) return false
-        val bottom = s.items.filter { it.cy > s.h * 0.85 }
-        return bottom.count { b -> app.mainTabs.any { Text.eq(it, b.label) } } >= app.minTabs
+    fun isMain(s: Screen): Boolean = MainScreen.isMain(s, app)
+
+    private suspend fun tapChatTab(s: Screen) {
+        val (x, y) = MainScreen.chatTabPoint(s, app)
+        d.tapXY(x, y); d.afterAction(800)
     }
 
+    /**
+     * Reach the chat list without loops: never press back on a tabbed root screen (that exits
+     * the app — PPG-AN00 21:57 regression), tap the chat tab instead; if a back press ever leaves
+     * the app, stop backing for good, relaunch, and settle for tab taps / waiting.
+     */
     private suspend fun ensureMain(): Boolean {
         var relaunches = 0
         var backs = 0
-        val maxBacks = 5
-        for (i in 0 until 10) {
+        var backAllowed = true
+        var waits = 0
+        val maxBacks = 4
+        for (i in 0 until 12) {
             val s = d.screen()
             if (s.source == "none" && s.pkg == app.pkg) log("界面读取为空（树与 OCR 均无文字）")
             if (s.pkg != app.pkg) {
                 if (relaunches++ >= 3) return false
                 log("前台=${s.pkg}，将${app.label}带到前台（第${relaunches}次）")
-                // force=true: even if package briefly matches, reset task to root
                 d.bringToFront(app.pkg, app.label, force = relaunches > 1); d.afterAction(1500)
                 backs = 0; continue
             }
             if (isMain(s)) {
-                s.items.firstOrNull { it.cy > s.h * 0.85 && Text.eq(it.label, app.chatTab) }?.let { d.tap(it); d.afterAction(800) }
+                tapChatTab(s)
                 log("✓ 已在${app.label}主界面")
                 return true
+            }
+            val tabs = MainScreen.tabsSeen(s, app)
+            log("未判定为主界面（底部 Tab：${tabs.joinToString("、").ifEmpty { "无" }}）看到：" +
+                s.items.take(15).joinToString(" | ") { it.label.take(12) })
+            if (MainScreen.tabBarVisible(s, app)) {
+                log("可见 Tab 栏，点击「${app.chatTab}」而不是返回")
+                tapChatTab(s)
+                val again = d.screen()
+                if (isMain(again) || MainScreen.tabBarVisible(again, app)) { log("✓ 已在${app.label}主界面（Tab 栏）"); return true }
+                continue
+            }
+            if (!backAllowed) {
+                // Splash / ad / loading after a relaunch: wait, then try the chat-tab slot once.
+                if (waits++ < 2) { log("等待${app.label}首屏加载…"); d.sleep(1500); d.invalidateObservation(); continue }
+                if (waits++ == 3) { log("尝试点击左下角「${app.chatTab}」Tab 位"); tapChatTab(s); continue }
+                return false
             }
             if (backs >= maxBacks) {
                 if (relaunches++ >= 3) return false
@@ -228,6 +251,13 @@ class MessagingFlow(
             backs++
             log("不在主界面，返回一步（$backs/$maxBacks）")
             d.back(); d.afterAction(1200)
+            val after = d.screen()
+            if (after.pkg != app.pkg) {
+                log("返回后离开了${app.label}（说明上一屏就是根界面），不再按返回，重新打开一次")
+                backAllowed = false
+                if (relaunches++ >= 3) return false
+                d.bringToFront(app.pkg, app.label, force = false); d.afterAction(2000)
+            }
         }
         return false
     }

@@ -20,6 +20,21 @@ object OcrEngine {
     }
 
     /** Raw OCR lines (screen coords, [yOffset] added back after cropping). */
+    @Volatile private var warmed = false
+
+    /**
+     * First ML Kit call loads the bundled Chinese model (PPG-AN00: 7–11 s when it coincided with
+     * WeChat's cold start). Run once on a tiny bitmap at app/task start so the real read is fast.
+     */
+    suspend fun warmUp() {
+        if (warmed) return
+        val t0 = System.currentTimeMillis()
+        val b = Bitmap.createBitmap(160, 48, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.WHITE) }
+        try { recognizeLines(b) } catch (_: Exception) {} finally { b.recycle() }
+        warmed = true
+        android.util.Log.i(TAG, "warm-up ${System.currentTimeMillis() - t0}ms")
+    }
+
     suspend fun recognizeLines(bmp: Bitmap, yOffset: Int = 0): List<OcrLine>? =
         suspendCancellableCoroutine { cont ->
             try {

@@ -86,6 +86,7 @@ class FakeWeChat(
                 listOf("微信", "通讯录", "发现", "我").forEachIndexed { i, t -> items += item(t, 158 + i * 316, 2690) }
             }
             state == "moments" -> items += item("朋友圈", 632, 200)
+            state == "splash" -> items += item("广告 跳过", 1100, 200)
             state.startsWith("menu:") -> { items += item("置顶该聊天", 632, 1300); items += item("删除该聊天", 632, 1500) }
             state == "search" && realOcrSearch && searchText.isBlank() -> {
                 items += item("くQ搜索本地或网络结果", 560, 210)
@@ -144,6 +145,7 @@ class FakeWeChat(
         taps += label
         when {
             state == "main" && label == tabs[0] -> Unit
+            (state == "me" || state == "main") && y > 2600 && (label == "微信" || x < 300) -> { state = "main" }
             state == "main" && label == searchLabel -> { state = "search"; searchText = "" }
             state == "main" && y in 120..280 && x > 1000 -> { state = "search"; searchText = "" }
             state == "main" && label in listRows -> { state = "chat:" + chatTitleFor(label); inputText = draft }
@@ -185,7 +187,7 @@ class FakeWeChat(
         backs++
         state = when {
             state == "search" || state.startsWith("chat:") || state == "moments" || state.startsWith("menu:") -> "main"
-            state == "main" || state == "me" -> "home"
+            state == "main" || state == "me" || state == "splash" -> "home"
             else -> state
         }
     }
