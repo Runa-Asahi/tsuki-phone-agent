@@ -59,6 +59,22 @@ class AgentForegroundService : Service() {
 
     private fun begin(goal: String) {
         com.runasakura.phoneagent.util.Diagnostics.reset(goal)
+        if (com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() == null) {
+            log("无障碍服务未连接（更新 APK 后需在系统设置里重新打开本服务）")
+            broadcastStatus("stopped", "无障碍服务未开启：请到系统设置→辅助功能→已安装的服务中重新打开 Phone Agent")
+            // Toast from service context
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(
+                    this,
+                    "无障碍服务已断开，请重新开启后重试",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+            starting.set(false)
+            stopSelf()
+            return
+        }
+        log("提示：若任务中微信/QQ 被系统杀掉，请到设置→电池→应用启动管理，允许 Phone Agent「自启动/关联启动/后台活动」")
         // Cancel any previous loop (and its in-flight MNN call) before starting a new one
         job?.let {
             if (it.isActive) {

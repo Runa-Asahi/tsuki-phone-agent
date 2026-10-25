@@ -73,6 +73,7 @@ class AgentLoop(
         val msgGoal = MessagingGoals.parse(goal)
         var targetPkg: String? = null
         if (msgGoal != null && msgGoal.contact != null && msgGoal.message != null) {
+            MessagingGoals.validate(msgGoal.contact, msgGoal.message)?.let { return Result(false, 0, it) }
             return runMessaging(dev, msgGoal.packageName, msgGoal.contact, msgGoal.message)
         } else if (subTarget == null) {
             // Generic: 打开/启动/进入 <任意已安装 App>[，进入X，发送Y…]
@@ -99,6 +100,7 @@ class AgentLoop(
                 val o = subs.getOrNull(0) as? Subgoal.Open
                 val sd = subs.getOrNull(1) as? Subgoal.Send
                 if (isMsgApp && o != null && sd != null && subs.size == 2) {
+                    MessagingGoals.validate(o.target, sd.text)?.let { return Result(false, 0, it) }
                     return runMessaging(dev, match.packageName, o.target, sd.text, reallySend = sd.send)
                 }
                 val (res, left) = runSubgoals(dev, subs)

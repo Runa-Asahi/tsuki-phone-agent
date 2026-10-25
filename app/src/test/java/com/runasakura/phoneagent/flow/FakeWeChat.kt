@@ -19,7 +19,8 @@ class FakeWeChat(
     val searchLabel: String? = null,
     val resultTapWorks: Boolean = true,
     /** type() attempts that silently do nothing (simulates WeChat ignoring SET_TEXT). */
-    val silentTypeAttempts: Set<Int> = emptySet()
+    val silentTypeAttempts: Set<Int> = emptySet(),
+    var voiceMode: Boolean = false
 ) : Device {
     val W = 1264; val H = 2800
     val taps = mutableListOf<String>()
@@ -61,10 +62,26 @@ class FakeWeChat(
             state.startsWith("chat:") -> {
                 items += item(state.removePrefix("chat:"), 632, 200)
                 items += item("昨天 12:00", 632, 600)
-                sent.filter { it.first == state }.forEachIndexed { i, m -> items += item(m.second, 900, 2300 - i * 150) }
-                if (source == "tree") items += item(inputText, 560, 2660, edit = true)
-                else if (inputText.isNotBlank()) items += item(inputText, 560, 2660)
-                if (inputText.isNotBlank()) items += item("发送", 1180, 2660)
+                sent.filter { it.first == state }.forEachIndexed { i, m ->
+                    // Multi-line bubbles: one item per line stacked
+                    m.second.lines().filter { it.isNotBlank() }.forEachIndexed { j, line ->
+                        items += item(line, 900, 2300 - i * 200 - j * 50)
+                    }
+                }
+                if (voiceMode) {
+                    items += item("按住 说话", 560, 2660)
+                } else {
+                    if (source == "tree") {
+                        inputText.lines().filter { it.isNotBlank() || inputText.isEmpty() }.ifEmpty { listOf(inputText) }.forEachIndexed { j, line ->
+                            items += item(line, 560, 2660 - j * 40, edit = j == 0)
+                        }
+                    } else if (inputText.isNotBlank()) {
+                        inputText.lines().filter { it.isNotBlank() }.forEachIndexed { j, line ->
+                            items += item(line, 560, 2660 - j * 40)
+                        }
+                    }
+                    if (inputText.isNotBlank()) items += item("发送", 1180, 2660)
+                }
             }
         }
         return Screen(if (state == "home") "launcher" else pkg, W, H, items, source, imeTop)
@@ -83,6 +100,7 @@ class FakeWeChat(
             state == "search" && label in resultRows && !resultTapWorks -> Unit
             state == "search" && label in resultRows -> { state = "chat:" + chatTitleFor(label); inputText = "" }
             state.startsWith("chat:") && label == "发送" -> { sent += state to inputText; inputText = "" }
+            state.startsWith("chat:") && voiceMode && (x < 150 || label.contains("键盘")) -> { voiceMode = false }
         }
         return true
     }
@@ -96,7 +114,10 @@ class FakeWeChat(
         typed += text
         when {
             state == "search" -> searchText = text
-            state.startsWith("chat:") -> inputText = text
+            state.startsWith("chat:") -> {
+                if (voiceMode) return false
+                inputText = text
+            }
             else -> return false
         }
         return true

@@ -57,7 +57,10 @@ class MessagingFlow(
     }
 
     suspend fun run(contact: String, message: String): Outcome {
-        log("消息流程：${app.label} → 「$contact」 内容「$message」")
+        com.runasakura.phoneagent.agent.MessagingGoals.validate(contact, message)?.let { return fail(it) }
+        log("消息流程：${app.label} → 「$contact」 内容「${message.take(40)}${if (message.length > 40) "…" else ""}」")
+        val probe = d.screen()
+        if (probe.w > probe.h) return fail("当前为横屏（${probe.w}x${probe.h}），请竖屏后重试")
         if (!ensureMain()) return fail("无法回到${app.label}主界面（请先手动打开${app.label}首页后重试）")
 
         // 1) exact match in visible chat list (only if exactly one)
@@ -87,12 +90,9 @@ class MessagingFlow(
         }
         log("✓ 聊天标题已核对：$contact")
 
-        // 3) type message (switch out of voice mode first)
-        s.items.firstOrNull { it.cy > s.h * 0.8 && Text.norm(it.label).let { n -> n.contains("按住") && n.contains("说话") } }?.let {
-            log("输入栏处于语音模式，切换到键盘")
-            d.tapXY((s.w * 0.06).toInt(), it.cy); d.afterAction(1000); s = d.screen()
-        }
-        val bubblesBefore = countBubbles(s, message)
+        // 3) type message (switch out of voice mode first; WeChat shows 「按住 说话」)
+        s = leaveVoiceMode(s) ?: return fail("无法退出语音输入模式，未发送")
+        val bubblesBefore = InputVerify.countBubbles(s, message)
         val edit = s.items.lastOrNull { it.edit && (s.imeTop == null || it.cy < s.imeTop) }
         val hx = edit?.cx ?: (s.w * app.inputFallback.first).toInt()
         val hy = edit?.cy ?: (s.h * app.inputFallback.second).toInt()
@@ -102,7 +102,7 @@ class MessagingFlow(
             d.afterAction(1200)
             s = d.screen()
             val sb = findSend(s)
-            if (sb != null && inputContains(s, message, sb)) { send = sb; break }
+            if (sb != null && InputVerify.inputContains(s, message, sb)) { send = sb; break }
             log("输入框未核对到「$message」，换输入方式重试（${attempt + 1}/3）")
         }
         if (send == null) return fail("输入后无法核对输入框内容/未出现「发送」按钮（可能语音模式或输入失败），未发送")
@@ -128,8 +128,8 @@ class MessagingFlow(
 
         // 5) verify bubble
         s = d.screen()
-        val stillPending = findSend(s)?.let { inputContains(s, message, it) } ?: false
-        val bubble = countBubbles(s, message) > bubblesBefore
+        val stillPending = findSend(s)?.let { InputVerify.inputContains(s, message, it) } ?: false
+        val bubble = InputVerify.countBubbles(s, message) > bubblesBefore
         return if (!stillPending && bubble) {
             log("✓ 已在聊天中看到消息")
             Outcome(true, "已发送给「$contact」：$message（已核验）", verified = true)
@@ -192,7 +192,7 @@ class MessagingFlow(
         if (cancel == null && searchEdit == null) return "点击搜索后未进入搜索页（看到：${s.summary()}）"
         val placeholder = s.items.firstOrNull { it.cy < s.h * 0.15 && it.label.startsWith("搜索") }
         val hx = searchEdit?.cx ?: placeholder?.cx ?: (s.w * 0.45).toInt()
-        val hy = searchEdit?.cy ?: placeholder?.cy ?: cancel!!.cy
+        val hy = searchEdit?.cy ?: placeholder?.cy ?: cancel?.cy ?: (s.h * 0.07).toInt()
         var typedOk = false
         for (attempt in 0..2) {
             if (!d.type(contact, hx, hy, attempt)) continue
@@ -207,7 +207,9 @@ class MessagingFlow(
         d.afterAction(1200)
         s = d.screen()
         val barBottom = maxOf(cancel?.cy ?: 0, searchEdit?.cy ?: 0, (s.h * 0.08).toInt()) + (s.h * 0.025).toInt()
-        val hits = exactMatches(s, contact, top = barBottom, excludeSections = true)
+        val (hits0, sections) = exactMatchesWithSections(s, contact, top = barBottom, excludeSections = true)
+        val hits = InputVerify.preferContactSection(hits0, sections)
+        if (hits.size == 1 && hits0.size > 1) log("同名多项中优先选择「${sections[hits[0]] ?: "联系人"}」分区的「$contact」")
         return when (hits.size) {
             0 -> {
                 val near = s.items.filter { it.cy > barBottom && it.label.contains(contact) }.take(4).joinToString("、") { it.label }
@@ -219,20 +221,27 @@ class MessagingFlow(
     }
 
     /** Exact label matches below [top] and above the keyboard, optionally skipping non-contact sections. */
-    fun exactMatches(s: Screen, contact: String, top: Int, excludeSections: Boolean): List<ScreenItem> {
+    fun exactMatches(s: Screen, contact: String, top: Int, excludeSections: Boolean): List<ScreenItem> =
+        exactMatchesWithSections(s, contact, top, excludeSections).first
+
+    fun exactMatchesWithSections(
+        s: Screen, contact: String, top: Int, excludeSections: Boolean
+    ): Pair<List<ScreenItem>, Map<ScreenItem, String?>> {
         val limit = s.imeTop ?: s.h
         var section: String? = null
         val out = mutableListOf<ScreenItem>()
+        val secMap = mutableMapOf<ScreenItem, String?>()
         for (it in s.items.filter { it.cy in (top + 1) until limit }.sortedBy { it.cy }) {
             val n = Text.norm(it.label)
             if (SECTION_HEADERS.contains(n) && !Text.eq(n, contact)) { section = n; continue }
             if (it.edit) continue
             if (n != Text.norm(contact)) continue
             if (excludeSections && section != null && section in EXCLUDED_SECTIONS) continue
-            if (out.any { o -> kotlin.math.abs(o.cy - it.cy) < s.h * 0.015 }) continue // same row twice (tree+desc)
+            if (out.any { o -> kotlin.math.abs(o.cy - it.cy) < s.h * 0.015 }) continue
             out += it
+            secMap[it] = section
         }
-        return out
+        return out to secMap
     }
 
     fun titleMatches(s: Screen, contact: String): Boolean {
@@ -246,22 +255,34 @@ class MessagingFlow(
         }
     }
 
-    /** Exact-text items in the message area (excludes title bar, input row, keyboard). */
-    private fun countBubbles(s: Screen, message: String): Int {
-        val bottom = minOf(s.imeTop ?: s.h, (s.h * 0.93).toInt())
-        return s.items.count { !it.edit && Text.eq(it.label, message) && it.cy > s.h * 0.1 && it.cy < bottom }
-    }
-
     fun findSend(s: Screen): ScreenItem? = s.items
         .filter { Text.eq(it.label, SEND) && it.cy > s.h * 0.3 && (s.imeTop == null || it.cy < s.imeTop) }
         .maxByOrNull { it.cy }
 
-    fun inputContains(s: Screen, message: String, send: ScreenItem): Boolean {
-        val m = Text.norm(message)
-        val row = (s.h * 0.03).toInt()
-        return s.items.any {
-            it !== send && Text.norm(it.label).contains(m) &&
-                (it.edit || kotlin.math.abs(it.cy - send.cy) <= row)
+    private fun isVoiceMode(s: Screen): Boolean = s.items.any {
+        it.cy > s.h * 0.75 && Text.norm(it.label).let { n ->
+            (n.contains("按住") && n.contains("说话")) || n == "按住说话" || n.contains("滑动取消")
         }
+    }
+
+    /** Leave WeChat/QQ voice input mode. Returns updated screen, or null if stuck. */
+    private suspend fun leaveVoiceMode(s0: Screen): Screen? {
+        var s = s0
+        for (i in 1..3) {
+            if (!isVoiceMode(s)) return s
+            val bar = s.items.firstOrNull {
+                it.cy > s.h * 0.75 && Text.norm(it.label).let { n -> n.contains("按住") || n.contains("说话") }
+            }
+            // Keyboard/switch icon is typically at the far left of the input bar
+            val y = bar?.cy ?: (s.h * 0.93).toInt()
+            val switchBtn = s.items.firstOrNull {
+                it.cy > s.h * 0.8 && (Text.norm(it.label).contains("键盘") || Text.eq(it.label, "切换到键盘"))
+            }
+            log("输入栏处于语音模式，切换到键盘（第${i}次）")
+            if (switchBtn != null) d.tap(switchBtn) else d.tapXY((s.w * 0.06).toInt(), y)
+            d.afterAction(1000)
+            s = d.screen()
+        }
+        return if (isVoiceMode(s)) null else s
     }
 }

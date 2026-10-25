@@ -20,10 +20,17 @@ class SafetyGate(private val prefs: AgentPreferences) {
     private val confirmKeywords = listOf(
         "发送", "发给", "付款", "支付", "转账", "删除", "卸载", "授权",
         "开通", "确认支付", "立即购买", "提交订单", "发帖", "发布",
+        "确认转账", "立即付款", "确认付款", "红包", "借钱", "同意协议",
+        "开通权限", "允许本次", "确认还款", "提现", "兑换",
         "send", "pay", "transfer", "delete", "uninstall", "purchase"
     )
 
-    private val sendButtonLabels = listOf("发送", "Send", "傳送", "发送(S)")
+    private val sendButtonLabels = listOf(
+        "发送", "Send", "傳送", "发送(S)", "送出", "发消息", "Send Message"
+    )
+    private val payButtonLabels = listOf(
+        "确认支付", "立即支付", "确认付款", "付款", "确认转账", "立即转账", "转账", "Pay", "确认"
+    )
 
     private val otpKeywords = listOf("验证码", "短信验证", "动态码", "OTP", "verification code")
 
@@ -58,15 +65,23 @@ class SafetyGate(private val prefs: AgentPreferences) {
                 return SafetyResult(SafetyDecision.BLOCK_HUMAN, action.reason)
             is AgentAction.Tap -> {
                 val label = action.text.orEmpty()
-                if (isSendLike(label) || isSendLike(label) && userGoal.contains("发")) {
-                    return SafetyResult(
-                        SafetyDecision.REQUIRE_CONFIRM,
-                        "即将点击「发送」，确认后才会真正发出"
-                    )
+                // Resolve label from node_id against the dump when text is blank
+                val resolved = label.ifBlank {
+                    val id = action.nodeId.orEmpty()
+                    if (id.isNotBlank() && tree.contains("[$id]")) {
+                        tree.lineSequence().firstOrNull { it.contains("[$id]") }
+                            ?.substringAfter("] ")?.substringBefore(" (")?.trim().orEmpty()
+                    } else ""
                 }
-                val context = "$userGoal $label $tree".take(1500)
+                if (isSendLike(resolved) || isSendLike(label)) {
+                    return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将点击「发送」，确认后才会真正发出")
+                }
+                if (payButtonLabels.any { resolved.equals(it, true) || label.equals(it, true) }) {
+                    return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将点击支付/转账类按钮，确认后才会执行")
+                }
+                val context = "$userGoal $label $resolved $tree".take(1500)
                 if (confirmKeywords.any { context.contains(it, ignoreCase = true) } &&
-                    looksLikeCommit(label.ifBlank { context })
+                    looksLikeCommit(resolved.ifBlank { label.ifBlank { context } })
                 ) {
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "疑似发送/支付/删除类操作，需确认")
                 }
@@ -86,7 +101,10 @@ class SafetyGate(private val prefs: AgentPreferences) {
         sendButtonLabels.any { label.equals(it, true) || label.trim() == it }
 
     private fun looksLikeCommit(context: String): Boolean {
-        val triggers = listOf("发送", "付款", "支付", "转账", "删除", "卸载", "提交", "发布", "send", "pay")
+        val triggers = listOf(
+            "发送", "付款", "支付", "转账", "删除", "卸载", "提交", "发布",
+            "红包", "提现", "借钱", "send", "pay", "transfer"
+        )
         return triggers.any { context.contains(it, ignoreCase = true) }
     }
 

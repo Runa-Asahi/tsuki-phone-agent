@@ -25,6 +25,21 @@ import com.runasakura.phoneagent.service.AgentForegroundService
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
 
+    private val a11yReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != AgentAccessibilityService.ACTION_A11Y_STATE) return
+            val on = intent.getBooleanExtra(AgentAccessibilityService.EXTRA_CONNECTED, false)
+            runOnUiThread {
+                refreshA11yStatus()
+                if (!on) {
+                    appendLog("⚠ 无障碍服务已断开（常见于刚更新 APK）。请到系统设置重新打开本服务。")
+                    Toast.makeText(this@MainActivity, "无障碍服务已断开，请重新开启", Toast.LENGTH_LONG).show()
+                    AgentForegroundService.stop(this@MainActivity)
+                }
+            }
+        }
+    }
+
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != AgentForegroundService.ACTION_STATUS) return
@@ -95,6 +110,11 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.registerReceiver(
             this, statusReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED
         )
+        ContextCompat.registerReceiver(
+            this, a11yReceiver,
+            IntentFilter(AgentAccessibilityService.ACTION_A11Y_STATE),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         refreshA11yStatus()
     }
 
@@ -102,6 +122,7 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
         try {
             unregisterReceiver(statusReceiver)
+            unregisterReceiver(a11yReceiver)
         } catch (_: Exception) {
         }
     }

@@ -35,6 +35,10 @@ class A11yDevice(
     /** Packages that returned an empty tree in this task → poll shorter before OCR. */
     private val blindPkgs = HashSet<String>()
     private var lastShotAt = 0L
+    /** Cached OCR result until the accessibility event clock advances (screen change). */
+    private var ocrCache: Screen? = null
+    private var ocrCacheEventAt = -1L
+    private var ocrCachePkg = ""
 
     // ---------- observation ----------
 
@@ -75,7 +79,11 @@ class A11yDevice(
     private fun treeScreen(): Screen {
         val (w, h) = s.screenSize()
         val ws = appWindows()
-        val roots = ws.mapNotNull { win ->
+        // Split-screen: only read the focused/active application window (avoid mixing both apps)
+        val preferred = ws.firstOrNull { it.isFocused } ?: ws.firstOrNull { it.isActive }
+        val pkgs = ws.mapNotNull { try { it.root?.packageName?.toString() } catch (_: Exception) { null } }.toSet()
+        val use = if (pkgs.size > 1 && preferred != null) listOf(preferred) else ws
+        val roots = use.mapNotNull { win ->
             try { win.root?.also { it.refresh() } } catch (_: Exception) { null }
         }.ifEmpty { listOfNotNull(s.rootInActiveWindow) }
         val budget = intArrayOf(1500)
@@ -88,30 +96,103 @@ class A11yDevice(
         return if (id > 0) s.resources.getDimensionPixelSize(id) else 0
     }
 
+    /**
+     * Honor PPG-AN00 (1264x2800) gesture nav: navigation_bar_height is often 0.
+     * Soft nav bar ~48–56dp; gesture home indicator ~16–24dp of chrome but swipe zone taller.
+     * Use dimen when present, else ~3.2% top / 2.8% bottom of the bitmap (≈90 / 78 px at 2800).
+     */
+    private fun cropBands(bmpH: Int): Pair<Int, Int> =
+        com.runasakura.phoneagent.ocr.CropBands.compute(bmpH, dimen("status_bar_height"), dimen("navigation_bar_height"))
+
     private suspend fun ocrScreen(pkg: String): Screen? {
+        // Reuse OCR until a new accessibility event (UI change) arrives
+        if (ocrCache != null && ocrCachePkg == pkg && ocrCacheEventAt == s.lastEventAt) {
+            log("OCR 缓存命中（界面未变）")
+            return ocrCache
+        }
         val (w, h) = s.screenSize()
         val wait = 400 - (System.currentTimeMillis() - lastShotAt)
-        if (wait > 0) delay(wait) // takeScreenshot is rate limited (~3/s)
+        if (wait > 0) delay(wait)
         coroutineContext.ensureActive()
+        val t0 = System.currentTimeMillis()
         var bmp = withContext(Dispatchers.IO) { s.takeScreenshotBitmap() }
         if (bmp == null) { delay(450); bmp = withContext(Dispatchers.IO) { s.takeScreenshotBitmap() } }
         lastShotAt = System.currentTimeMillis()
         if (bmp == null) { log("截图失败（系统拒绝或频率限制）"); return null }
         coroutineContext.ensureActive()
-        // Crop status bar and gesture/nav bar (clock, battery, nav hints are noise)
-        val top = dimen("status_bar_height").coerceIn(0, bmp.height / 10)
-        val bottom = (bmp.height - dimen("navigation_bar_height").coerceIn(0, bmp.height / 10)).coerceAtLeast(top + 1)
+        val (top, bottom) = cropBands(bmp.height)
         val crop = try { android.graphics.Bitmap.createBitmap(bmp, 0, top, bmp.width, bottom - top) } catch (_: Exception) { bmp }
         val off = if (crop === bmp) 0 else top
-        // Screenshot may differ from logical screen size: scale back to screen coordinates
-        val sx = w.toFloat() / bmp.width; val sy = h.toFloat() / bmp.height
-        val lines = OcrEngine.recognizeLines(crop, off) ?: return null
+        // Half resolution for Chinese OCR speed (scale coords back). Cap long side at 720.
+        val longSide = maxOf(crop.width, crop.height)
+        val scaleDown = if (longSide > 720) 720f / longSide else 1f
+        val small = if (scaleDown < 0.99f) {
+            android.graphics.Bitmap.createScaledBitmap(
+                crop, (crop.width * scaleDown).toInt().coerceAtLeast(1),
+                (crop.height * scaleDown).toInt().coerceAtLeast(1), true
+            )
+        } else crop
+        // Mild contrast stretch helps dark-mode WeChat (pure Kotlin, no ColorMatrix GPU needed)
+        val ready = enhanceContrast(small)
+        val lines = OcrEngine.recognizeLines(ready, 0) ?: return null
+        // Map OCR pixels → screen: first undo scaleDown, then undo crop offset, then bmp→screen
+        val sx = w.toFloat() / bmp.width
+        val sy = h.toFloat() / bmp.height
+        val inv = if (scaleDown < 0.99f) 1f / scaleDown else 1f
         val scaled = lines.map {
-            com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * sx).toInt(), (it.t * sy).toInt(), (it.r * sx).toInt(), (it.b * sy).toInt())
+            val l = ((it.l * inv)).toInt()
+            val t = ((it.t * inv) + off).toInt()
+            val r = ((it.r * inv)).toInt()
+            val b = ((it.b * inv) + off).toInt()
+            com.runasakura.phoneagent.ocr.OcrLine(it.text, (l * sx).toInt(), (t * sy).toInt(), (r * sx).toInt(), (b * sy).toInt())
         }
         val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
-        val items = com.runasakura.phoneagent.ocr.OcrPost.process(scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore)
-        return Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
+        val items = com.runasakura.phoneagent.ocr.OcrPost.process(
+            scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore
+        )
+        val ms = System.currentTimeMillis() - t0
+        log("OCR ${ms}ms（截图${bmp.width}x${bmp.height}→识别${small.width}x${small.height}）文字=${items.size}")
+        val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
+        ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg
+        return out
+    }
+
+    /** Linear contrast stretch on luminance — helps dark-mode UI without changing hue much. */
+    private fun enhanceContrast(src: android.graphics.Bitmap): android.graphics.Bitmap {
+        if (src.config == null) return src
+        val w = src.width; val h = src.height
+        // Sample a grid to find lo/hi (full scan is too slow)
+        var lo = 255; var hi = 0
+        val stepX = (w / 32).coerceAtLeast(1); val stepY = (h / 32).coerceAtLeast(1)
+        val px = IntArray(1)
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                src.getPixels(px, 0, 1, x, y, 1, 1)
+                val c = px[0]
+                val l = ((c shr 16 and 0xff) * 30 + (c shr 8 and 0xff) * 59 + (c and 0xff) * 11) / 100
+                if (l < lo) lo = l; if (l > hi) hi = l
+                x += stepX
+            }
+            y += stepY
+        }
+        val mid = (lo + hi) / 2
+        if (hi - lo < 40 || mid > 110) return src // flat or already bright (light theme)
+        val out = src.copy(android.graphics.Bitmap.Config.ARGB_8888, true) ?: return src
+        val row = IntArray(w)
+        for (yy in 0 until h) {
+            out.getPixels(row, 0, w, 0, yy, w, 1)
+            for (i in row.indices) {
+                val c = row[i]
+                val a = c ushr 24
+                val r = c shr 16 and 0xff; val g = c shr 8 and 0xff; val b = c and 0xff
+                fun stretch(v: Int) = ((v - lo) * 255 / (hi - lo)).coerceIn(0, 255)
+                row[i] = (a shl 24) or (stretch(r) shl 16) or (stretch(g) shl 8) or stretch(b)
+            }
+            out.setPixels(row, 0, w, 0, yy, w, 1)
+        }
+        return out
     }
 
     /** Settle (≤1.5s), then tree (poll ≤3s, ≤0.6s for known-blind apps), else OCR. */
@@ -125,14 +206,18 @@ class A11yDevice(
             delay(300); t = treeScreen()
         }
         if (t.textCount >= 3) {
+            val ms = System.currentTimeMillis() - start
             Diagnostics.observe(t.pkg, "tree", t.textCount)
+            log("读屏 ${ms}ms 来源=tree 文字=${t.textCount}")
             return t
         }
         blindPkgs += t.pkg
         val o = ocrScreen(t.pkg)
         val best = if (o != null && o.textCount > t.textCount) o else t
+        val ms = System.currentTimeMillis() - start
         Diagnostics.observe(best.pkg, best.source + "(tree=${t.textCount})", best.textCount)
-        if (best.source == "ocr") log("界面树仅 ${t.textCount} 项文字，已用 OCR：${best.textCount} 行")
+        log("读屏 ${ms}ms 来源=${best.source} 文字=${best.textCount}" +
+            if (best.source == "ocr") "（树仅 ${t.textCount}）" else "")
         return best
     }
 

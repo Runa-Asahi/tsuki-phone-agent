@@ -17,10 +17,10 @@ object OcrPost {
      */
     fun process(lines: List<OcrLine>, top: Int, bottom: Int, ignore: Set<String> = emptySet()): List<ScreenItem> {
         val kept = lines.filter { it.text.isNotBlank() && it.cy in top until bottom && it.text.trim() !in ignore }
-            .sortedWith(compareBy({ it.cy }, { it.l }))
+            .sortedWith(compareBy({ it.cy / 30 }, { it.l }))
         val merged = mutableListOf<OcrLine>()
         for (ln in kept) {
-            val i = merged.indexOfLast { sameRow(it, ln) && ln.l - it.r in -it.h..(minOf(it.h, ln.h) * 8 / 10) }
+            val i = merged.indexOfLast { sameRow(it, ln) && ln.l - it.r in -it.h..(maxOf(minOf(it.h, ln.h) * 9 / 10, 24)) }
             if (i >= 0) {
                 val m = merged[i]
                 merged[i] = OcrLine(m.text + ln.text, minOf(m.l, ln.l), minOf(m.t, ln.t), maxOf(m.r, ln.r), maxOf(m.b, ln.b))

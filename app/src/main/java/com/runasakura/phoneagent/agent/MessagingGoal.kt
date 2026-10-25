@@ -1,5 +1,7 @@
 package com.runasakura.phoneagent.agent
 
+import com.runasakura.phoneagent.flow.Text
+
 /** Parsed messaging goal. [app] = "微信" | "QQ" | null (unknown → WeChat default). */
 data class MessagingGoal(
     val openOnly: Boolean,
@@ -14,11 +16,11 @@ object MessagingGoals {
     const val WECHAT = "com.tencent.mm"
     const val QQ = "com.tencent.mobileqq"
 
-    // [打开/用][微信|QQ][，]{给|向|跟|对}X{发送|发消息说|发消息|发|说}[：:]Y
+    // [打开/用][微信|QQ][，]{给|向|跟|对}X{发送|发消息说|发消息|发|说}[：:]Y  (Y may be multi-line)
     private val FULL = Regex(
         "^(?:请)?(?:帮我)?(?:打开|用|在|去)?\\s*(微信|WeChat|QQ|qq)?\\s*(?:里|上)?[，,、\\s]*(?:并|然后)?\\s*" +
             "(?:给|向|跟|对)(.+?)(?:发送消息|发消息说|发消息|发送|发微信说|发微信|发QQ说|发QQ|发|说)[：:，,\\s]*(.+)$",
-        RegexOption.IGNORE_CASE
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
     )
 
     fun parse(goal: String): MessagingGoal? {
@@ -34,5 +36,13 @@ object MessagingGoals {
             if (contact.isNotBlank() && msg.isNotBlank()) return MessagingGoal(false, contact, msg, app)
         }
         return null
+    }
+
+    /** Reject empty / whitespace-only contact or message (safety). */
+    fun validate(contact: String?, message: String?): String? = when {
+        contact.isNullOrBlank() -> "联系人为空，拒绝发送"
+        message.isNullOrBlank() -> "消息内容为空，拒绝发送"
+        Text.norm(contact).isEmpty() -> "联系人无效，拒绝发送"
+        else -> null
     }
 }
