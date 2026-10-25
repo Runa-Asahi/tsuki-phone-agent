@@ -140,7 +140,7 @@ class FakeWeChat(
     override suspend fun back() {
         backs++
         state = when {
-            state == "search" || state.startsWith("chat:") || state == "moments" -> "main"
+            state == "search" || state.startsWith("chat:") || state == "moments" || state.startsWith("menu:") -> "main"
             state == "main" || state == "me" -> "home"
             else -> state
         }

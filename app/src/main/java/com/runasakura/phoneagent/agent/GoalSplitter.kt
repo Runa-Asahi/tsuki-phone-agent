@@ -7,6 +7,8 @@ sealed class Subgoal {
     /** forward = reveal content further down (finger moves up, 上滑). */
     data class Scroll(val forward: Boolean) : Subgoal()
     data object Back : Subgoal()
+    /** Undo the previous subgoal: back and verify the earlier screen returns. */
+    data object Undo : Subgoal()
     data object Home : Subgoal()
     data class Search(val query: String) : Subgoal()
     data class LongPress(val target: String) : Subgoal()
@@ -21,6 +23,7 @@ sealed class Subgoal {
         is Unknown -> raw
         is Scroll -> if (forward) "上滑" else "下滑"
         Back -> "返回"
+        Undo -> "撤销上一步"
         Home -> "回到桌面"
         is Search -> "搜索$query"
         is LongPress -> "长按$target"
@@ -30,7 +33,7 @@ sealed class Subgoal {
 }
 
 object GoalSplitter {
-    private const val VERBS = "进入|打开|点击|点开|找到|去|发送|发|说|输入|填写|搜索|上滑|下滑|向上滑|向下滑|往上滑|往下滑|滑动|返回|回到|回桌面|长按|滑到|滚动到|翻到|在"
+    private const val VERBS = "进入|打开|点击|点开|找到|去|发送|发|说|输入|填写|搜索|上滑|下滑|向上滑|向下滑|往上滑|往下滑|滑动|返回|回到|回桌面|长按|滑到|滚动到|翻到|撤销|在"
     // Connectives only split when followed by an action verb (so 「再见」「合并」 stay intact).
     private val SEP = Regex("[，,、；;。]|(?:然后|接着|并且|并|再)(?=(?:$VERBS))")
     private val SEND = Regex("^(?:然后|接着|再|并)?(?:发送|发|说)[：:\\s]*(.+)$", RegexOption.DOT_MATCHES_ALL)
@@ -73,6 +76,7 @@ object GoalSplitter {
                 return Subgoal.Scroll(true)
             Regex("^(?:向下|往下)滑.*|^下滑.*|^上一页$").matches(seg) -> return Subgoal.Scroll(false)
             Regex("^(?:返回|后退)(?:上一页|上一级)?$").matches(seg) -> return Subgoal.Back
+            Regex("^撤销(?:上一步|刚才的?操作|操作)?$").matches(seg) -> return Subgoal.Undo
             Regex("^(?:回到|返回|回)(?:主页|桌面|主屏幕)$|^回桌面$|^主页$").matches(seg) -> return Subgoal.Home
         }
         Regex("^长按(.+)$").find(seg)?.let { return Subgoal.LongPress(it.groupValues[1].trim()) }

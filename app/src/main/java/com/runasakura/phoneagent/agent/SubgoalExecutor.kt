@@ -17,7 +17,47 @@ class SubgoalExecutor(
 ) {
     enum class Status { OK, FAILED, CANCELLED }
 
-    suspend fun run(sub: Subgoal): Status = when (sub) {
+    /** Screen before each successful subgoal, newest last (for 撤销 / wrong-page recovery). */
+    private val trail = ArrayDeque<ScreenSig>()
+
+    suspend fun run(sub: Subgoal): Status {
+        if (sub == Subgoal.Undo) return undo()
+        val before = d.screen()
+        val r = runInner(sub)
+        when (r) {
+            Status.OK -> { trail.addLast(ScreenSig.of(before)); while (trail.size > 10) trail.removeFirst() }
+            Status.FAILED -> {
+                // Wrong-page detection: a failed step that left the app we were in → go back.
+                val now = d.screen()
+                if (before.pkg.isNotEmpty() && now.pkg != before.pkg && sub !is Subgoal.Home) {
+                    onLog("失败后跑到了 ${now.pkg}，尝试回到 ${before.pkg}")
+                    backUntil(ScreenSig.of(before))
+                }
+            }
+            else -> Unit
+        }
+        return r
+    }
+
+    private suspend fun undo(): Status {
+        val target = trail.removeLastOrNull() ?: run { onLog("✗ 没有可撤销的步骤"); return Status.FAILED }
+        onLog("子目标：撤销上一步")
+        return if (backUntil(target)) { onLog("✓ 已回到上一步的界面"); Status.OK }
+        else { onLog("✗ 返回后未能确认回到上一步界面"); Status.FAILED }
+    }
+
+    /** Press back (≤3) until the screen resembles [target]. */
+    private suspend fun backUntil(target: ScreenSig): Boolean {
+        if (ScreenSig.similar(ScreenSig.of(d.screen()), target)) return true
+        repeat(3) {
+            d.back(); d.afterAction(1200)
+            if (ScreenSig.similar(ScreenSig.of(d.screen()), target)) return true
+        }
+        return false
+    }
+
+    private suspend fun runInner(sub: Subgoal): Status = when (sub) {
+        Subgoal.Undo -> Status.FAILED
         is Subgoal.Open -> if (open(sub.target)) Status.OK else Status.FAILED
         is Subgoal.Send -> send(sub.text, sub.send)
         is Subgoal.Unknown -> Status.FAILED
