@@ -60,6 +60,11 @@ class AgentAccessibilityService : AccessibilityService() {
 
     fun isReady(): Boolean = true
 
+    /** Current foreground package (active window root, else last event). */
+    fun foregroundPackage(): String =
+        try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
+            ?: lastPackage.ifEmpty { "unknown" }
+
     fun dumpUiTree(maxNodes: Int = 120): UiSnapshot {
         val root = rootInActiveWindow
         val (w, h) = screenSize()

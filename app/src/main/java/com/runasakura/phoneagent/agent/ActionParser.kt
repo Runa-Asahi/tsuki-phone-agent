@@ -13,12 +13,13 @@ object ActionParser {
             )
         }
         val jsonText = extractJson(raw)
+        val noThink = stripThink(raw)
         val obj = try {
             JSONObject(jsonText)
         } catch (e: Exception) {
             // Heuristic: model said launch settings in prose
             val lower = raw.lowercase()
-            if (raw.contains("打开设置") || lower.contains("launch") && lower.contains("settings")) {
+            if (noThink.contains("打开设置") || lower.contains("launch") && lower.contains("settings") && noThink.isNotBlank()) {
                 return PlanStep(
                     thought = "heuristic_from_prose",
                     action = AgentAction.Launch(appName = "设置")
@@ -167,7 +168,7 @@ object ActionParser {
         if (trimmed.isEmpty()) return trimmed
 
         // Strip <think>...</think> blocks some models emit
-        trimmed = trimmed.replace(Regex("(?s)<think>.*?</think>"), "").trim()
+        trimmed = stripThink(trimmed)
 
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             return trimmed
@@ -186,6 +187,17 @@ object ActionParser {
         if (start >= 0 && end > start) return trimmed.substring(start, end + 1)
         return trimmed
     }
+
+    /** Remove <think>…</think>; also an unclosed <think> (truncated by max_tokens). */
+    fun stripThink(s: String): String {
+        var r = s.replace(Regex("(?s)<think>.*?</think>"), "")
+        val open = r.indexOf("<think>")
+        if (open >= 0) r = r.substring(0, open)
+        return r.replace("</think>", "").trim()
+    }
+
+    fun hasThinkWithoutJson(raw: String): Boolean =
+        raw.contains("<think>") && !stripThink(raw).contains("{")
 
     private fun balancedObject(s: String): String? {
         val start = s.indexOf('{')

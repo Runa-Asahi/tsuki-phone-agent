@@ -26,6 +26,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
+import kotlin.coroutines.coroutineContext
 
 class AgentForegroundService : Service() {
 
@@ -57,10 +58,18 @@ class AgentForegroundService : Service() {
     }
 
     private fun begin(goal: String) {
-        if (job?.isActive == true || starting.getAndSet(true)) {
-            log("已有任务在运行，忽略重复开始")
-            return
+        // Cancel any previous loop (and its in-flight MNN call) before starting a new one
+        job?.let {
+            if (it.isActive) {
+                log("取消上一个任务及其 MNN 请求")
+                it.cancel()
+            }
         }
+        pendingConfirm?.invoke(false)
+        pendingConfirm = null
+        overlay?.hide()
+        overlay = null
+        starting.set(true)
         stopFlag.set(false)
         overlay = EmergencyStopOverlay(this) { requestStop() }.also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
@@ -80,10 +89,23 @@ class AgentForegroundService : Service() {
             onConfirm = { reason -> askConfirm(reason) },
             isStopped = { stopFlag.get() }
         )
+        val previous = job
         job = scope.launch(Dispatchers.Default) {
+            previous?.join()
             broadcastStatus("running", "开始：$goal")
+            try {
+                val m = local.resolveModel()
+                log("MNN 当前模型：${m.ifBlank { "(未知)" }}")
+                if (m.contains("reason", true) || m.contains("think", true) || m.contains("distill", true)) {
+                    log("提示：推理(Reasoning)模型会输出长思考，建议换 Qwen3 1.7B/4B 或 Qwen2.5 Instruct（MNN）")
+                }
+            } catch (e: Exception) {
+                log("读取 /v1/models 失败：${e.message}")
+            }
             val result = try {
                 loop.run(goal)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                AgentLoop.Result(false, 0, "已取消")
             } catch (e: Exception) {
                 Log.e(TAG, "loop error", e)
                 AgentLoop.Result(false, 0, e.message ?: "error")
@@ -92,11 +114,13 @@ class AgentForegroundService : Service() {
                 if (result.success) "done" else "stopped",
                 "结束(${result.steps}步): ${result.summary}"
             )
-            overlay?.hide()
-            overlay = null
-            starting.set(false)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            if (job == coroutineContext[Job]) {
+                overlay?.hide()
+                overlay = null
+                starting.set(false)
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         }
     }
 
@@ -113,7 +137,8 @@ class AgentForegroundService : Service() {
     fun requestStop() {
         stopFlag.set(true)
         starting.set(false)
-        job?.cancel()
+        job?.cancel() // cancels in-flight OkHttp call via coroutine cancellation
+        job = null
         pendingConfirm?.invoke(false)
         pendingConfirm = null
         broadcastStatus("stopped", "急停")

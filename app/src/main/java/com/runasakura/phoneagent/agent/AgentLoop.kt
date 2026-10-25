@@ -12,6 +12,7 @@ import com.runasakura.phoneagent.prefs.AgentPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 
 class AgentLoop(
@@ -39,26 +40,28 @@ class AgentLoop(
             onLog("目标含敏感语义，开始前请知悉：发送/支付等会二次确认")
         }
 
-        // Fast-path: 打开设置 / 打开系统设置 — don't wait 30s+ on tiny local LLM
-        if (isOpenSettingsGoal(goal)) {
-            onLog("快路径：检测到「打开设置」，直接 Intent(Settings.ACTION_SETTINGS)")
+        // Fast-path: 打开设置 / 打开设置并进入X — no LLM unless deterministic path fails
+        val subTarget = compoundSettingsTarget(goal)
+        if (isOpenSettingsGoal(goal) || subTarget != null) {
+            onLog("快路径：Intent(Settings.ACTION_SETTINGS)")
             val ok = a11y.launchSystemSettings()
             onLog(if (ok) "已发起打开系统设置" else "打开系统设置失败")
             if (ok) {
-                delay(1200)
-                val snap = a11y.dumpUiTree()
-                onLog("前台=${snap.packageName}")
-                if (a11y.isSettingsForeground(snap.packageName) || goalReachedSettings(goal, snap)) {
-                    return Result(true, 1, "已打开系统设置 (${snap.packageName})")
+                val fg = waitForeground(a11y, 2500) { a11y.isSettingsForeground(it) }
+                onLog("前台=$fg")
+                if (subTarget == null) {
+                    // Exact open-settings goal: done, never call LLM
+                    return Result(true, 1, "已打开系统设置 ($fg)")
                 }
-                // Still try once more after wait
-                delay(800)
-                val snap2 = a11y.dumpUiTree()
-                onLog("复查前台=${snap2.packageName}")
-                if (a11y.isSettingsForeground(snap2.packageName)) {
-                    return Result(true, 1, "已打开系统设置 (${snap2.packageName})")
+                if (a11y.isSettingsForeground(fg)) {
+                    onLog("快路径：在设置中查找「$subTarget」")
+                    if (tapTextWithScroll(a11y, subTarget)) {
+                        val after = waitForeground(a11y, 1500) { true }
+                        return Result(true, 2, "已打开设置并进入「$subTarget」($after)")
+                    }
+                    onLog("未找到「$subTarget」，交给 LLM 继续")
+                    history += ChatMessage("user", "系统设置已打开。剩余目标：进入「$subTarget」")
                 }
-                onLog("快路径未确认进入设置页，继续走 LLM 循环")
             }
         }
 
@@ -80,7 +83,7 @@ class AgentLoop(
             }
 
             onLog("请求本机 MNN（可能需数十秒）…")
-            var resp = router.plan(
+            var resp = planWithTimeout(
                 history + ChatMessage("user", buildObserveMessage(goal, snap, step)),
                 forceCloud = snap.lowConfidence && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY
             )
@@ -95,9 +98,9 @@ class AgentLoop(
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
 
-            if (ActionParser.isInvalid(plan)) {
+            if (ActionParser.isInvalid(plan) || ActionParser.hasThinkWithoutJson(resp.content)) {
                 onLog("解析失败，使用短提示重试一次…")
-                resp = router.plan(
+                resp = planWithTimeout(
                     listOf(
                         ChatMessage("system", SystemPrompt.SHORT),
                         ChatMessage(
@@ -176,9 +179,15 @@ class AgentLoop(
                     if (!ok) return Result(false, step, "用户取消")
                 }
                 else -> {
+                    val before = a11y.foregroundPackage()
                     val ok = execute(a11y, action, snap)
                     onLog(if (ok) "执行成功" else "执行失败/部分失败")
-                    delay(900)
+                    if (action is AgentAction.Launch && ok) {
+                        val fg = waitForeground(a11y, 3000) { it != before }
+                        onLog("启动后前台=$fg")
+                    } else {
+                        delay(900)
+                    }
                     val after = a11y.dumpUiTree()
                     onLog("执行后前台=${after.packageName}")
                     if (goalReachedSettings(goal, after) && a11y.isSettingsForeground(after.packageName)) {
@@ -188,6 +197,63 @@ class AgentLoop(
             }
         }
         return Result(false, step, "达到最大步数 $max")
+    }
+
+    private suspend fun planWithTimeout(
+        messages: List<ChatMessage>,
+        forceCloud: Boolean,
+        temperature: Double = 0.2
+    ): LlmResponse {
+        val r = withTimeoutOrNull(STEP_TIMEOUT_MS) {
+            router.plan(messages, forceCloud = forceCloud, temperature = temperature)
+        }
+        if (r == null) {
+            onLog("本步 LLM 超时 ${STEP_TIMEOUT_MS / 1000}s，已取消请求（MNN 若仍在推理，可在 MNN Chat 重启 API 服务清队列）")
+            return LlmResponse("", "mnn_local", STEP_TIMEOUT_MS, "step timeout ${STEP_TIMEOUT_MS}ms")
+        }
+        return r
+    }
+
+    private suspend fun waitForeground(
+        a11y: AgentAccessibilityService,
+        timeoutMs: Long,
+        pred: (String) -> Boolean
+    ): String {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var fg = a11y.foregroundPackage()
+        while (System.currentTimeMillis() < deadline) {
+            fg = a11y.foregroundPackage()
+            if (pred(fg) && !fg.contains("runasakura.phoneagent")) return fg
+            delay(200)
+        }
+        return fg
+    }
+
+    private suspend fun tapTextWithScroll(a11y: AgentAccessibilityService, target: String): Boolean {
+        val (w, h) = a11y.screenSize()
+        for (attempt in 0..3) {
+            coroutineContext.ensureActive()
+            val node = a11y.findByText(target)
+            if (node != null) {
+                val ok = a11y.tapNode(node)
+                onLog("点击「$target」${if (ok) "成功" else "失败"}")
+                if (ok) return true
+            }
+            if (attempt < 3) {
+                onLog("未见「$target」，上滑 ${attempt + 1}/3")
+                a11y.swipe(w / 2, (h * 0.75).toInt(), w / 2, (h * 0.30).toInt(), 350)
+                delay(700)
+            }
+        }
+        return false
+    }
+
+    /** 「打开设置并进入电池」→ "电池"; null when not a compound settings goal. */
+    private fun compoundSettingsTarget(goal: String): String? {
+        val m = Regex("^打开(系统)?设置[，,、\\s]*(并|然后|再|后)?[\\s]*(进入|打开|找到|点击|点开)(.+)$")
+            .find(goal.trim()) ?: return null
+        return m.groupValues[4].trim().removeSuffix("页面").removeSuffix("页")
+            .removeSuffix("设置").trim().ifBlank { null }
     }
 
     private fun logLlm(resp: LlmResponse) {
@@ -346,5 +412,6 @@ class AgentLoop(
 
     companion object {
         private const val TAG = "AgentLoop"
+        const val STEP_TIMEOUT_MS = 90_000L
     }
 }

@@ -39,6 +39,7 @@ class CloudClient(
                     put("model", model)
                     put("temperature", temperature)
                     put("stream", false)
+                    put("max_tokens", 256)
                     put("messages", JSONArray().apply {
                         messages.forEach { m ->
                             put(JSONObject().put("role", m.role).put("content", m.content))

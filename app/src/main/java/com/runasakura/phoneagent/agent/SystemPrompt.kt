@@ -2,6 +2,8 @@ package com.runasakura.phoneagent.agent
 
 object SystemPrompt {
     val TEXT = """
+/no_think
+不要输出思考过程，不要输出 <think>，直接输出 JSON。
 你是荣耀 PPG-AN00（MagicOS 10）上的手机 Agent。你通过无障碍节点树观察界面，并返回一步结构化 JSON 动作。
 
 规则：
@@ -41,6 +43,7 @@ JSON schema:
 """.trimIndent()
 
     val SHORT = """
+/no_think
 你是手机 Agent。只输出一个 JSON：
 {"thought":"...","action":{"type":"launch|tap|back|home|wait|done|fail","app":"...","package":"...","text":"...","node_id":"...","x":0,"y":0}}
 打开系统设置用 type=launch, app=设置。不要点 Agent 自己工具栏的设置。

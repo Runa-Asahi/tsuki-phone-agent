@@ -39,4 +39,5 @@
     <string name="label_max_steps">最大步数</string>
     <string name="label_cloud_shot">允许截图上云（金融包名仍禁止）</string>
     <string name="btn_save">保存</string>
+    <string name="model_hint">建议在 MNN Chat 加载「非推理」Instruct 模型（如 Qwen3 1.7B/4B Instruct 或 Qwen2.5 Instruct MNN）。Reasoning/Distilled 模型会长时间思考、阻塞队列。模型名可留 mnn-local，启动时自动读取 /v1/models。每步最多 256 tokens、90 秒超时。</string>
 </resources>
