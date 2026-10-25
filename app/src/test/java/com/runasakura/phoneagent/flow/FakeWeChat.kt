@@ -39,7 +39,9 @@ class FakeWeChat(
     val fieldReadable: Boolean = false,
     var clearWorks: Boolean = true,
     /** Unsent draft WeChat restores when the chat opens. */
-    val draft: String = ""
+    val draft: String = "",
+    /** The 发送 tap is swallowed (e.g. lands on nothing). */
+    val sendTapIgnored: Boolean = false
 ) : Device {
     var clears = 0
     override suspend fun fieldText(): String? = if (!fieldReadable) null else when {
@@ -152,7 +154,7 @@ class FakeWeChat(
             state == "search" && label == "取消" -> state = "main"
             state == "search" && label in currentSearchRows() && !resultTapWorks -> Unit
             state == "search" && label in currentSearchRows() -> { state = "chat:" + chatTitleFor(label); inputText = draft; resultPage = 0 }
-            state.startsWith("chat:") && inputText.isNotBlank() && (label == "发送" || (x > 1100 && y in 2600..2720)) -> { sent += state to inputText; inputText = "" }
+            state.startsWith("chat:") && inputText.isNotBlank() && !sendTapIgnored && (label == "发送" || (x > 1100 && y in 2600..2720)) -> { sent += state to inputText; inputText = "" }
             state.startsWith("chat:") && voiceMode && (x < 150 || label.contains("键盘")) -> { voiceMode = false }
         }
         return true

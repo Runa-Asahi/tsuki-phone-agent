@@ -69,6 +69,7 @@ class MessagingFlow(
 
         // 1) exact match in visible chat list (only if exactly one)
         var s = d.screen()
+        dump("主界面", s)
         val listHits = exactMatches(s, contact, top = (s.h * 0.10).toInt(), excludeSections = false)
             .filter { it.cy < s.h * 0.86 }
         val entered = if (listHits.size == 1) {
@@ -86,18 +87,19 @@ class MessagingFlow(
 
         // 2) verify chat title
         s = d.screen()
+        dump("聊天页", s)
         if (s.pkg != app.pkg) return fail("进入聊天后前台不是${app.label}（${s.pkg}）")
         if (!titleMatches(s, contact)) {
             val seen = s.items.filter { it.cy < s.h * 0.12 }.joinToString("、") { it.label }
             log("✗ 聊天标题与「$contact」不符（看到：$seen），退出")
-            d.back(); d.afterAction(1000); d.back()
+            d.back(); d.afterAction(1000) // ONE back: a second one could exit the app from its main screen
             return fail("打开的聊天标题不是「$contact」（看到：${seen.ifBlank { "无" }}），已退出，未输入任何内容")
         }
         log("✓ 聊天标题已核对：$contact")
 
         // 3) type message (switch out of voice mode first; WeChat shows 「按住 说话」)
         s = leaveVoiceMode(s) ?: return fail("无法退出语音输入模式，未发送")
-        val bubblesBefore = InputVerify.countBubbles(s, message)
+        val myBubblesBefore = InputVerify.countMyBubbles(s, message, InputVerify.barY(s, (s.h * app.inputFallback.second).toInt()))
         val edit = s.items.lastOrNull { it.edit && (s.imeTop == null || it.cy < s.imeTop) }
         val hx = edit?.cx ?: (s.w * app.inputFallback.first).toInt()
         val hy = edit?.cy ?: (s.h * app.inputFallback.second).toInt()
@@ -105,10 +107,15 @@ class MessagingFlow(
         // Focus the chat input bar first (bottom bar, above the keyboard).
         d.tapXY(hx, hy); d.afterAction(600)
         // WeChat restores unsent drafts (e.g. 八嘎八嘎八嘎 from a previous failed run): clear first.
-        d.fieldText()?.takeIf { Text.norm(it).isNotEmpty() }?.let { draft ->
+        s = d.screen()
+        var bar = InputVerify.barY(s, hy)
+        dump("输入前", s)
+        val draft = d.fieldText() ?: InputVerify.barText(s, bar).takeIf { it.isNotEmpty() }
+        if (!draft.isNullOrBlank()) {
             log("输入框已有草稿「${draft.take(20)}」，先清空")
             d.clearField(); d.afterAction(400)
-            if (!d.fieldText().isNullOrBlank()) return fail("输入框无法清空（残留「${draft.take(20)}」），为避免重复内容未发送，请手动清空")
+            val left = d.fieldText() ?: d.screen().let { InputVerify.barText(it, InputVerify.barY(it, hy)) }
+            if (left.isNotBlank()) return fail("输入框无法清空（残留「${left.take(20)}」），为避免重复内容未发送，请手动清空")
         }
         var send: ScreenItem? = null
         for (attempt in 0..2) {
@@ -118,7 +125,7 @@ class MessagingFlow(
                 val left = d.fieldText()
                 val sNow = d.screen()
                 val stillThere = if (left != null) Text.norm(left).isNotEmpty()
-                    else findSend(sNow)?.let { InputVerify.inputContains(sNow, message, it) } ?: false
+                    else InputVerify.barText(sNow, InputVerify.barY(sNow, hy)).isNotEmpty()
                 if (stillThere) {
                     return fail("输入框无法清空（残留「${left ?: "未知"}」），为避免重复内容未发送，请手动清空")
                 }
@@ -126,6 +133,8 @@ class MessagingFlow(
             if (!d.type(message, hx, hy, attempt)) { log("输入方式 ${attempt + 1} 不可用"); continue }
             d.afterAction(1200)
             s = d.screen()
+            bar = InputVerify.barY(s, hy)
+            dump("输入后${attempt + 1}", s)
             val v = InputCheck.judge(d.fieldText(), message)
             val sb = findSend(s)
             when (v) {
@@ -136,7 +145,7 @@ class MessagingFlow(
                 InputCheck.Verdict.REPEATED -> log("输入框内容重复（${d.fieldText()}），清空后重输（${attempt + 1}/3）")
                 InputCheck.Verdict.WRONG -> log("输入框实际内容「${d.fieldText()}」与目标不符，清空后重试（${attempt + 1}/3）")
                 InputCheck.Verdict.UNKNOWN ->
-                    if (sb != null && InputVerify.inputContains(s, message, sb)) send = sb
+                    if (sb != null && InputVerify.barEquals(s, InputVerify.barY(s, sb.cy).let { if (s.imeTop == null) sb.cy else it }, message)) send = sb
                     else log("输入框未核对到「$message」（OCR：${s.items.filter { it.cy > s.h * 0.6 }.joinToString(" | ") { it.label }}），清空后换方式重试（${attempt + 1}/3）")
             }
             if (send != null) break
@@ -156,8 +165,9 @@ class MessagingFlow(
         }
         // Confirm overlay may not emit app a11y events — drop OCR cache before re-reading
         d.invalidateObservation()
-        d.sleep(500)
+        d.sleep(300)
         s = d.screen()
+        dump("确认后", s)
         if (s.pkg != app.pkg) {
             log("确认框关闭后前台=${s.pkg}，回到${app.label}")
             d.bringToFront(app.pkg, app.label); d.afterAction(1500); s = d.screen()
@@ -166,6 +176,8 @@ class MessagingFlow(
         if (!titleMatches(s, contact)) return fail("确认期间界面已变化，未发送")
         val fieldNow = InputCheck.judge(d.fieldText(), message)
         if (fieldNow == InputCheck.Verdict.REPEATED || fieldNow == InputCheck.Verdict.WRONG) return fail("确认期间输入框内容变化，未发送")
+        if (fieldNow == InputCheck.Verdict.UNKNOWN && !InputVerify.barEquals(s, findSend(s)?.cy ?: InputVerify.barY(s, hy), message))
+            return fail("确认后输入栏文字与「$message」不一致（看到：${InputVerify.barText(s, InputVerify.barY(s, hy))}），未发送")
         val send2 = findSend(s)
             ?: if (fieldNow == InputCheck.Verdict.EXACT || send.label != SEND) sendFallback(s, hy).also { log("按输入栏右侧位置点击发送 (${it.cx},${it.cy})") }
             else return fail("确认后找不到「发送」按钮，未发送")
@@ -173,17 +185,19 @@ class MessagingFlow(
         log("已点击发送")
         d.afterAction(1500)
 
-        // 5) verify bubble
+        // 5) verify: my (right-side) bubble appeared AND the input bar is empty
         s = d.screen()
+        dump("发送后", s)
         val after = d.fieldText()
+        val barAfter = InputVerify.barY(s, hy)
         val stillPending = if (after != null) Text.norm(after).isNotEmpty()
-            else findSend(s)?.let { InputVerify.inputContains(s, message, it) } ?: false
-        val bubble = InputVerify.countBubbles(s, message) > bubblesBefore
+            else InputVerify.barText(s, barAfter).contains(Text.norm(message.lines().first()))
+        val bubble = InputVerify.countMyBubbles(s, message, barAfter) > myBubblesBefore
         if (stillPending) {
             log("✗ 点击发送后输入框仍有内容，未发送成功")
             return fail("点击发送后输入框仍有内容，消息可能未发出（未重复点击，请看一眼手机）")
         }
-        return if (bubble || after != null) {
+        return if (bubble) {
             log("✓ 已在聊天中看到消息")
             Outcome(true, "已发送给「$contact」：$message（已核验）", verified = true)
         } else {
@@ -193,6 +207,12 @@ class MessagingFlow(
     }
 
     private fun fail(msg: String): Outcome { log("✗ $msg"); return Outcome(false, msg) }
+
+    /** Diagnostic dump of what the agent saw at a decision point (truncated). */
+    private fun dump(tag: String, s: Screen) {
+        val body = s.items.sortedBy { it.cy }.take(20).joinToString(" | ") { "${it.label.take(14)}@${it.cy}" }
+        log("[屏幕·$tag] ${s.source} ${s.items.size}项 ime=${s.imeTop ?: "-"}：${body.take(420)}")
+    }
 
     fun isMain(s: Screen): Boolean = MainScreen.isMain(s, app)
 
@@ -284,11 +304,13 @@ class MessagingFlow(
         val cancel = s.items.firstOrNull { it.cy < s.h * 0.15 && Text.eq(it.label, "取消") }
         val searchEdit = s.items.firstOrNull { it.edit && it.cy < s.h * 0.15 }
         if (!SearchPage.isSearchPage(s)) {
+            dump("点搜索后", s)
             // Page may still be animating in; re-read once before giving up.
             d.afterAction(800); s = d.screen()
             if (!SearchPage.isSearchPage(s)) return "点击搜索后未进入搜索页（看到：${s.summary()}）"
         }
         log("✓ 已进入搜索页")
+        dump("搜索页", s)
         val fieldXY = SearchPage.field(s)
         val hx = searchEdit?.cx ?: fieldXY?.first ?: (s.w * 0.45).toInt()
         val hy = searchEdit?.cy ?: fieldXY?.second ?: cancel?.cy ?: (s.h * 0.07).toInt()
@@ -307,6 +329,7 @@ class MessagingFlow(
         d.afterAction(1200)
         s = d.screen()
         val barBottom = maxOf(cancel?.cy ?: 0, searchEdit?.cy ?: 0, (s.h * 0.08).toInt()) + (s.h * 0.025).toInt()
+        dump("搜索结果", s)
         var page = 0
         while (true) {
             val (hits0, sections) = exactMatchesWithSections(s, contact, top = barBottom, excludeSections = true)
