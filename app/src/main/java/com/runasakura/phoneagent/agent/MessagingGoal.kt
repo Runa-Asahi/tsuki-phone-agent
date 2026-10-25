@@ -46,3 +46,28 @@ object MessagingGoals {
         else -> null
     }
 }
+
+/** 「给X打语音/视频电话」 (WeChat only). */
+data class CallGoal(val contact: String, val video: Boolean)
+
+object CallGoals {
+    private val A = Regex(
+        "^(?:请)?(?:帮我)?(?:打开|用|在)?\\s*(?:微信)?\\s*(?:里|上)?[，,、\\s]*(?:并|然后)?\\s*(?:给|跟|和|与|向)(.+?)" +
+            "(?:打|拨打|拨|发起|打个|打一个|进行)?(?:个|一个|一通)?\\s*(语音|视频)(?:电话|通话)?\\s*[。.!！]?$"
+    )
+    private val B = Regex("^(?:请)?(?:帮我)?(?:用)?(?:微信)?\\s*(?:语音|视频)(?:呼叫|打给|拨给)(.+?)\\s*$")
+
+    fun parse(goal: String): CallGoal? {
+        val g = goal.trim()
+        if (g.contains("QQ", true)) return null
+        A.find(g)?.let { m ->
+            val c = m.groupValues[1].trim().removeSuffix("打").removeSuffix("拨").trim()
+            if (c.isNotBlank() && c.length <= 30) return CallGoal(c, m.groupValues[2] == "视频")
+        }
+        B.find(g)?.let { m ->
+            val c = m.groupValues[1].trim()
+            if (c.isNotBlank()) return CallGoal(c, g.contains("视频"))
+        }
+        return null
+    }
+}

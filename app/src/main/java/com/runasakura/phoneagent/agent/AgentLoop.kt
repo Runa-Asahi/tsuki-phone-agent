@@ -73,6 +73,12 @@ class AgentLoop(
 
         // ---- Deterministic paths (never call the model here) ----
         val dev = com.runasakura.phoneagent.a11y.A11yDevice(a11y, onLog)
+        CallGoals.parse(goal)?.let { cg ->
+            val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev,
+                com.runasakura.phoneagent.flow.AppProfile.forPackage(MessagingGoals.WECHAT), onLog) { onConfirm(it) }
+            val out = flow.call(cg.contact, cg.video)
+            return Result(out.ok, 1, out.summary)
+        }
         val msgGoal = MessagingGoals.parse(goal)
         var targetPkg: String? = null
         if (msgGoal != null && msgGoal.contact != null && msgGoal.message != null) {

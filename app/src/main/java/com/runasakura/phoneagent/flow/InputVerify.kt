@@ -40,10 +40,14 @@ object InputVerify {
      * button stripped). Used for STRICT equality when the field can't be read via the IME:
      * a leftover draft makes this ≠ message, so it can no longer pass as 「contains」.
      */
+    private val BAR_ICONS = setOf("+", "＋", "⊕", "㊉", "☺", "☻", "😊")
+
     fun barText(s: Screen, barY: Int): String {
         val row = (s.h * 0.035).toInt().coerceAtLeast(40)
         return s.items.filter { kotlin.math.abs(it.cy - barY) <= row && (s.imeTop == null || it.cy < s.imeTop) }
             .filter { Text.nameKey(it.label) !in BAR_CHROME.map { c -> Text.nameKey(c) } }
+            // Icons OCR'd as symbols (WeChat's 「+」 / 「⊕」 / emoji face) are not draft text.
+            .filter { Text.norm(it.label).trim() !in BAR_ICONS && Text.nameKey(it.label).isNotEmpty() }
             .sortedWith(compareBy({ it.cy }, { it.cx }))
             .joinToString("") { val n = Text.norm(it.label); if (n.endsWith("发送") && n.length > 2) n.dropLast(2) else n }
     }

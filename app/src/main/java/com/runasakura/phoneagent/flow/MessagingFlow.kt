@@ -1,5 +1,7 @@
 package com.runasakura.phoneagent.flow
 
+import com.runasakura.phoneagent.agent.MessagingGoals
+
 import com.runasakura.phoneagent.screen.ScreenItem
 
 /** Per-app knobs for the deterministic messaging flow. */
@@ -56,6 +58,9 @@ class MessagingFlow(
         val SECTION_HEADERS = EXCLUDED_SECTIONS + setOf(
             "联系人", "群聊", "最常使用", "好友", "功能", "设备", "更多联系人", "企业微信联系人"
         )
+        const val CALL_ENTRY = "音视频通话"
+        private const val PLUS_X = 0.95
+        val CALL_MARKERS = listOf("等待对方接受邀请", "正在呼叫", "挂断", "切到语音通话", "免提", "通话中")
         val CONTACT_SECTIONS = setOf("联系人", "最常使用", "好友", "更多联系人")
         private const val SEND = "发送"
     }
@@ -64,40 +69,8 @@ class MessagingFlow(
         containsTitle = null; fuzzyTitle = null
         com.runasakura.phoneagent.agent.MessagingGoals.validate(contact, message)?.let { return fail(it) }
         log("消息流程：${app.label} → 「$contact」 内容「${message.take(40)}${if (message.length > 40) "…" else ""}」")
-        val probe = d.screen()
-        if (probe.w > probe.h) return fail("当前为横屏（${probe.w}x${probe.h}），请竖屏后重试")
-        if (!d.alive()) return fail(DISCONNECTED)
-        if (!ensureMain()) return if (!d.alive()) fail(DISCONNECTED) else fail("无法回到${app.label}主界面（请先手动打开${app.label}首页后重试）")
-
-        // 1) exact match in visible chat list (only if exactly one)
+        openChat(contact)?.let { return fail(it) }
         var s = d.screen()
-        dump("主界面", s)
-        val listHits = exactMatches(s, contact, top = (s.h * 0.10).toInt(), excludeSections = false)
-            .filter { it.cy < s.h * 0.86 }
-        val entered = if (listHits.size == 1) {
-            log("聊天列表中精确匹配到「$contact」，直接进入")
-            d.tap(listHits[0]); d.afterAction(2000); true
-        } else {
-            if (listHits.size > 1) log("聊天列表中有 ${listHits.size} 个同名项，改用搜索")
-            when (val r = searchAndOpen(contact)) {
-                null -> true
-                else -> return fail(r)
-            }
-        }
-        if (!d.alive()) return fail(DISCONNECTED)
-        if (!entered) return fail("未能进入聊天")
-
-        // 2) verify chat title
-        s = d.screen()
-        dump("聊天页", s)
-        if (s.pkg != app.pkg) return fail("进入聊天后前台不是${app.label}（${s.pkg}）")
-        if (!titleMatches(s, contact)) {
-            val seen = s.items.filter { it.cy < s.h * 0.12 }.joinToString("、") { it.label }
-            log("✗ 聊天标题与「$contact」不符（看到：$seen），退出")
-            d.back(); d.afterAction(1000) // ONE back: a second one could exit the app from its main screen
-            return fail("打开的聊天标题不是「$contact」（看到：${seen.ifBlank { "无" }}），已退出，未输入任何内容")
-        }
-        log("✓ 聊天标题已核对：$contact")
 
         // 3) type message (switch out of voice mode first; WeChat shows 「按住 说话」)
         s = leaveVoiceMode(s) ?: return fail("无法退出语音输入模式，未发送")
@@ -361,6 +334,90 @@ class MessagingFlow(
                 }
             }
         }
+    }
+
+    /** Steps 0–2 shared by messaging and calls: main screen → chat list / search → verified chat title. Returns an error or null. */
+    suspend fun openChat(contact: String): String? {
+        val probe = d.screen()
+        if (probe.w > probe.h) return ("当前为横屏（${probe.w}x${probe.h}），请竖屏后重试")
+        if (!d.alive()) return (DISCONNECTED)
+        if (!ensureMain()) return if (!d.alive()) DISCONNECTED else "无法回到${app.label}主界面（请先手动打开${app.label}首页后重试）"
+
+        // 1) exact match in visible chat list (only if exactly one)
+        var s = d.screen()
+        dump("主界面", s)
+        val listHits = exactMatches(s, contact, top = (s.h * 0.10).toInt(), excludeSections = false)
+            .filter { it.cy < s.h * 0.86 }
+        val entered = if (listHits.size == 1) {
+            log("聊天列表中精确匹配到「$contact」，直接进入")
+            d.tap(listHits[0]); d.afterAction(2000); true
+        } else {
+            if (listHits.size > 1) log("聊天列表中有 ${listHits.size} 个同名项，改用搜索")
+            when (val r = searchAndOpen(contact)) {
+                null -> true
+                else -> return r
+            }
+        }
+        if (!d.alive()) return (DISCONNECTED)
+        if (!entered) return ("未能进入聊天")
+
+        // 2) verify chat title
+        s = d.screen()
+        dump("聊天页", s)
+        if (s.pkg != app.pkg) return ("进入聊天后前台不是${app.label}（${s.pkg}）")
+        if (!titleMatches(s, contact)) {
+            val seen = s.items.filter { it.cy < s.h * 0.12 }.joinToString("、") { it.label }
+            log("✗ 聊天标题与「$contact」不符（看到：$seen），退出")
+            d.back(); d.afterAction(1000) // ONE back: a second one could exit the app from its main screen
+            return ("打开的聊天标题不是「$contact」（看到：${seen.ifBlank { "无" }}），已退出，未输入任何内容")
+        }
+        log("✓ 聊天标题已核对：$contact")
+        return null
+    }
+
+    /**
+     * 给X打语音/视频电话: verified chat → 「+」 → 「音视频通话」 → confirm (recipient + type) → 语音通话/视频通话 → verify call screen.
+     */
+    suspend fun call(contact: String, video: Boolean): Outcome {
+        containsTitle = null; fuzzyTitle = null
+        if (app.pkg != MessagingGoals.WECHAT) return fail("音视频通话目前只支持微信")
+        if (Text.norm(contact).isEmpty()) return fail("联系人为空，拒绝拨打")
+        val kind = if (video) "视频通话" else "语音通话"
+        log("通话流程：微信 → 「$contact」 $kind")
+        openChat(contact)?.let { return fail(it) }
+        var s = leaveVoiceMode(d.screen()) ?: return fail("无法退出语音输入模式，未拨打")
+        if (s.items.none { Text.eq(it.label, CALL_ENTRY) }) {
+            val plus = s.items.filter { it.cy > s.h * 0.8 && (s.imeTop == null || it.cy < s.imeTop) &&
+                Text.norm(it.label).let { n -> n == "+" || n == "＋" || n.contains("更多功能") } }.maxByOrNull { it.cx }
+            if (plus != null) d.tap(plus) else {
+                val edit = s.items.lastOrNull { it.edit && (s.imeTop == null || it.cy < s.imeTop) }
+                val y = edit?.cy ?: (s.h * app.inputFallback.second).toInt()
+                log("未识别到「+」，按位置点击输入栏右侧")
+                d.tapXY((s.w * PLUS_X).toInt(), y)
+            }
+            d.afterAction(900); s = d.screen()
+        }
+        dump("更多面板", s)
+        val entry = s.items.firstOrNull { Text.eq(it.label, CALL_ENTRY) }
+            ?: s.items.firstOrNull { Text.norm(it.label).contains("视频通话") && it.cy > s.h * 0.6 }
+            ?: return fail("未找到「音视频通话」入口（已在「$contact」聊天页），未拨打").also { d.back() }
+        d.tap(entry); d.afterAction(900); s = d.screen()
+        dump("通话类型", s)
+        val opt = s.items.filter { Text.eq(it.label, kind) }.maxByOrNull { it.cy }
+            ?: return fail("未找到「$kind」选项，未拨打").also { d.back() }
+        val who = containsTitle?.let { "$contact（⚠ 包含匹配，完整名称「$it」）" }
+            ?: fuzzyTitle?.let { "$contact（⚠ 屏幕标题识别为「$it」）" } ?: "$contact（已核对聊天标题）"
+        if (!confirm("通话确认（微信）\n对象：$who\n类型：$kind\n\n确认后将立即拨出。")) {
+            log("用户取消通话"); d.back(); d.afterAction(500)
+            return Outcome(false, "用户取消通话", cancelled = true)
+        }
+        d.invalidateObservation()
+        d.tap(opt); d.afterAction(2500)
+        s = d.screen()
+        dump("通话页", s)
+        val inCall = s.items.any { Text.norm(it.label).let { n -> CALL_MARKERS.any { m -> n.contains(m) } } }
+        return if (inCall) { log("✓ 已进入${kind}界面"); Outcome(true, "已向「$contact」发起$kind", verified = true) }
+        else fail("已点击「$kind」，但未识别到通话界面（请在手机上查看）")
     }
 
     /** Exact label matches below [top] and above the keyboard, optionally skipping non-contact sections. */

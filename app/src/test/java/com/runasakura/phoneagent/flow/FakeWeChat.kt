@@ -44,6 +44,10 @@ class FakeWeChat(
     val sendTapIgnored: Boolean = false
 ) : Device {
     var clears = 0
+    /** "" | "plus" | "sheet" — chat bottom panels for the call flow. */
+    var chatPanel = ""
+    var showPlusLabel = true
+    val calls = mutableListOf<String>()
     override suspend fun fieldText(): String? = if (!fieldReadable) null else when {
         state.startsWith("chat:") -> inputText
         state == "search" -> searchText
@@ -75,6 +79,12 @@ class FakeWeChat(
         val items = mutableListOf<ScreenItem>()
         var imeTop: Int? = null
         when {
+            state.startsWith("call:") -> {
+                items += item(state.substringAfterLast(":"), 632, 900)
+                items += item("等待对方接受邀请", 632, 1200)
+                if (state.contains("video")) items += item("切到语音通话", 632, 2200)
+                items += item("取消", 632, 2450)
+            }
             state == "home" -> return Screen("com.hihonor.android.launcher", W, H, listOf(item("微信", 300, 1500)), source)
             state == "main" -> {
                 items += item(tabs[0], 632, 200)
@@ -116,6 +126,11 @@ class FakeWeChat(
                         items += item(line, 900, 2300 - i * 200 - j * 50)
                     }
                 }
+                when (chatPanel) {
+                    "plus" -> listOf("相册", "拍摄", "音视频通话", "位置").forEachIndexed { i, l -> items += item(l, 200 + i * 300, 2300) }
+                    "sheet" -> { items += item("视频通话", 632, 2300); items += item("语音通话", 632, 2450); items += item("取消", 632, 2600) }
+                }
+                if (inputText.isBlank() && showPlusLabel && !voiceMode) items += item("+", 1200, 2660)
                 if (voiceMode) {
                     items += item("按住 说话", 560, 2660)
                 } else {
@@ -154,6 +169,12 @@ class FakeWeChat(
             state == "search" && label == "取消" -> state = "main"
             state == "search" && label in currentSearchRows() && !resultTapWorks -> Unit
             state == "search" && label in currentSearchRows() -> { state = "chat:" + chatTitleFor(label); inputText = draft; resultPage = 0 }
+            state.startsWith("chat:") && chatPanel == "" && inputText.isBlank() && (label == "+" || (x > 1150 && y in 2600..2720)) -> chatPanel = "plus"
+            state.startsWith("chat:") && chatPanel == "plus" && label == "音视频通话" -> chatPanel = "sheet"
+            state.startsWith("chat:") && chatPanel == "sheet" && (label == "语音通话" || label == "视频通话") -> {
+                val kind = if (label == "视频通话") "video" else "voice"
+                calls += kind; state = "call:$kind:" + state.removePrefix("chat:"); chatPanel = ""
+            }
             state.startsWith("chat:") && inputText.isNotBlank() && !sendTapIgnored && (label == "发送" || (x > 1100 && y in 2600..2720)) -> { sent += state to inputText; inputText = "" }
             state.startsWith("chat:") && voiceMode && (x < 150 || label.contains("键盘")) -> { voiceMode = false }
         }
@@ -187,6 +208,7 @@ class FakeWeChat(
 
     override suspend fun back() {
         backs++
+        if (chatPanel.isNotEmpty()) { chatPanel = ""; return }
         state = when {
             state == "search" || state.startsWith("chat:") || state == "moments" || state.startsWith("menu:") -> "main"
             state == "main" || state == "me" || state == "splash" -> "home"
