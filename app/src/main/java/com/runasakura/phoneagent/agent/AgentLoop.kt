@@ -202,7 +202,13 @@ class AgentLoop(
                 onLog("界面文本少于3项，附带截图（仅 VL 模型会使用）")
                 try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
             } else null
-            onLog("请求本机 MNN（2B 可能需数十秒，日志会心跳）…")
+            if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_CLOUD_ONLY &&
+                router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
+                cloudPlanText = router.cloudPlan(goal, snap.compressedText)?.let { st ->
+                    onLog("云端规划（本机按此执行）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")
+                } ?: ""
+            }
+            onLog("请求模型（${com.runasakura.phoneagent.llm.RoutePolicy.label(router.mode)}${if (router.localSidelined) "，本机已旁路" else ""}）…")
             val useFocused = history.firstOrNull()?.content == SystemPrompt.FOCUSED
             val sys = if (useFocused) SystemPrompt.FOCUSED else SystemPrompt.SHORT
             val msgs = if (useFocused) {
@@ -213,14 +219,18 @@ class AgentLoop(
                 // Keep history short for VL: system SHORT + last user observe only
                 listOf(
                     ChatMessage("system", SystemPrompt.SHORT),
-                    ChatMessage("user", "目标：$goal"),
+                    ChatMessage("user", "目标：$goal" + (cloudPlanText?.takeIf { it.isNotBlank() }?.let { "\n$it" } ?: "")),
                     ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote), shot)
                 )
             }
             // Local↔cloud collaboration: simple steps stay local; escalate to cloud on no-progress
             // or after the previous step's invalid/unparseable output.
-            val escalate = escalateNext || steps.stuckCount >= 2
-            if (escalate && router.canEscalate) onLog("升级到云端：" + if (escalateNext) "上一步模型输出无效" else "界面连续无变化")
+            val lowConf = sc.items.size < 3  // almost nothing readable (OCR-only alone is not low-confidence)
+            val escalate = escalateNext || steps.stuckCount >= 2 || lowConf
+            if (escalate && router.canEscalate) onLog("升级到云端：" + when {
+                escalateNext -> "上一步本机输出无效或低置信（重复同一动作）"
+                lowConf -> "界面文字过少（低置信）"
+                else -> "界面连续无变化" })
             escalateNext = false
             var resp = planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
             logLlm(resp)
@@ -235,6 +245,12 @@ class AgentLoop(
             onLog("action: ${plan.action}")
             var err = validationError(plan, resp.content, sc)
             if (err != null) escalateNext = true
+            // Low confidence: local model repeats exactly the previous action → next step goes to cloud.
+            val actKey = plan.action.toString()
+            if (err == null && !resp.backend.startsWith("cloud") && !resp.backend.startsWith("deepseek") && actKey == lastActionKey) {
+                onLog("本机重复上一步相同动作（低置信），下一步交给云端"); escalateNext = true
+            }
+            lastActionKey = actKey
             var tries = 0
             while (err != null && tries < 2) {
                 tries++
@@ -547,6 +563,8 @@ class AgentLoop(
     }
 
     private var escalateNext = false
+    private var lastActionKey: String? = null
+    private var cloudPlanText: String? = null
     private var injectionBlocks = 0
     private var lastTyped: String? = null
 
