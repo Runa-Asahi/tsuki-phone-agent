@@ -110,6 +110,13 @@ class SubgoalExecutor(
             d.scroll(true); d.afterAction(1200)
             s = d.screen()
             pick(s, target, below = (s.h * 0.04).toInt())?.let { onLog("✓ 滑动 $i 次后看到「${it.label}」"); return it }
+            var waits = 0
+            while (StepHistory.isLoading(s.items.map { it.label }) && waits++ < 4) { d.afterAction(2000); s = d.screen() }
+            if (waits > 0) {
+                still = 0
+                pick(s, target, below = (s.h * 0.04).toInt())?.let { onLog("✓ 加载后看到「${it.label}」"); return it }
+                continue
+            }
             if (sig(s) == before) { if (++still >= 2) { onLog("已到底，未见「$target」"); return null } } else still = 0
         }
         return null

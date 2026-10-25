@@ -24,7 +24,9 @@ class FakeWeChat(
     /** Extra search-result pages revealed by scroll (pagination). */
     var extraResultPages: List<List<String>> = emptyList(),
     /** Chat-list rows shown after the first scroll (scroll-until-visible tests). */
-    val moreListRows: List<String> = emptyList()
+    val moreListRows: List<String> = emptyList(),
+    /** Number of observations after the first scroll that show only a 加载中 spinner. */
+    var loadingObservations: Int = 0
 ) : Device {
     val W = 1264; val H = 2800
     val taps = mutableListOf<String>()
@@ -39,6 +41,10 @@ class FakeWeChat(
         ScreenItem("", label, cx, cy, true, edit, false, label)
 
     override suspend fun screen(): Screen {
+        if (state == "main" && scrolls > 0 && loadingObservations > 0) {
+            loadingObservations--
+            return Screen(pkg, 1264, 2800, listOf(item("加载中", 632, 1400)), "tree")
+        }
         val items = mutableListOf<ScreenItem>()
         var imeTop: Int? = null
         when {
