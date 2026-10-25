@@ -297,16 +297,29 @@ class A11yDevice(
             return Text.norm(n.text?.toString().orEmpty()) == Text.norm(text)
         }
         suspend fun paste(): Boolean {
-            val n = node ?: s.focusedInput() ?: return false
-            s.clearText(n)
-            return s.pasteText(n, text).also { if (it) log("输入方式：剪贴板粘贴") }
+            val n = node ?: s.focusedInput()
+            if (n != null && s.pasteText(n, text)) { log("输入方式：剪贴板粘贴（节点）"); return true }
+            return s.imePaste(text).also { if (it) log("输入方式：剪贴板粘贴（输入法通道）") }
         }
-        fun ime(): Boolean = s.imeCommit(text).also { if (it) log("输入方式：无障碍输入法通道") }
+        fun ime(): Boolean = s.imeCommit(text).also { if (it) log("输入方式：无障碍输入法通道 commitText") }
+        // Each attempt uses ONE method (callers clear the field between attempts, so a method
+        // that "silently worked" can never stack duplicates like 八嘎八嘎八嘎).
         return when (attempt) {
-            0 -> setText() || ime() || paste()
-            1 -> paste() || ime()
-            else -> ime() || paste()
+            0 -> setText().also { if (it) log("输入方式：SET_TEXT") } || ime()
+            1 -> paste()
+            else -> setText().also { if (it) log("输入方式：SET_TEXT") } || ime()
         }
+    }
+
+    override suspend fun fieldText(): String? =
+        s.imeFieldText() ?: s.focusedInput()?.let { n -> n.refresh(); n.text?.toString() }
+
+    override suspend fun clearField(): Boolean {
+        invalidateOcr("clear")
+        val n = s.focusedInput()
+        val ok = (n != null && s.clearText(n)) || s.imeClear()
+        delay(200)
+        return ok
     }
 
     override suspend fun home() { invalidateOcr("home"); s.home(); delay(150) }

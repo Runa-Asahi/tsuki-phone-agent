@@ -277,11 +277,43 @@ class AgentAccessibilityService : AccessibilityService() {
      * Type through the accessibility input-method channel (API 33+, flagInputMethodEditor).
      * Works even when the app hides its node tree, as long as a text field has input focus.
      */
-    fun imeCommit(text: String): Boolean {
+    /** Full text of the focused field via the a11y IME connection (works with WeChat's hidden tree). */
+    fun imeFieldText(): String? {
+        if (Build.VERSION.SDK_INT < 33) return null
+        return try {
+            val ic = inputMethod?.currentInputConnection ?: return null
+            val st = ic.getSurroundingText(4000, 4000, 0) ?: return null
+            st.text?.toString()
+        } catch (e: Exception) { Log.w(TAG, "imeFieldText failed: ${e.message}"); null }
+    }
+
+    /** Clear the focused field through the IME connection: delete everything around the cursor. */
+    fun imeClear(): Boolean {
         if (Build.VERSION.SDK_INT < 33) return false
         return try {
             val ic = inputMethod?.currentInputConnection ?: return false
             ic.performContextMenuAction(android.R.id.selectAll)
+            ic.commitText("", 1, null)
+            ic.deleteSurroundingText(4000, 4000)
+            true
+        } catch (e: Exception) { Log.w(TAG, "imeClear failed: ${e.message}"); false }
+    }
+
+    /** Paste [text] through the IME connection (clipboard + context-menu paste). */
+    fun imePaste(text: String): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        return try {
+            val ic = inputMethod?.currentInputConnection ?: return false
+            val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            cm.setPrimaryClip(android.content.ClipData.newPlainText("agent", text))
+            ic.performContextMenuAction(android.R.id.paste); true
+        } catch (e: Exception) { Log.w(TAG, "imePaste failed: ${e.message}"); false }
+    }
+
+    fun imeCommit(text: String): Boolean {
+        if (Build.VERSION.SDK_INT < 33) return false
+        return try {
+            val ic = inputMethod?.currentInputConnection ?: return false
             ic.commitText(text, 1, null)
             true
         } catch (e: Exception) {

@@ -28,8 +28,31 @@ class FakeWeChat(
     /** Number of observations after the first scroll that show only a 加载中 spinner. */
     var loadingObservations: Int = 0,
     /** Render the search page exactly as PPG-AN00 OCR saw it (no 取消, merged placeholder). */
-    val realOcrSearch: Boolean = false
+    val realOcrSearch: Boolean = false,
+    /** IME commit appends (select-all is a no-op in WeChat) — reproduces 八嘎八嘎八嘎. */
+    val imeAppends: Boolean = false,
+    /** OCR glues the input text and the green button into one label: 「八嘎发送」. */
+    val ocrMergesSend: Boolean = false,
+    /** OCR misses the 发送 label entirely (white on green). */
+    val ocrMissesSend: Boolean = false,
+    /** Field content readable through the IME connection. */
+    val fieldReadable: Boolean = false,
+    var clearWorks: Boolean = true,
+    /** Unsent draft WeChat restores when the chat opens. */
+    val draft: String = ""
 ) : Device {
+    var clears = 0
+    override suspend fun fieldText(): String? = if (!fieldReadable) null else when {
+        state.startsWith("chat:") -> inputText
+        state == "search" -> searchText
+        else -> null
+    }
+    override suspend fun clearField(): Boolean {
+        clears++
+        if (!clearWorks) return false
+        if (state.startsWith("chat:")) inputText = "" else if (state == "search") searchText = ""
+        return true
+    }
     val W = 1264; val H = 2800
     val taps = mutableListOf<String>()
     val typed = mutableListOf<String>()
@@ -97,12 +120,14 @@ class FakeWeChat(
                         inputText.lines().filter { it.isNotBlank() || inputText.isEmpty() }.ifEmpty { listOf(inputText) }.forEachIndexed { j, line ->
                             items += item(line, 560, 2660 - j * 40, edit = j == 0)
                         }
+                    } else if (inputText.isNotBlank() && ocrMergesSend) {
+                        items += item(inputText + "发送", 700, 2660)
                     } else if (inputText.isNotBlank()) {
                         inputText.lines().filter { it.isNotBlank() }.forEachIndexed { j, line ->
                             items += item(line, 560, 2660 - j * 40)
                         }
                     }
-                    if (inputText.isNotBlank()) items += item("发送", 1180, 2660)
+                    if (inputText.isNotBlank() && !ocrMergesSend && !ocrMissesSend) items += item("发送", 1180, 2660)
                 }
             }
         }
@@ -121,11 +146,11 @@ class FakeWeChat(
             state == "main" && label == tabs[0] -> Unit
             state == "main" && label == searchLabel -> { state = "search"; searchText = "" }
             state == "main" && y in 120..280 && x > 1000 -> { state = "search"; searchText = "" }
-            state == "main" && label in listRows -> { state = "chat:" + chatTitleFor(label); inputText = "" }
+            state == "main" && label in listRows -> { state = "chat:" + chatTitleFor(label); inputText = draft }
             state == "search" && label == "取消" -> state = "main"
             state == "search" && label in currentSearchRows() && !resultTapWorks -> Unit
-            state == "search" && label in currentSearchRows() -> { state = "chat:" + chatTitleFor(label); inputText = ""; resultPage = 0 }
-            state.startsWith("chat:") && label == "发送" -> { sent += state to inputText; inputText = "" }
+            state == "search" && label in currentSearchRows() -> { state = "chat:" + chatTitleFor(label); inputText = draft; resultPage = 0 }
+            state.startsWith("chat:") && inputText.isNotBlank() && (label == "发送" || (x > 1100 && y in 2600..2720)) -> { sent += state to inputText; inputText = "" }
             state.startsWith("chat:") && voiceMode && (x < 150 || label.contains("键盘")) -> { voiceMode = false }
         }
         return true
@@ -149,7 +174,7 @@ class FakeWeChat(
             state == "search" -> searchText = text
             state.startsWith("chat:") -> {
                 if (voiceMode) return false
-                inputText = text
+                inputText = if (imeAppends) inputText + text else text
             }
             else -> return false
         }

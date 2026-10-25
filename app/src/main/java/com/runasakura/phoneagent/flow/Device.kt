@@ -25,6 +25,10 @@ interface Device {
     suspend fun longPress(item: ScreenItem): Boolean
     /** False once the accessibility service backing this device has disconnected/restarted. */
     fun alive(): Boolean = true
+    /** Actual content of the focused input (IME surrounding text / node text); null = unknown. */
+    suspend fun fieldText(): String? = null
+    /** Clear the focused input (IME select-all+delete, else SET_TEXT ""). */
+    suspend fun clearField(): Boolean = false
     /**
      * Type into the focused/given field (tap hint first if needed). Replaces existing text.
      * [attempt] selects the strategy order so callers can retry with a different channel:

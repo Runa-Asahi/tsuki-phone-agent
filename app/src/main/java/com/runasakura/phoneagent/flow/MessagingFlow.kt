@@ -45,6 +45,8 @@ class MessagingFlow(
     data class Outcome(val ok: Boolean, val summary: String, val cancelled: Boolean = false, val verified: Boolean = false)
 
     companion object {
+        /** Horizontal centre of WeChat/QQ's 发送 button as a fraction of screen width. */
+        const val SEND_X = 0.915
         const val DISCONNECTED = "无障碍服务已断开，任务已停止，未发送；请重新打开无障碍服务后重试"
         /** Result sections whose rows are NOT the contact itself. */
         val EXCLUDED_SECTIONS = setOf(
@@ -99,17 +101,51 @@ class MessagingFlow(
         val edit = s.items.lastOrNull { it.edit && (s.imeTop == null || it.cy < s.imeTop) }
         val hx = edit?.cx ?: (s.w * app.inputFallback.first).toInt()
         val hy = edit?.cy ?: (s.h * app.inputFallback.second).toInt()
+        pendingMessage = message
+        // Focus the chat input bar first (bottom bar, above the keyboard).
+        d.tapXY(hx, hy); d.afterAction(600)
+        // WeChat restores unsent drafts (e.g. 八嘎八嘎八嘎 from a previous failed run): clear first.
+        d.fieldText()?.takeIf { Text.norm(it).isNotEmpty() }?.let { draft ->
+            log("输入框已有草稿「${draft.take(20)}」，先清空")
+            d.clearField(); d.afterAction(400)
+            if (!d.fieldText().isNullOrBlank()) return fail("输入框无法清空（残留「${draft.take(20)}」），为避免重复内容未发送，请手动清空")
+        }
         var send: ScreenItem? = null
         for (attempt in 0..2) {
-            if (!d.type(message, hx, hy, attempt)) continue
+            if (attempt > 0) {
+                // NEVER retype on top of a previous attempt: clear and prove it is empty.
+                d.clearField(); d.afterAction(500)
+                val left = d.fieldText()
+                val sNow = d.screen()
+                val stillThere = if (left != null) Text.norm(left).isNotEmpty()
+                    else findSend(sNow)?.let { InputVerify.inputContains(sNow, message, it) } ?: false
+                if (stillThere) {
+                    return fail("输入框无法清空（残留「${left ?: "未知"}」），为避免重复内容未发送，请手动清空")
+                }
+            }
+            if (!d.type(message, hx, hy, attempt)) { log("输入方式 ${attempt + 1} 不可用"); continue }
             d.afterAction(1200)
             s = d.screen()
+            val v = InputCheck.judge(d.fieldText(), message)
             val sb = findSend(s)
-            if (sb != null && InputVerify.inputContains(s, message, sb)) { send = sb; break }
-            log("输入框未核对到「$message」，换输入方式重试（${attempt + 1}/3）")
+            when (v) {
+                InputCheck.Verdict.EXACT -> {
+                    log("✓ 输入框内容（输入法通道读取）=「$message」")
+                    send = sb ?: sendFallback(s, hy).also { log("OCR 未识别到「发送」，按输入栏右侧位置 (${it.cx},${it.cy})") }
+                }
+                InputCheck.Verdict.REPEATED -> log("输入框内容重复（${d.fieldText()}），清空后重输（${attempt + 1}/3）")
+                InputCheck.Verdict.WRONG -> log("输入框实际内容「${d.fieldText()}」与目标不符，清空后重试（${attempt + 1}/3）")
+                InputCheck.Verdict.UNKNOWN ->
+                    if (sb != null && InputVerify.inputContains(s, message, sb)) send = sb
+                    else log("输入框未核对到「$message」（OCR：${s.items.filter { it.cy > s.h * 0.6 }.joinToString(" | ") { it.label }}），清空后换方式重试（${attempt + 1}/3）")
+            }
+            if (send != null) break
         }
         if (!d.alive()) return fail(DISCONNECTED)
-        if (send == null) return fail("输入后无法核对输入框内容/未出现「发送」按钮（可能语音模式或输入失败），未发送")
+        if (send == null) {
+            d.clearField()
+            return fail("输入后无法核对输入框内容（已尝试 commitText / 粘贴 / 再次输入，并已清空输入框），未发送")
+        }
         log("✓ 输入框已核对")
 
         // 4) confirm
@@ -128,16 +164,26 @@ class MessagingFlow(
         }
         if (!d.alive()) return fail(DISCONNECTED)
         if (!titleMatches(s, contact)) return fail("确认期间界面已变化，未发送")
-        val send2 = findSend(s) ?: return fail("确认后找不到「发送」按钮，未发送")
+        val fieldNow = InputCheck.judge(d.fieldText(), message)
+        if (fieldNow == InputCheck.Verdict.REPEATED || fieldNow == InputCheck.Verdict.WRONG) return fail("确认期间输入框内容变化，未发送")
+        val send2 = findSend(s)
+            ?: if (fieldNow == InputCheck.Verdict.EXACT || send.label != SEND) sendFallback(s, hy).also { log("按输入栏右侧位置点击发送 (${it.cx},${it.cy})") }
+            else return fail("确认后找不到「发送」按钮，未发送")
         d.tap(send2)
         log("已点击发送")
         d.afterAction(1500)
 
         // 5) verify bubble
         s = d.screen()
-        val stillPending = findSend(s)?.let { InputVerify.inputContains(s, message, it) } ?: false
+        val after = d.fieldText()
+        val stillPending = if (after != null) Text.norm(after).isNotEmpty()
+            else findSend(s)?.let { InputVerify.inputContains(s, message, it) } ?: false
         val bubble = InputVerify.countBubbles(s, message) > bubblesBefore
-        return if (!stillPending && bubble) {
+        if (stillPending) {
+            log("✗ 点击发送后输入框仍有内容，未发送成功")
+            return fail("点击发送后输入框仍有内容，消息可能未发出（未重复点击，请看一眼手机）")
+        }
+        return if (bubble || after != null) {
             log("✓ 已在聊天中看到消息")
             Outcome(true, "已发送给「$contact」：$message（已核验）", verified = true)
         } else {
@@ -218,6 +264,7 @@ class MessagingFlow(
         val hy = searchEdit?.cy ?: fieldXY?.second ?: cancel?.cy ?: (s.h * 0.07).toInt()
         var typedOk = false
         for (attempt in 0..2) {
+            if (attempt > 0) { d.clearField(); d.afterAction(400) }
             if (!d.type(contact, hx, hy, attempt)) continue
             d.afterAction(1500)
             s = d.screen()
@@ -291,6 +338,8 @@ class MessagingFlow(
         return out to secMap
     }
 
+    private var pendingMessage: String? = null
+
     /** Set when the chat title only matched fuzzily; shown verbatim in the send confirmation. */
     private var fuzzyTitle: String? = null
 
@@ -310,6 +359,20 @@ class MessagingFlow(
     fun findSend(s: Screen): ScreenItem? = s.items
         .filter { Text.eq(it.label, SEND) && it.cy > s.h * 0.3 && (s.imeTop == null || it.cy < s.imeTop) }
         .maxByOrNull { it.cy }
+        ?: s.items
+            // OCR row-merge: 「八嘎发送」 — the green button glued to the input text. Tap the right end.
+            .filter { Text.norm(it.label).endsWith(SEND) && it.label.length > SEND.length && it.cy > s.h * 0.5 && (s.imeTop == null || it.cy < s.imeTop) }
+            .maxByOrNull { it.cy }
+            ?.let { ScreenItem(it.id, it.label, (s.w * SEND_X).toInt(), it.cy, true, false, false, null) }
+
+    /** Bottom-right of the input bar (WeChat/QQ green 发送 button) when OCR misses the label. */
+    private fun sendFallback(s: Screen, barY: Int): ScreenItem {
+        // Row of the typed text in the input bar; never "lowest item" (could be a keyboard key).
+        val y = pendingMessage?.let { m -> s.items.filter { Text.norm(it.label).contains(Text.norm(m)) && it.cy > s.h * 0.5 && (s.imeTop == null || it.cy < s.imeTop) }.maxByOrNull { it.cy }?.cy }
+            ?: s.imeTop?.let { it - (s.h * 0.035).toInt() }
+            ?: barY
+        return ScreenItem("fallback-send", "(发送位置)", (s.w * SEND_X).toInt(), y, true, false, false, null)
+    }
 
     private fun isVoiceMode(s: Screen): Boolean = s.items.any {
         it.cy > s.h * 0.75 && Text.norm(it.label).let { n ->
