@@ -98,6 +98,7 @@ class AgentForegroundService : Service() {
         val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)
         val brain = com.runasakura.phoneagent.llm.CloudProviders.describe(prefs.routeMode, prefs.cloudProvider,
             prefs.cloudBaseUrl, prefs.cloudModel, prefs.cloudApiKey, prefs.mnnModel)
+        com.runasakura.phoneagent.util.Diagnostics.model = brain
         log("大脑：$brain" + if (cloud == null && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY) "（云端未就绪）" else "")
         val router = LlmRouter({ prefs.routeMode }, local, cloud).also { r -> r.log = { log(it) } }
         val loop = AgentLoop(
@@ -124,7 +125,7 @@ class AgentForegroundService : Service() {
                 val live = local.probe()
                 val m = live ?: local.resolveModel()
                 log(if (live != null) "MNN 当前模型：$live" else "MNN 未启动（发消息/打开应用等确定性任务不需要；复杂任务的模型兜底会不可用）")
-                com.runasakura.phoneagent.util.Diagnostics.model = m
+                com.runasakura.phoneagent.util.Diagnostics.model = "$brain | MNN=$m"
                 if (m.contains("reason", true) || m.contains("think", true) || m.contains("distill", true)) {
                     log("提示：推理(Reasoning)模型会输出长思考，建议换 Qwen3 1.7B/4B 或 Qwen2.5 Instruct（MNN）")
                 }

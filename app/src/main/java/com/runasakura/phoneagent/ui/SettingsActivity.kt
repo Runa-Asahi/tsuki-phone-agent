@@ -48,7 +48,7 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.btnTestCloud.setOnClickListener {
             val url = binding.cloudUrl.text.toString().trim(); val key = binding.cloudKey.text.toString().trim()
-            val model = binding.cloudModel.text.toString().trim().ifBlank { AgentPreferences.DEEPSEEK_MODEL }
+            val model = binding.cloudModel.text.toString().trim().ifBlank { CloudProviders.byId(CloudProviders.effectiveProvider(prefs.cloudProvider, url, key)).model }
             binding.cloudTestResult.text = "测试中…"
             lifecycleScope.launch {
                 val (ok, msg) = try { CloudProviders.test(url, key, model) } catch (e: Exception) { false to (e.message ?: "$e") }
@@ -57,20 +57,41 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val providers = CloudProviders.ALL
+        val modelAdapter = ArrayAdapter<String>(this, android.R.layout.simple_dropdown_item_1line, mutableListOf())
+        binding.cloudModel.setAdapter(modelAdapter)
+        fun setModelChoices(list: List<String>) {
+            modelAdapter.clear(); modelAdapter.addAll(list); modelAdapter.notifyDataSetChanged()
+        }
+        binding.cloudModel.setOnClickListener { binding.cloudModel.showDropDown() }
+        binding.cloudModel.setOnFocusChangeListener { _, f -> if (f && modelAdapter.count > 0) binding.cloudModel.post { binding.cloudModel.showDropDown() } }
+        val initialPos = providers.indexOfFirst { it.id == CloudProviders.effectiveProvider(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey) }.coerceAtLeast(0)
         binding.cloudProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers.map { it.label })
-        binding.cloudProvider.setSelection(providers.indexOfFirst { it.id == prefs.cloudProvider }.coerceAtLeast(0))
+        binding.cloudProvider.setSelection(initialPos)
+        setModelChoices(providers[initialPos].models)
+        if (binding.cloudModel.text.isNullOrBlank()) binding.cloudModel.setText(providers[initialPos].model)
+        var lastPos = initialPos
         binding.cloudProvider.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) {}
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val p = providers[position]
-                if (p.id == AgentPreferences.PROVIDER_DEEPSEEK) {
-                    if (binding.cloudUrl.text.isNullOrBlank() || binding.cloudUrl.text.toString() == AgentPreferences.DEEPSEEK_BASE ||
-                        prefs.cloudProvider != AgentPreferences.PROVIDER_DEEPSEEK) {
-                        binding.cloudUrl.setText(AgentPreferences.DEEPSEEK_BASE)
-                    }
-                    if (binding.cloudModel.text.isNullOrBlank() || prefs.cloudProvider != AgentPreferences.PROVIDER_DEEPSEEK) {
-                        binding.cloudModel.setText(AgentPreferences.DEEPSEEK_MODEL)
-                    }
+                setModelChoices(p.models)
+                if (position == lastPos) return   // initial callback: never overwrite the saved model
+                val old = providers[lastPos]; lastPos = position
+                val url = binding.cloudUrl.text.toString().trim()
+                if (p.baseUrl.isNotBlank() && (url.isBlank() || url == old.baseUrl)) binding.cloudUrl.setText(p.baseUrl)
+                val m = binding.cloudModel.text.toString().trim()
+                if (m.isBlank() || m in old.models) binding.cloudModel.setText(p.model)
+            }
+        }
+        binding.btnFetchModels.setOnClickListener {
+            binding.cloudTestResult.text = "获取模型列表中…"
+            lifecycleScope.launch {
+                val (list, err) = CloudProviders.listModels(binding.cloudUrl.text.toString(), binding.cloudKey.text.toString())
+                if (err != null) binding.cloudTestResult.text = "❌ 获取失败：$err（仍可手动输入模型名）"
+                else {
+                    setModelChoices(list)
+                    binding.cloudTestResult.text = "✅ 共 ${list.size} 个模型，点模型框选择"
+                    binding.cloudModel.requestFocus(); binding.cloudModel.showDropDown()
                 }
             }
         }
@@ -83,6 +104,7 @@ class SettingsActivity : AppCompatActivity() {
             prefs.cloudBaseUrl = binding.cloudUrl.text.toString().trim()
             prefs.cloudApiKey = binding.cloudKey.text.toString().trim()
             prefs.cloudModel = binding.cloudModel.text.toString().trim()
+            if (CloudProviders.isReasoner(prefs.cloudModel)) Toast.makeText(this, "提示：推理模型较慢，建议日常用 chat 类模型", Toast.LENGTH_LONG).show()
             prefs.cloudProvider = CloudProviders.effectiveProvider(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)
             prefs.maxSteps = binding.maxSteps.text.toString().toIntOrNull() ?: 25
             prefs.allowCloudScreenshot = binding.cloudShot.isChecked

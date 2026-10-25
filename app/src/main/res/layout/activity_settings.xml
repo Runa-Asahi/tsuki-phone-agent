@@ -49,7 +49,8 @@
             <EditText android:id="@+id/cloudKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" />
 
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_model" />
-            <EditText android:id="@+id/cloudModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" />
+            <AutoCompleteTextView android:id="@+id/cloudModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:completionThreshold="0" android:hint="点击选择，或直接输入任意模型名" />
+            <Button android:id="@+id/btnFetchModels" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="获取模型列表" />
             <Button android:id="@+id/btnTestCloud" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="测试连接" />
             <TextView android:id="@+id/cloudTestResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:textIsSelectable="true" />
 

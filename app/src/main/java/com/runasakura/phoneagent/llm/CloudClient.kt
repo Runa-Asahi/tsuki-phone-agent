@@ -20,15 +20,16 @@ class CloudClient(
     private val baseUrl: String,
     private val apiKey: String,
     private val model: String,
-    private val jsonMode: Boolean = baseUrl.contains("deepseek", true) || baseUrl.contains("openai.com", true),
-    private val maxTokens: Int = 200,
+    private val jsonMode: Boolean = (baseUrl.contains("deepseek", true) || baseUrl.contains("openai.com", true) ||
+        baseUrl.contains("dashscope", true)) && !CloudProviders.isReasoner(model),
+    private val maxTokens: Int = if (CloudProviders.isReasoner(model)) 2000 else 200,
     private val http: OkHttpClient = SHARED
 ) : LlmClient {
-    override val name: String = if (baseUrl.contains("deepseek", true)) "deepseek" else "cloud"
+    override val name: String = (if (baseUrl.contains("deepseek", true)) "deepseek" else "cloud") + ":" + model
 
     fun buildBody(messages: List<ChatMessage>, temperature: Double): JSONObject = JSONObject().apply {
         put("model", model)
-        put("temperature", temperature)
+        if (!CloudProviders.isReasoner(model)) put("temperature", temperature)
         put("stream", false)
         put("max_tokens", maxTokens)
         if (jsonMode) put("response_format", JSONObject().put("type", "json_object"))
