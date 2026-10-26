@@ -21,8 +21,6 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        setSupportActionBar(binding.toolbar)
-        supportActionBar?.setDisplayHomeAsUpEnabled(true)
         binding.toolbar.setNavigationOnClickListener { finish() }
 
         val prefs = PhoneAgentApp.instance.prefs
@@ -42,6 +40,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.visionLocalModel.setText(prefs.visionLocalModel)
         binding.confirmAlarm.isChecked = prefs.confirmAlarm
         binding.cloudThinking.isChecked = prefs.cloudThinking
+        binding.modelCheckpoint.isChecked = prefs.modelCheckpoint
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
@@ -123,6 +122,7 @@ class SettingsActivity : AppCompatActivity() {
             prefs.visionLocalModel = binding.visionLocalModel.text.toString()
             prefs.confirmAlarm = binding.confirmAlarm.isChecked
             prefs.cloudThinking = binding.cloudThinking.isChecked
+            prefs.modelCheckpoint = binding.modelCheckpoint.isChecked
             binding.visionKey.text.toString().trim().takeIf { it.isNotEmpty() }?.let { prefs.visionApiKey = it }
             prefs.routeMode = modes[binding.routeMode.selectedItemPosition]
             Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()

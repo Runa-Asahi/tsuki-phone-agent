@@ -50,7 +50,7 @@ class MainActivity : AppCompatActivity() {
                 when (type) {
                     "running" -> setRunning(true)
                     "done", "stopped" -> setRunning(false)
-                    "paused" -> binding.btnPause.text = if (msg == "1") "继续" else "暂停"
+                    "paused" -> setPauseButton(msg == "1")
                 }
                 scheduleRender()
                 if (type != "log") refreshA11yStatus()
@@ -125,20 +125,27 @@ class MainActivity : AppCompatActivity() {
         binding.btnStart.visibility = if (running) android.view.View.GONE else android.view.View.VISIBLE
         binding.btnStop.visibility = if (running) android.view.View.VISIBLE else android.view.View.GONE
         binding.btnPause.visibility = if (running) android.view.View.VISIBLE else android.view.View.GONE
-        if (!running) binding.btnPause.text = "暂停"
+        if (!running) setPauseButton(false)
         binding.goalInput.isEnabled = !running
-        binding.goalLayout.hint = if (!running && ChatSession.lastGoal != null) "继续追问或下一个任务…" else getString(R.string.goal_hint)
+        val asking = (ChatSession.snapshot().lastOrNull() as? ChatSession.Item.Result)?.ask == true
+        binding.goalInput.hint = getString(when {
+            !running && asking -> R.string.reply_hint
+            !running && ChatSession.lastGoal != null -> R.string.followup_hint
+            else -> R.string.goal_hint })
         renderPhase()
     }
 
     private fun renderPhase() {
         val ph = ChatSession.phase
-        binding.statusText.text = (if (ph == ChatSession.Phase.IDLE) "● " else "◌ ") + ph.label
-        binding.statusText.setTextColor(ContextCompat.getColor(this, when (ph) {
-            ChatSession.Phase.IDLE -> R.color.text_secondary
+        val c = ContextCompat.getColor(this, when (ph) {
+            ChatSession.Phase.IDLE -> R.color.text_tertiary
             ChatSession.Phase.CONFIRM, ChatSession.Phase.PAUSED -> R.color.warn_amber
-            else -> R.color.step_accent
-        }))
+            else -> R.color.primary
+        })
+        binding.statusText.text = ph.label
+        binding.statusText.setTextColor(if (ph == ChatSession.Phase.IDLE) ContextCompat.getColor(this, R.color.text_secondary) else c)
+        val dot = ContextCompat.getDrawable(this, R.drawable.dot)!!.mutate().apply { setTint(c) }
+        binding.statusText.setCompoundDrawablesRelativeWithIntrinsicBounds(dot, null, null, null)
         binding.sessionHint.text = ChatSession.lastGoal?.let { if (ph == ChatSession.Phase.IDLE) "同一会话 · 可追问" else it } ?: ""
     }
 
@@ -186,7 +193,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startAgent(retry: String? = null) {
-        val goal = retry ?: binding.goalInput.text?.toString()?.trim().orEmpty()
+        val typed = binding.goalInput.text?.toString()?.trim().orEmpty()
+        val goal = retry ?: ChatSession.composeGoal(typed)
         if (goal.isEmpty()) {
             Toast.makeText(this, R.string.goal_empty, Toast.LENGTH_SHORT).show()
             return
@@ -315,102 +323,29 @@ class MainActivity : AppCompatActivity() {
         } || expected.let { false }
     }
 
-    // ---------------- Chat rendering (Grok Bot / Codex style) ----------------
+    // ---------------- Chat rendering (Codex / Grok style, see ChatRenderer) ----------------
     private val renderPending = java.util.concurrent.atomic.AtomicBoolean(false)
     private fun scheduleRender() {
         if (renderPending.compareAndSet(false, true)) binding.chatList.postDelayed({ renderPending.set(false); renderChat() }, 120)
     }
-
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private fun color(id: Int) = ContextCompat.getColor(this, id)
-    private fun bubble(bg: Int, radius: Int = 14) = android.graphics.drawable.GradientDrawable().apply { setColor(bg); cornerRadius = dp(radius).toFloat() }
-    private fun tv(text: CharSequence, size: Float = 14f, c: Int = R.color.text_primary, bold: Boolean = false) =
-        android.widget.TextView(this).apply {
-            this.text = text; textSize = size; setTextColor(color(c)); setTextIsSelectable(false)
-            if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-    private fun lp(top: Int = 6, gravity: Int = android.view.Gravity.START, match: Boolean = false) =
-        android.widget.LinearLayout.LayoutParams(if (match) -1 else -2, -2).apply { topMargin = dp(top); this.gravity = gravity }
+    private val renderer by lazy {
+        ChatRenderer(this,
+            onConfirm = { AgentForegroundService.deliverConfirm(it) },
+            onRetry = { g -> if (!AgentForegroundService.isRunning()) startAgent(g) },
+            onPick = { g -> binding.goalInput.setText(g); binding.goalInput.setSelection(g.length); binding.goalInput.requestFocus() },
+            onToggle = { id -> ChatSession.toggle(id); renderChat() })
+    }
 
     private fun renderChat() {
-        val list = binding.chatList
         val atBottom = !binding.scrollChat.canScrollVertically(1)
-        list.removeAllViews()
-        val items = ChatSession.snapshot()
-        if (items.isEmpty()) {
-            list.addView(tv("👋 你好，我是你的手机 Agent", 18f, bold = true), lp(24))
-            list.addView(tv("用一句话告诉我要做什么，我会一步步操作手机，并在这里实时展示计划、每一步的动作和耗时。\n发送消息、打电话、支付等敏感操作一定会先问你。\n任务进行中可随时「暂停」或「停止」；完成后可以直接追问。", 14f, R.color.text_secondary), lp(8))
-            val recent = TaskHistory.load(this).take(3)
-            if (recent.isNotEmpty()) {
-                list.addView(tv("最近任务", 13f, R.color.text_secondary, bold = true), lp(18))
-                recent.forEach { e -> list.addView(tv((if (e.ok) "✓ " else "✗ ") + e.goal, 14f, R.color.step_accent).apply {
-                    setPadding(0, dp(6), 0, dp(6)); setOnClickListener { binding.goalInput.setText(e.goal) } }, lp(2)) }
-            }
-            renderPhase(); return
-        }
-        for (it in items) list.addView(viewFor(it))
-        if (ChatSession.phase != ChatSession.Phase.IDLE) {
-            list.addView(tv("◌ " + ChatSession.phase.label + "…", 13f, R.color.step_accent), lp(8))
-        }
+        val recent = TaskHistory.load(this).take(3).map { it.goal to it.ok }
+        renderer.render(binding.chatList, ChatSession.snapshot(), ChatSession.phase, recent, SUGGESTIONS)
         renderPhase()
-        if (atBottom || ChatSession.phase != ChatSession.Phase.IDLE) binding.scrollChat.post { binding.scrollChat.fullScroll(android.view.View.FOCUS_DOWN) }
+        if (atBottom || ChatSession.phase != ChatSession.Phase.IDLE) binding.scrollChat.post { binding.scrollChat.smoothScrollTo(0, binding.chatList.height) }
     }
 
-    private fun viewFor(item: ChatSession.Item): android.view.View = when (item) {
-        is ChatSession.Item.User -> tv(item.text, 15f, R.color.white).apply {
-            background = bubble(color(R.color.step_accent)); setPadding(dp(14), dp(10), dp(14), dp(10)); maxWidth = (resources.displayMetrics.widthPixels * 0.8).toInt()
-        }.also { it.layoutParams = lp(14, android.view.Gravity.END) }
-        is ChatSession.Item.Plan -> android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            addView(tv("🧭 计划", 13f, R.color.text_secondary, bold = true))
-            item.lines.takeLast(6).forEach { l -> addView(tv("· " + l, 13f, R.color.text_primary), lp(2)) }
-            layoutParams = lp(10, match = true)
-        }
-        is ChatSession.Item.Step -> stepCard(item)
-        is ChatSession.Item.Confirm -> android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            background = bubble(color(R.color.confirm_bg)); setPadding(dp(14), dp(12), dp(14), dp(10))
-            addView(tv("⚠ 需要你确认", 14f, R.color.warn_amber, bold = true))
-            addView(tv(item.reason, 14f), lp(6))
-            if (item.answer == null) {
-                val row = android.widget.LinearLayout(this@MainActivity).apply { gravity = android.view.Gravity.END }
-                row.addView(com.google.android.material.button.MaterialButton(this@MainActivity, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                    text = getString(R.string.confirm_no); setOnClickListener { AgentForegroundService.deliverConfirm(false) } })
-                row.addView(com.google.android.material.button.MaterialButton(this@MainActivity).apply {
-                    text = getString(R.string.confirm_yes); setOnClickListener { AgentForegroundService.deliverConfirm(true) } }, lp(0).apply { marginStart = dp(8) })
-                addView(row, lp(6, match = true))
-            } else addView(tv(if (item.answer == true) "✓ 已确认" else "✗ 已拒绝", 13f, if (item.answer == true) R.color.ok_green else R.color.err_red), lp(6))
-            layoutParams = lp(10, match = true)
-        }
-        is ChatSession.Item.Result -> android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            background = bubble(color(if (item.ok) R.color.ok_bg else R.color.err_bg)); setPadding(dp(14), dp(12), dp(14), dp(10))
-            addView(tv((if (item.ok) "✅ 完成  " else "⛔ 未完成  ") + item.summary, 15f, if (item.ok) R.color.ok_green else R.color.err_red, bold = true))
-            item.hint?.let { addView(tv("💡 $it", 13f, R.color.text_secondary), lp(6)) }
-            if (!item.ok && item.goal.isNotBlank()) addView(com.google.android.material.button.MaterialButton(this@MainActivity, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                text = "重试"; setOnClickListener { if (!AgentForegroundService.isRunning()) startAgent(item.goal) } }, lp(6))
-            layoutParams = lp(12, match = true)
-        }
-        is ChatSession.Item.Note -> tv(item.text, 11f, R.color.text_secondary).also { it.layoutParams = lp(4) }
-    }
-
-    private fun stepCard(s: ChatSession.Item.Step): android.view.View = android.widget.LinearLayout(this).apply {
-        orientation = android.widget.LinearLayout.VERTICAL
-        background = bubble(color(R.color.card_bg), 10); setPadding(dp(12), dp(8), dp(12), dp(8))
-        val icon = when (s.state) { ChatSession.State.RUNNING -> "◌"; ChatSession.State.OK -> "✓"; ChatSession.State.FAIL -> "✗" }
-        val dur = if (s.endMs != null) "  %.1fs".format(s.durationMs / 1000.0) else ""
-        val head = android.widget.LinearLayout(this@MainActivity).apply { gravity = android.view.Gravity.CENTER_VERTICAL }
-        head.addView(tv("$icon  ${s.title}", 14f, when (s.state) { ChatSession.State.OK -> R.color.text_primary; ChatSession.State.FAIL -> R.color.err_red; else -> R.color.step_accent }, bold = s.state == ChatSession.State.RUNNING),
-            android.widget.LinearLayout.LayoutParams(0, -2, 1f))
-        head.addView(tv("$dur  ${if (s.expanded) "▾" else "▸"} ${s.details.size}", 12f, R.color.text_secondary))
-        addView(head, lp(0, match = true))
-        // Live "what the model is aiming at" line (model's own subgoal + screen read), always visible.
-        s.insight?.let { addView(tv("🎯 $it", 12f, R.color.insight), lp(2)) }
-        val shown = if (s.expanded) s.details else s.details.filter { it.startsWith("想法：") }.takeLast(1)
-        shown.forEach { d -> addView(tv(d, 12f, if (d.startsWith("✗") || d.contains("错误")) R.color.err_red else R.color.text_secondary).apply {
-            setTextIsSelectable(s.expanded); typeface = if (d.startsWith("想法：")) typeface else android.graphics.Typeface.MONOSPACE }, lp(3)) }
-        setOnClickListener { ChatSession.toggle(s.id); renderChat() }
-        layoutParams = lp(6, match = true)
+    private fun setPauseButton(paused: Boolean) {
+        binding.btnPause.text = getString(if (paused) R.string.resume else R.string.pause)
     }
 
     private fun newSession() {

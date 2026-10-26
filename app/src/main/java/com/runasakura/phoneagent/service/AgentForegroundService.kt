@@ -167,7 +167,7 @@ class AgentForegroundService : Service() {
             com.runasakura.phoneagent.util.Diagnostics.log("结果: success=${result.success} ${result.summary}")
             broadcastStatus(
                 if (result.success) "done" else "stopped",
-                "结束(${result.steps}步): ${result.summary}"
+                "结束(${result.steps}步): ${if (result.needsUser) com.runasakura.phoneagent.ui.ChatSession.ASK_MARK else ""}${result.summary}"
             )
             if (job == coroutineContext[Job]) {
                 overlay?.hide()

@@ -1,81 +1,109 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg" android:fitsSystemWindows="true">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
-        android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        android:background="@color/purple_500"
-        app:title="@string/settings_title"
-        app:titleTextColor="@color/white"
-        app:navigationIcon="?attr/homeAsUpIndicator" />
+        android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+        app:title="@string/settings_title" app:titleTextColor="@color/text_primary"
+        app:navigationIcon="@drawable/ic_tool_back" app:navigationIconTint="@color/text_primary" />
 
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:padding="16dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" android:textColor="#B3261E" android:text="@string/model_hint" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_mnn_url" />
-            <EditText android:id="@+id/mnnUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_mnn_key" />
-            <EditText android:id="@+id/mnnKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_mnn_model" />
-            <EditText android:id="@+id/mnnModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/label_route" />
-            <Spinner android:id="@+id/routeMode" android:layout_width="match_parent" android:layout_height="wrap_content" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/label_cloud_provider" />
-            <Spinner android:id="@+id/cloudProvider" android:layout_width="match_parent" android:layout_height="wrap_content" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/label_cloud_url" />
-            <EditText android:id="@+id/cloudUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_key" />
-            <EditText android:id="@+id/cloudKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_model" />
-            <AutoCompleteTextView android:id="@+id/cloudModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:completionThreshold="0" android:hint="点击选择，或直接输入任意模型名" />
-            <Button android:id="@+id/btnFetchModels" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="获取模型列表" />
-            <Button android:id="@+id/btnTestCloud" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="测试连接" />
-            <TextView android:id="@+id/cloudTestResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:textIsSelectable="true" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="@string/label_max_steps" />
-            <EditText android:id="@+id/maxSteps" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
-
-            <CheckBox android:id="@+id/cloudShot" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_shot" />
-
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:textStyle="bold" android:text="视觉辅助模型（可选，推荐）" />
-            <CheckBox android:id="@+id/visionLocal" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="本机 MNN 视觉模型看图（文字大脑仍用云端）" />
-            <EditText android:id="@+id/visionLocalModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:hint="本机 VL 模型名（留空=MNN 当前模型），如 Qwen2.5-VL-3B-Instruct-MNN" />
-            <CheckBox android:id="@+id/cloudThinking" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="DeepSeek 思考模式（更准但更慢，默认关）" />
-            <Button android:id="@+id/btnAppMemory" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="查看 / 清除应用经验" />
-            <CheckBox android:id="@+id/confirmAlarm" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="设置闹钟前先确认" />
-            <TextView android:id="@+id/visionTip" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" />
-            <EditText android:id="@+id/visionUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:hint="https://dashscope.aliyuncs.com/compatible-mode/v1" />
-            <EditText android:id="@+id/visionKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:hint="视觉模型 API Key（只保存在本机）" />
-            <EditText android:id="@+id/visionModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:hint="qwen3-vl-plus" />
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:scrollbars="none">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="24dp">
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="云端模型" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="主力大脑。只会使用你在这里选的模型，不会自动换成别的模型。API Key 只加密保存在本机，不进日志。" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="服务商" />
+            <Spinner android:id="@+id/cloudProvider" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="4dp" android:background="@drawable/bg_field" android:paddingStart="8dp" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Base URL">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/cloudUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_cloud_key" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/cloudKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense.ExposedDropdownMenu" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:hint="模型（点击选择或直接输入）">
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView android:id="@+id/cloudModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:completionThreshold="0" android:paddingStart="14dp" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnTestCloud" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="测试连接" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnFetchModels" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="获取模型列表" />
+            </LinearLayout>
+            <TextView android:id="@+id/cloudTestResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="@color/text_secondary" android:textIsSelectable="true" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="运行方式" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="在哪里思考、最多做几步，以及长任务如何节省 token。" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="@string/label_route" />
+            <Spinner android:id="@+id/routeMode" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="4dp" android:background="@drawable/bg_field" android:paddingStart="8dp" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_max_steps">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/maxSteps" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/modelCheckpoint" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="长任务用模型整理进度" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="默认关。对话很长时，用你选的同一个模型把早先步骤压成要点（多一次小请求）；关闭时用本地规则整理，不额外花 token。" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/cloudThinking" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="DeepSeek 思考模式" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="更准但更慢，默认关。" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="看图能力" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="文字读不懂的界面（游戏、纯图标）可以让模型看截图。" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/cloudShot" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_shot" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="游戏、图标多的界面会附截图给支持看图的云端模型；支付/银行类应用永远不截图。" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/visionLocal" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="本机 MNN 视觉模型看图" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="文字大脑仍用你选的云端模型。" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="本机 VL 模型名（留空=MNN 当前模型）">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionLocalModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <TextView android:id="@+id/visionTip" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textSize="12sp" android:textColor="@color/text_tertiary" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="云端视觉 Base URL（可选）">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="视觉模型 API Key（只保存在本机）" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="视觉模型名，如 qwen3-vl-plus">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="安全与确认" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="敏感操作会先停下问你。" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/confirmAlarm" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="设置闹钟前先确认" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="发送消息、通话、支付、删除、卸载、下单始终需要确认，不能关闭。" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnAppMemory" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="查看 / 清除应用经验" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="本机模型（MNN，可选）" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="在手机本地跑小模型，离线可用但较慢。" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/warn_amber" android:text="@string/model_hint" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_mnn_url">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/mnnUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_mnn_key" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/mnnKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_mnn_model">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/mnnModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
     </ScrollView>
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnSave"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_margin="16dp"
-        android:text="@string/btn_save" />
+        android:layout_width="match_parent" android:layout_height="52dp"
+        android:layout_marginStart="16dp" android:layout_marginEnd="16dp" android:layout_marginBottom="12dp" android:layout_marginTop="4dp"
+        app:cornerRadius="16dp" android:text="@string/btn_save" />
 </LinearLayout>

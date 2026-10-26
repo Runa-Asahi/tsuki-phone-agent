@@ -42,7 +42,7 @@ object GoalSplitter {
 
     private val TYPE_TAIL = Regex("[，,；;]\\s*(?:然后|接着|再)(?=(?:$VERBS|提交|保存|确定|完成))")
     /** 「内容：X」「密码：X」 → X (a short field label before a colon is not part of the text). */
-    private val FIELD_LABEL = Regex("^[^：:，,\\s]{1,6}[：:]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
+    private val FIELD_LABEL = Regex("^[\\u4e00-\\u9fff]{1,6}[：:]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)   // CJK label only: never cut 「https://…」
 
     fun split(goal: String): List<Subgoal> {
         val g = goal.trim()

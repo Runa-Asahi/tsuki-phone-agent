@@ -5,8 +5,10 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.view.Gravity
 import android.view.WindowManager
-import android.widget.Button
-import androidx.core.content.ContextCompat
+import android.view.View
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.runasakura.phoneagent.R
 
 class EmergencyStopOverlay(
@@ -20,7 +22,7 @@ class EmergencyStopOverlay(
     /** Codex-style live progress next to the stop button while operating other apps. */
     fun setProgress(text: String) {
         val t = text.replace('\n', ' ').take(28)
-        main.post { label?.let { it.text = t; it.visibility = if (t.isBlank()) android.view.View.GONE else android.view.View.VISIBLE } }
+        main.post { label?.let { it.text = t.ifBlank { "运行中" } } }
     }
 
     private val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -59,38 +61,11 @@ class EmergencyStopOverlay(
     fun show() {
         if (button != null) return
         val a11y = context is android.accessibilityservice.AccessibilityService
-        if (!a11y && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-            !android.provider.Settings.canDrawOverlays(context)
+        if (!a11y && !android.provider.Settings.canDrawOverlays(context)
         ) {
             return // optional; notification stop still works
         }
-        val btn = Button(context).apply {
-            text = context.getString(R.string.fab_stop)
-            setBackgroundColor(ContextCompat.getColor(context, R.color.stop_red))
-            setTextColor(ContextCompat.getColor(context, android.R.color.white))
-            setOnClickListener { onStop() }
-            minWidth = 0; minimumWidth = 0
-            textSize = 12f
-            setPadding(12, 8, 12, 8)
-        }
-        val d = context.resources.displayMetrics.density
-        val box = android.widget.LinearLayout(context).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding((4 * d).toInt(), (4 * d).toInt(), (4 * d).toInt(), (4 * d).toInt())
-            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xCC202124.toInt()); cornerRadius = 10 * d }
-        }
-        val lbl = android.widget.TextView(context).apply {
-            textSize = 10f; setTextColor(android.graphics.Color.WHITE); maxWidth = (110 * d).toInt(); maxLines = 2
-            visibility = android.view.View.GONE
-        }
-        box.addView(lbl)
-        val row = android.widget.LinearLayout(context)
-        if (onPause != null) row.addView(Button(context).apply {
-            text = "暂停"; textSize = 12f; minWidth = 0; minimumWidth = 0; setPadding(12, 8, 12, 8)
-            setOnClickListener { text = if (onPause.invoke()) "继续" else "暂停" }
-        })
-        row.addView(btn)
-        box.addView(row)
+        val (box, lbl) = OverlayPill.build(context, onStop, onPause)
         val type = if (a11y) {
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -109,10 +84,11 @@ class EmergencyStopOverlay(
             // Left edge, ~40% height: away from title bars, search icons (WeChat ~x1057,y200),
             // chat input bars and the gesture-navigation area at the bottom.
             gravity = Gravity.TOP or Gravity.START
-            x = 0
+            x = (8 * context.resources.displayMetrics.density).toInt()
             y = (context.resources.displayMetrics.heightPixels * 0.40).toInt()
         }
         try {
+            OverlayPill.enableDrag(box, params) { try { wm.updateViewLayout(box, params) } catch (_: Exception) {} }
             wm.addView(box, params)
             button = box; label = lbl; lp = params; active = this
             box.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
@@ -151,5 +127,54 @@ object OverlayAvoid {
         if (r == null) return false
         val steps = 12
         return (0..steps).any { i -> hits(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps, r) }
+    }
+}
+
+/**
+ * Compact floating pill shown over other apps while a task runs: live dot + current step + pause + stop.
+ * Built separately from the window logic so it can be rendered in JVM screenshot tests.
+ */
+object OverlayPill {
+    fun build(context: Context, onStop: () -> Unit, onPause: (() -> Boolean)?): Pair<LinearLayout, TextView> {
+        val d = context.resources.displayMetrics.density
+        fun px(v: Int) = (v * d).toInt()
+        val box = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(px(10), px(5), px(5), px(5))
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xE6111113.toInt()); cornerRadius = 999f * d }
+            elevation = 6 * d
+        }
+        val dot = View(context).apply { background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFF8B8CF8.toInt()) } }
+        box.addView(dot, LinearLayout.LayoutParams(px(8), px(8)))
+        val lbl = TextView(context).apply {
+            textSize = 12f; setTextColor(android.graphics.Color.WHITE); maxWidth = px(150); maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END; text = "运行中"
+        }
+        box.addView(lbl, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = px(8); marginEnd = px(8) })
+        fun circle(icon: Int, bg: Int, desc: String, click: (ImageView) -> Unit) = ImageView(context).apply {
+            setImageResource(icon); imageTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
+            setPadding(px(7), px(7), px(7), px(7)); contentDescription = desc
+            background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(bg) }
+            setOnClickListener { click(this) }
+        }
+        if (onPause != null) box.addView(circle(R.drawable.ic_pause, 0x33FFFFFF, "暂停") { v ->
+            val paused = onPause.invoke(); v.setImageResource(if (paused) R.drawable.ic_play else R.drawable.ic_pause); v.contentDescription = if (paused) "继续" else "暂停"
+        }, LinearLayout.LayoutParams(px(30), px(30)))
+        box.addView(circle(R.drawable.ic_stop, 0xFFDC2626.toInt(), context.getString(R.string.fab_stop)) { onStop() },
+            LinearLayout.LayoutParams(px(30), px(30)).apply { marginStart = px(6) })
+        return box to lbl
+    }
+
+    /** Vertical drag on the pill body (buttons still click) so it can be moved off whatever it covers. */
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    fun enableDrag(box: View, p: WindowManager.LayoutParams, apply: () -> Unit) {
+        var startY = 0f; var startPos = 0
+        box.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> { startY = e.rawY; startPos = p.y; false }
+                android.view.MotionEvent.ACTION_MOVE -> { p.y = (startPos + (e.rawY - startY)).toInt().coerceAtLeast(0); apply(); true }
+                else -> false
+            }
+        }
     }
 }

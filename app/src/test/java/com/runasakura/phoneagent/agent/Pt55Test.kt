@@ -19,6 +19,9 @@ class Pt55Test {
         assertEquals("界面很好用", t.text); assertFalse(t.send)
         assertTrue(s.toString(), s.last() !is Subgoal.Send)
     }
+    @Test fun urlIsNotMistakenForAFieldLabel() {
+        assertEquals("https://a.com/x", GoalSplitter.split("打开浏览器，输入https://a.com/x").filterIsInstance<Subgoal.Send>().single().text)
+    }
     @Test fun chatMessageKeepsCommasVerbatim() {
         val t = GoalSplitter.split("打开张三，发送：好的，然后去吃饭").filterIsInstance<Subgoal.Send>().single()
         assertEquals("好的，然后去吃饭", t.text)
@@ -61,5 +64,28 @@ class Pt55Test {
         d.tap(item); stop = true
         try { d.tap(item); fail() } catch (_: StopRequested) {}
         assertEquals(1, taps)
+    }
+
+    @Test fun toolIconsByActionTitle() {
+        val k = com.runasakura.phoneagent.ui.ToolIcon
+        assertEquals(com.runasakura.phoneagent.ui.ToolIcon.Kind.TAP, k.of("第 1 步 · 点击「搜索」"))
+        assertEquals(com.runasakura.phoneagent.ui.ToolIcon.Kind.TYPE, k.of("第 2 步 · 输入「晴天」"))
+        assertEquals(com.runasakura.phoneagent.ui.ToolIcon.Kind.SEARCH, k.of("第 3 步 · 滚动查找「王五」"))
+        assertEquals(com.runasakura.phoneagent.ui.ToolIcon.Kind.ASK, k.of("第 1 步 · 问你：发给谁？"))
+        assertEquals(com.runasakura.phoneagent.ui.ToolIcon.Kind.THINK, k.of("第 4 步"))
+    }
+    @Test fun askResultIsNotAFailedStepAndReplyMergesIntoGoal() {
+        val cs = com.runasakura.phoneagent.ui.ChatSession
+        cs.clear(); cs.startTask("给他发个消息", 0)
+        cs.onLog("—— 步骤 1/25 ——", 1); cs.onLog("action: AskUser(question=发给谁？)", 2)
+        cs.onStatus("stopped", "结束(1步): ${cs.ASK_MARK}发给谁？", 3)
+        val items = cs.snapshot()
+        assertEquals(com.runasakura.phoneagent.ui.ChatSession.State.OK, (items.first { it is com.runasakura.phoneagent.ui.ChatSession.Item.Step } as com.runasakura.phoneagent.ui.ChatSession.Item.Step).state)
+        val r = items.last() as com.runasakura.phoneagent.ui.ChatSession.Item.Result
+        assertTrue(r.ask); assertEquals("发给谁？", r.summary)
+        assertEquals("给他发个消息（补充：张三）", cs.composeGoal("张三"))
+        cs.startTask("给他发个消息（补充：张三）", 4)
+        assertEquals("打开蓝牙", cs.composeGoal("打开蓝牙"))
+        cs.clear()
     }
 }

@@ -16,10 +16,13 @@ object ChatSession {
             var insight: String? = null
         ) : Item() { val durationMs get() = (endMs ?: startMs) - startMs }
         data class Confirm(override val id: Long, val reason: String, var answer: Boolean? = null) : Item()
-        data class Result(override val id: Long, val ok: Boolean, val summary: String, val hint: String?, val goal: String) : Item()
+        /** [ask] = the agent stopped to ask the user something (reply continues the session). */
+        data class Result(override val id: Long, val ok: Boolean, val summary: String, val hint: String?, val goal: String, val ask: Boolean = false) : Item()
         data class Note(override val id: Long, val text: String) : Item()
     }
     enum class State { RUNNING, OK, FAIL }
+    /** Prefix on a result summary meaning "the agent is asking the user" (AgentLoop.Result.needsUser). */
+    const val ASK_MARK = "❓"
     enum class Phase(val label: String) { IDLE("空闲"), THINKING("思考中"), ACTING("操作中"), CONFIRM("等待确认"), PAUSED("已暂停") }
 
     private val items = mutableListOf<Item>()
@@ -33,6 +36,16 @@ object ChatSession {
     @Synchronized fun clear() { items.clear(); phase = Phase.IDLE; lastGoal = null; lastSummary = null; running = false }
     @Synchronized fun toggle(id: Long) { (items.firstOrNull { it.id == id } as? Item.Step)?.let { it.expanded = !it.expanded } }
     @Synchronized fun setPaused(p: Boolean) { if (running) phase = if (p) Phase.PAUSED else Phase.ACTING }
+
+    /**
+     * The goal actually sent for what the user typed: an answer to the agent's question is merged into the
+     * original goal (so 「张三」 alone is never treated as a new task like "open an app called 张三").
+     */
+    @Synchronized fun composeGoal(input: String): String {
+        val last = items.lastOrNull { it is Item.Result } as? Item.Result
+        val g = lastGoal
+        return if (last != null && last.ask && g != null && items.last() === last) "$g（补充：$input）" else input
+    }
 
     /** Context for a follow-up message in the same session. */
     @Synchronized fun followUpContext(): String? = lastGoal?.let { g -> "上一任务：$g；结果：${lastSummary ?: "未知"}" }
@@ -104,11 +117,12 @@ object ChatSession {
             "done", "stopped" -> {
                 if (!running) return false // duplicate end (急停 followed by 已取消)
                 val ok = type == "done"
-                closeStep(now, ok)
+                closeStep(now, ok || msg.substringAfter("): ", msg).startsWith(ASK_MARK))   // a question is not a failed step
                 (items.lastOrNull { it is Item.Confirm && it.answer == null } as? Item.Confirm)?.answer = false
                 val summary = msg.substringAfter("): ", msg)
-                lastSummary = summary
-                items += Item.Result(nextId++, ok, summary, if (ok) null else FriendlyErrors.explain(summary), lastGoal.orEmpty())
+                lastSummary = summary.replace(ASK_MARK, "Agent 提问：")
+                val ask = summary.startsWith(ASK_MARK)
+                items += Item.Result(nextId++, ok, summary.removePrefix(ASK_MARK).trim(), if (ok || ask) null else FriendlyErrors.explain(summary), lastGoal.orEmpty(), ask)
                 running = false; phase = Phase.IDLE; finished = true
             }
         }
@@ -134,6 +148,8 @@ object ActionText {
         a.startsWith("Done") -> "完成"
         a.startsWith("Fail") -> "无法继续"
         a.startsWith("AskConfirm") -> "请求确认"
+        a.startsWith("AskUser") -> "问你：" + (field(a, "question") ?: "")
+        a.startsWith("HumanTakeover") -> "交给你处理"
         a.startsWith("Global") -> field(a, "name")?.let { com.runasakura.phoneagent.agent.ActionDesc.GLOBAL_ZH[it] } ?: "系统面板"
         a.startsWith("OpenUri") -> "打开链接" + (field(a, "uri")?.let { " ${it.take(30)}" } ?: "")
         a.startsWith("Intent") -> "打开系统页" + (field(a, "action")?.let { " ${it.substringAfterLast('.')}" } ?: "")

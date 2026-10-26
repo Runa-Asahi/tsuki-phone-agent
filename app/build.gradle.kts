@@ -11,8 +11,8 @@ android {
         applicationId = "com.runasakura.phoneagent"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.6.3-mvp"
+        versionCode = 16
+        versionName = "0.6.4-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Honor PPG-AN00 / Android 16: document 16KB page alignment for future .so embeds
@@ -37,7 +37,7 @@ android {
     }
 
     // Offline simulator runs the real AgentLoop on the JVM: framework stubs (Log, Build…) return defaults.
-    testOptions { unitTests.isReturnDefaultValues = true }
+    testOptions { unitTests.isReturnDefaultValues = true; unitTests.isIncludeAndroidResources = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -72,4 +72,7 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("junit:junit:4.13.2")
+    // JVM UI rendering (no device): screenshot tests of the chat / settings / overlay views.
+    testImplementation("org.robolectric:robolectric:4.17")
+    testImplementation("androidx.test:core:1.6.1")
 }

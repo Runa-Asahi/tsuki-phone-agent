@@ -43,7 +43,7 @@ class AgentAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         Log.i(TAG, "AccessibilityService connected")
-        sendBroadcast(Intent(ACTION_A11Y_STATE).putExtra(EXTRA_CONNECTED, true))
+        sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, true))
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -167,7 +167,7 @@ class AgentAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
-        sendBroadcast(Intent(ACTION_A11Y_STATE).putExtra(EXTRA_CONNECTED, false))
+        sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, false))
         super.onDestroy()
     }
 
