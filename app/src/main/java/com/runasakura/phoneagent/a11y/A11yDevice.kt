@@ -77,6 +77,10 @@ class A11yDevice(
     /** Wall-clock deadline for one tree walk: each getChild is an IPC; a stale/blocked window can cost ~25ms each. */
     private var walkDeadline = 0L
 
+    /** WebViews seen in the last tree walk (bounds + text count of their subtree). */
+    private val webs = ArrayList<com.runasakura.phoneagent.screen.WebSparse.Web>()
+    private fun countTexts(r: RawNode): Int = (if (r.text.isNotBlank() || r.desc.isNotBlank()) 1 else 0) + r.children.sumOf { countTexts(it) }
+
     private fun toRaw(n: AccessibilityNodeInfo, depth: Int, budget: IntArray): RawNode {
         budget[0]--
         if (System.currentTimeMillis() > walkDeadline) budget[0] = 0
@@ -88,12 +92,14 @@ class A11yDevice(
             if (!c.isVisibleToUser) continue
             kids += toRaw(c, depth + 1, budget)
         }
-        return RawNode(
+        val raw = RawNode(
             n.text?.toString().orEmpty(), n.contentDescription?.toString().orEmpty(),
             n.viewIdResourceName.orEmpty().substringAfterLast('/'),
             r.left, r.top, r.right, r.bottom,
             n.isClickable || n.isLongClickable, n.isEditable, n.isScrollable, kids, n
         )
+        if (n.className?.toString() == "android.webkit.WebView") webs += com.runasakura.phoneagent.screen.WebSparse.Web(r.left, r.top, r.right, r.bottom, kids.sumOf { countTexts(it) })
+        return raw
     }
 
     private fun treeScreen(): Screen {
@@ -111,6 +117,7 @@ class A11yDevice(
             try { win.root?.also { it.refresh() } } catch (_: Exception) { null }
         }.ifEmpty { listOfNotNull(s.rootInActiveWindow) }) { it.packageName?.toString() }
         val budget = intArrayOf(1500)
+        webs.clear()
         walkDeadline = System.currentTimeMillis() + 1500
         val items = ScreenItems.leaves(roots.map { toRaw(it, 0, budget) }, w, h)
         return Screen(fg, w, h, items, if (items.isEmpty()) "none" else "tree", imeTop(), s.editableFocused())
@@ -410,6 +417,16 @@ class A11yDevice(
                 !com.runasakura.phoneagent.agent.SemanticDiff.compare(a.items, b.items).meaningful }
             t = frame
             TaskTiming.count(if (stable) "两帧一致" else "两帧仍在变化")
+        }
+        com.runasakura.phoneagent.screen.WebSparse.target(webs.toList(), t.w, t.h)?.let { web ->
+            // Sparse web page: OCR it in the same read so the model sees the page (and can judge loading) without a look step.
+            val o = ocrScreen(t.pkg)
+            if (o != null && o.textCount > 0) {
+                val merged = t.copy(items = com.runasakura.phoneagent.screen.WebSparse.merge(t.items, o.items, web), source = "tree+ocr")
+                log("网页可读文字少（树 ${web.texts} 条）：已自动 OCR 网页区域，补充 ${merged.items.size - t.items.size} 条")
+                Diagnostics.observe(t.pkg, "tree+ocr", merged.textCount)
+                return merged
+            }
         }
         if (t.textCount >= 3) {
             val ms = System.currentTimeMillis() - start

@@ -315,8 +315,15 @@ class AgentLoop(
 
         var step = 0
         var refocus = 0
-        val max = prefs.maxSteps
-        while (step < max) {
+        var max = prefs.maxSteps
+        val base = max
+        // Adaptive budget: when the cap is reached while the task is visibly progressing (new screens, no loop, no
+        // stuck streak), grant +8 steps, at most twice. A stalled task still stops at the configured cap.
+        fun extendBudget(): Boolean {
+            if (max >= base * 2 || !StepBudget.progressing(recentSigs, loopStreak, steps.stuck)) return false
+            max += 8; onLog("步数将用完，但任务仍在推进（最近 ${recentSigs.size} 步出现 ${recentSigs.toSet().size} 个不同界面）：追加 8 步（上限 ${base * 2}）"); return true
+        }
+        while (step < max || extendBudget()) {
             coroutineContext.ensureActive()
             if (isStopped()) return Result(false, step, "已急停")
             waitIfPaused()
@@ -340,6 +347,17 @@ class AgentLoop(
             val sc = if (refineNext) { refineNext = false; dev.refineScreen() } else dev.screen()
             lastScreen = sc
             a11y.lastItems = sc.items
+            val labelsNow = sc.items.map { it.label }.filter { it.isNotBlank() }.toSet()
+            recentSigs += (sc.pkg + "|" + labelsNow.sorted().take(40).joinToString("|")).hashCode(); while (recentSigs.size > 6) recentSigs.removeAt(0)
+            // Enter after typing that dropped the input and brought back the pre-typing screen (seen in Chrome when
+            // the text was set programmatically): tell the model instead of letting it retype + enter again.
+            if ((lastExec?.first as? AgentAction.Key)?.name == "enter" && preTypeLabels != null &&
+                StepBudget.jaccard(labelsNow, preTypeLabels!!) >= 0.85) {
+                onLog("回车后回到了输入前的界面：输入未被提交")
+                toolNote = listOfNotNull(toolNote, "回车没有提交输入（界面回到了输入前的样子）。不要重复「输入+回车」：重新点输入框后，直接点下拉建议里与输入内容一致的那一项。").joinToString("\n")
+                preTypeLabels = null
+            }
+            stepLabels += labelsNow; while (stepLabels.size > 3) stepLabels.removeAt(0)
             obsItems = sc.items
             if (seenText.length < 20_000) sc.items.forEach { seenText.append(it.label).append('\n') }
             val snap = UiSnapshot(
@@ -423,12 +441,25 @@ class AgentLoop(
             if (shot != null && vision) onLog("附带截图给云端模型（${prefs.cloudModel} 支持看图）")
             var obsNote = diffNote
             planNote?.let { obsNote = listOfNotNull(obsNote, "$it（仅供参考，以屏幕为准）").joinToString("\n"); planNote = null }
-            if (wantSkill && shot != null) {
-                onLog("看图技能：本机视觉模型描述屏幕…")
-                router.describeScreen(goal, shot, sc.w, sc.h)?.let { d ->
-                    onLog("视觉描述：" + d.replace('\n', ' ').take(160))
-                    obsNote = listOfNotNull(diffNote, "视觉描述（本机 VL 看截图所得，坐标可直接用于 tap x,y）：\n$d").joinToString("\n")
+            // Local vision assist runs in parallel and never blocks a step: it is started for hard/sparse screens and
+            // its description is attached when ready — only while the screen is still the one it described.
+            val sigNow = recentSigs.lastOrNull()
+            // When the brain already sees the screenshot, local vision only pre-summarises sparse web pages (no duplicate work).
+            val assistWanted = router.visionSkill != null && !router.localSidelined && ((!vision && hardScreen) || sc.source == "tree+ocr")
+            if (assistWanted && assistJob == null) {
+                val ashot = if (wantSkill) shot else try { a11y.screenshotJpegBase64(640) } catch (_: Exception) { null }
+                if (ashot != null) { assistSig = sigNow; onLog("本机看图：后台描述屏幕（不阻塞本步）")
+                    assistJob = planScope.async { runCatching { router.describeScreen(goal, ashot, sc.w, sc.h, 60_000) }.getOrNull() } }
+            }
+            // With no other eyes (brain cannot see images) give it a short grace period; otherwise only use it if done.
+            val ready = assistJob?.let { j -> if (wantSkill) kotlinx.coroutines.withTimeoutOrNull(3_000) { j.await() } ?: if (j.isCompleted) j.await() else null
+                else if (j.isCompleted) j.await() else null }
+            if (assistJob?.isCompleted == true) {
+                if (ready != null && assistSig == sigNow) {
+                    onLog("本机看图描述：" + ready.replace('\n', ' ').take(160))
+                    obsNote = listOfNotNull(obsNote, "视觉描述（本机模型看截图所得，坐标可直接用于 tap x,y）：\n$ready").joinToString("\n")
                 }
+                assistJob = null
             }
             val brainShot = if (vision) shot else null
             shotThisStep = brainShot != null || obsNote?.contains("视觉描述") == true
@@ -606,6 +637,7 @@ class AgentLoop(
                     continue
                 }
                 lastTyped = ty.text
+                preTypeLabels = stepLabels.getOrNull(stepLabels.size - 2)
             }
             val clip = plan.action as? AgentAction.SetClipboard
             if (clip != null && !Injection.typeAllowed(clip.text, goal) && clip.text != copied) { onLog("⚠ 拦截写剪贴板「${clip.text.take(30)}」——不在用户目标中"); lastExec = null
@@ -647,12 +679,15 @@ class AgentLoop(
                         transcript.note("本次无法看截图（模型不支持图片或未允许）。已改为高精度 OCR 重识别并列出无文字按钮候选〔…色块〕；不要再输出 look。")
                         lastExec = null; continue
                     }
-                    onLog("模型请求看截图（下一步附图）"); lastExec = null; continue
+                    // Same step: re-ask with the screenshot attached right away (no wait, no step consumed; ≤3 per task).
+                    if (freeLooks < 3) { freeLooks++; step--; onLog("模型请求看截图：本步直接附图重问（不占步数）") } else onLog("模型请求看截图（下一步附图）")
+                    lastExec = null; continue
                 }
             }
             when (val action = plan.action) {
                 is AgentAction.Done -> {
-                    val v = if (doneRejections < 2) verify(dev, goal) else null
+                    lastClaim = action.summary.takeIf { it.isNotBlank() }
+                    val v = if (doneRejections < 2) verify(dev, goal, action.summary) else null
                     if (v != null && !v.first) {
                         doneRejections++
                         onLog("模型说完成，但验收未通过：${v.second}（继续）")
@@ -718,8 +753,8 @@ class AgentLoop(
                     // Generic: the same target twice in a row without reaching the goal = treat as ineffective
                     // (catches "confirm without selecting" even when OCR churn makes the screen look changed).
                     val k = guard.key(action, lastExec!!.second)
-                    if (k != null && k == prevExecKey) { guard.record(action, lastExec!!.second, lastExec!!.third + "（连续两次同一目标未推进）"); onLog("同一目标连点两次未推进，标记为无效") }
-                    prevExecKey = k
+                    if (k != null && k == prevExecKey && StepBudget.jaccard(labelsNow, prevExecLabels) >= 0.7) { guard.record(action, lastExec!!.second, lastExec!!.third + "（连续两次同一目标未推进）"); onLog("同一目标连点两次未推进，标记为无效") }
+                    prevExecKey = k; prevExecLabels = labelsNow
                     onLog(if (ok) "执行成功：${ActionDesc.of(action, tapped)}" else "执行失败：${lastExecError ?: "未知原因"}")
                     if (action is AgentAction.Launch && ok) {
                         val fg = waitForeground(a11y, 3000) { it != before }
@@ -749,7 +784,7 @@ class AgentLoop(
                 }
             }
         }
-        return Result(false, step, "达到最大步数 $max")
+        return Result(false, step, "达到最大步数 $max" + (lastClaim?.let { "。已得到的结果（未通过验收，请自行确认）：$it" } ?: ""))
     }
 
     private val stepTimeoutMs: Long get() =
@@ -978,6 +1013,14 @@ class AgentLoop(
     private var lastScreenKind: String? = null
     private var lastGoalMatch: String? = null
     private var prevExecKey: String? = null
+    private var prevExecLabels: Set<String> = emptySet()
+    private var preTypeLabels: Set<String>? = null
+    private val stepLabels = ArrayList<Set<String>>()
+    private val recentSigs = ArrayList<Int>()
+    private var freeLooks = 0
+    private var lastClaim: String? = null
+    private var assistJob: kotlinx.coroutines.Deferred<String?>? = null
+    private var assistSig: Int? = null
     private var appMem: AppMemory? = null
     private var reusedPath = false
     private var llmFailStreak = 0
@@ -1126,10 +1169,13 @@ class AgentLoop(
     private var stepsRef: StepHistory? = null
 
     /** Verifier: cloud judge on the current screen; null = no judge available (deterministic result stands). */
-    private suspend fun verify(dev: com.runasakura.phoneagent.flow.Device, goal: String): Pair<Boolean, String>? {
+    private suspend fun verify(dev: com.runasakura.phoneagent.flow.Device, goal: String, claim: String? = null): Pair<Boolean, String>? {
         if (!router.cloudReady) return null
         val sc = dev.screen()
-        val v = try { router.judge(goal, buildDump(sc), sc.pkg) } catch (e: Exception) { null }
+        // Multi-step goals: earlier steps are no longer on screen. The executed-action log (written by Tsuki, not by
+        // the model) is the evidence for them; the judge only has to check the final step on this screen.
+        val evidence = (stepsRef?.progress()?.takeLast(700) ?: "") + (claim?.let { "\n模型的结论（待核对）：${it.take(200)}" } ?: "")
+        val v = try { router.judge(goal, buildDump(sc), sc.pkg, evidence) } catch (e: Exception) { null }
         v?.let { onLog("验收：${if (it.first) "✓ 已完成" else "✗ 未完成"} ${it.second}") }
         return v
     }
