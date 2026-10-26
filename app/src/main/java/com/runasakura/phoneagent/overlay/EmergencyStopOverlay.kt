@@ -25,6 +25,31 @@ class EmergencyStopOverlay(
 
     private val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private var button: android.view.View? = null
+    private var lp: WindowManager.LayoutParams? = null
+
+    /**
+     * Run [block] (an injected gesture) with the overlay invisible and untouchable, then restore it.
+     * Taps keep their exact coordinates instead of being shifted next to the button.
+     */
+    fun <T> withPassThrough(block: () -> T): T {
+        setPassThrough(true)
+        try { return block() } finally { setPassThrough(false) }
+    }
+
+    private fun setPassThrough(on: Boolean) {
+        val v = button ?: return; val p = lp ?: return
+        val latch = java.util.concurrent.CountDownLatch(1)
+        main.post {
+            try {
+                p.flags = if (on) p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                v.alpha = if (on) 0f else 1f
+                wm.updateViewLayout(v, p)
+            } catch (_: Exception) { }
+            latch.countDown()
+        }
+        latch.await(400, java.util.concurrent.TimeUnit.MILLISECONDS)
+        if (on) Thread.sleep(60) // let the window manager apply the flag before input arrives
+    }
 
     fun show() {
         if (button != null) return
@@ -84,7 +109,7 @@ class EmergencyStopOverlay(
         }
         try {
             wm.addView(box, params)
-            button = box; label = lbl
+            button = box; label = lbl; lp = params; active = this
             box.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
                 val loc = IntArray(2); v.getLocationOnScreen(loc)
                 bounds = android.graphics.Rect(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
@@ -101,23 +126,25 @@ class EmergencyStopOverlay(
             } catch (_: Exception) {
             }
         }
-        button = null; label = null
-        bounds = null
+        button = null; label = null; lp = null
+        bounds = null; if (active === this) active = null
     }
 
     companion object {
         /** Screen bounds of the visible stop button (gesture taps must avoid it). */
         @Volatile var bounds: android.graphics.Rect? = null
+        @Volatile var active: EmergencyStopOverlay? = null
     }
 }
 
-/** Pure helper: move a tap that would land on the overlay to just outside it (right side, else below). */
+/** Pure helper: does a gesture point (or a swipe path's bounding box) touch the overlay? */
 object OverlayAvoid {
-    const val PAD = 16
-    fun point(x: Int, y: Int, r: IntArray?): Pair<Int, Int> {
-        if (r == null) return x to y
-        val (l, t, rr, b) = r.toList()
-        if (x < l || x > rr || y < t || y > b) return x to y
-        return (rr + PAD) to y
+    const val PAD = 8
+    fun hits(x: Int, y: Int, r: IntArray?): Boolean =
+        r != null && x >= r[0] - PAD && x <= r[2] + PAD && y >= r[1] - PAD && y <= r[3] + PAD
+    fun pathHits(x1: Int, y1: Int, x2: Int, y2: Int, r: IntArray?): Boolean {
+        if (r == null) return false
+        val steps = 12
+        return (0..steps).any { i -> hits(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps, r) }
     }
 }

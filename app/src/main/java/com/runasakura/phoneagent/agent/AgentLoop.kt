@@ -349,7 +349,7 @@ class AgentLoop(
             }
             // ---- Reflect like a desktop agent: progress check every 6 steps / on loops, then re-plan ----
             if (router.cloudReady && step > 1 && loopStreak == 2) {
-                turns.clear()
+                transcript.clear()
                 val v = verify(dev, goal)
                 if (v != null && v.first) { saveAppMemory(goal, true, steps.progress()); return Result(true, step, "目标已达成（验收：${v.second}）") }
                 if (v != null) {
@@ -368,7 +368,7 @@ class AgentLoop(
             val msgs = if (useFocused) {
                 // Append-only transcript: each request = previous request + its answer + new observation,
                 // so DeepSeek's prefix cache covers everything but the newest screen.
-                history.take(2) + Transcript.window(turns) + ChatMessage("user", obsText, brainShot)
+                history.take(2) + transcript.window() + ChatMessage("user", obsText, brainShot)
             } else {
                 // Keep history short for VL: system SHORT + last user observe only
                 listOf(
@@ -455,7 +455,7 @@ class AgentLoop(
             invalidStreak = 0
 
             history += ChatMessage("assistant", resp.content)
-            pendingObs?.let { Transcript.append(turns, it, resp.content) }; pendingObs = null
+            pendingObs?.let { transcript.append(it, resp.content) { steps.progress() } }; pendingObs = null
 
             // Rewrite ambiguous tap on "设置" while still in our app → system settings launch
             plan = rewriteSettingsAmbiguity(plan, snap, goal)
@@ -467,7 +467,7 @@ class AgentLoop(
                     onLog("⚠ 疑似注入：拦截输入「${ty.text.take(40)}」——不在用户目标中")
                     if (injectionBlocks >= 2) return Result(false, step, "疑似注入：模型多次尝试输入用户目标之外的文字，已停止")
                     while (history.size > 2 && history.last().role == "assistant") history.removeAt(history.lastIndex)
-                    history += ChatMessage("user", "上一步被拦截：只能输入用户目标里的文字。"); turns += ChatMessage("user", "上一步被拦截：只能输入用户目标里的文字。")
+                    history += ChatMessage("user", "上一步被拦截：只能输入用户目标里的文字。"); transcript.note("上一步被拦截：只能输入用户目标里的文字。")
                     continue
                 }
                 lastTyped = ty.text
@@ -505,7 +505,7 @@ class AgentLoop(
                     if (v != null && !v.first) {
                         doneRejections++
                         onLog("模型说完成，但验收未通过：${v.second}（继续）")
-                        history += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。"); turns += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。")
+                        history += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。"); transcript.note("验收未通过：${v.second}。请继续完成目标，不要输出 done。")
                         continue
                     }
                     saveAppMemory(goal, true, steps.progress())
@@ -729,7 +729,8 @@ class AgentLoop(
     private val guard = NoEffectGuard()
     private var prevItems: List<com.runasakura.phoneagent.screen.ScreenItem>? = null
     private var prevIme: Int? = null
-    private val turns = ArrayList<ChatMessage>()
+    private var prevFocus = false
+    private val transcript = Transcript()
     private var pendingObs: String? = null
     private var lastExec: Triple<AgentAction, String?, String>? = null
     private var invalidStreak = 0
@@ -767,13 +768,14 @@ class AgentLoop(
     private fun semanticNote(sc: com.runasakura.phoneagent.flow.Screen): String? {
         val prev = prevItems; prevItems = sc.items
         val imeBefore = prevIme; prevIme = sc.imeTop
+        val focusBefore = prevFocus; prevFocus = sc.inputFocused
         lastNoEffect = false
         val le = lastExec ?: return null
         lastExec = null
         if (prev == null) return "上一步：${le.third}"
         val exp = lastExpect?.let { "（你预期：$it —— 对照下面判断是否达到）" } ?: ""
         val d = SemanticDiff.compare(prev, sc.items)
-        val stateNote = SemanticDiff.stateChange(imeBefore, sc.imeTop, (le.first as? AgentAction.Tap)?.let { t -> prev.firstOrNull { it.id == t.nodeId }?.edit } == true)
+        val stateNote = SemanticDiff.stateChange(imeBefore, sc.imeTop, focusBefore, sc.inputFocused)
         if (!d.meaningful && stateNote != null) return "上一步：${le.third}$exp → 文字没变，但$stateNote"
         return if (!d.meaningful) {
             guard.record(le.first, le.second, le.third); lastNoEffect = true

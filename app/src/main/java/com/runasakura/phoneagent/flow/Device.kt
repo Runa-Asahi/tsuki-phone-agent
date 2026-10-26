@@ -10,7 +10,9 @@ data class Screen(
     val items: List<ScreenItem>,
     val source: String,
     /** Top y of the soft keyboard window, or null when no IME is shown. */
-    val imeTop: Int? = null
+    val imeTop: Int? = null,
+    /** Verified via AccessibilityNodeInfo.findFocus(FOCUS_INPUT).isEditable — not guessed from the tap target. */
+    val inputFocused: Boolean = false
 ) {
     val textCount: Int get() = items.count { it.label.isNotBlank() }
     fun isEmpty() = textCount == 0

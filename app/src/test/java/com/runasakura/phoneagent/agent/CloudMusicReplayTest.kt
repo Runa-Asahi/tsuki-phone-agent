@@ -16,28 +16,37 @@ class CloudMusicReplayTest {
     @Test fun tappingInputWithKeyboardIsNotNoEffect() {
         // Step 4: identical text before/after tapping the input, keyboard appeared.
         assertFalse(SemanticDiff.compare(searchPage, searchPage).meaningful)
-        assertNotNull(SemanticDiff.stateChange(null, 1700, tappedEditable = true))
-        assertTrue(SemanticDiff.stateChange(null, 1700, false)!!.contains("键盘已弹出"))
-        assertNotNull("tapping an editable counts even if IME is not reported", SemanticDiff.stateChange(null, null, true))
-        assertNull(SemanticDiff.stateChange(1700, 1700, false))
+        assertTrue(SemanticDiff.stateChange(null, 1700, false, true)!!.contains("键盘已弹出"))
+        assertTrue("focus verified by a11y even without IME", SemanticDiff.stateChange(null, null, false, true)!!.contains("系统确认"))
+        assertNull("tapping an editable alone is no longer assumed to work", SemanticDiff.stateChange(null, null, false, false))
+        assertNull(SemanticDiff.stateChange(1700, 1700, true, true))
     }
 
-    @Test fun transcriptIsAppendOnlyForPrefixCache() {
-        val turns = ArrayList<ChatMessage>()
+    @Test fun transcriptIsAppendOnlyThenCompacts() {
+        val t = Transcript()
         val sys = listOf(ChatMessage("system", SystemPrompt.SHORT), ChatMessage("user", "目标"))
-        val r1 = sys + Transcript.window(turns) + ChatMessage("user", "obs1")
-        Transcript.append(turns, "obs1", "a1")
-        val r2 = sys + Transcript.window(turns) + ChatMessage("user", "obs2")
+        val r1 = sys + t.window() + ChatMessage("user", "obs1")
+        t.append("obs1", """{"state":"首页","action":{"type":"tap","node_id":"e15"},"expect":"搜索页"}""")
+        val r2 = sys + t.window() + ChatMessage("user", "obs2")
         assertEquals("request 2 starts with request 1 exactly", r1, r2.take(r1.size))
-        repeat(10) { Transcript.append(turns, "o$it", "a$it") }
-        assertTrue(turns.size <= Transcript.MAX)
+        val big = "屏".repeat(3000)
+        repeat(8) { t.append(big + it, """{"state":"s$it","action":{"type":"back"}}""") { "进度X" } }
+        assertTrue(t.size() <= Transcript.MAX)
+        val cp = t.checkpoint!!
+        assertTrue(cp.contains("<checkpoint>") && cp.contains("在「首页」") && cp.contains("进度X"))
+        val w = t.window()
+        assertTrue("old screens pruned and marked stale", w.filter { it.role == "user" && it.content.startsWith("（较早") }.all { it.content.length < 1200 })
+        // after compaction the series is append-only again
+        val before = sys + t.window()
+        t.append("obsN", "{}")
+        assertEquals(before, (sys + t.window()).take(before.size))
     }
 
-    @Test fun tapNeverLandsOnOwnStopButton() {
+    @Test fun overlayHitDetectionForPassThrough() {
         val r = intArrayOf(0, 1100, 350, 1300)
-        assertEquals(366 to 1200, OverlayAvoid.point(200, 1200, r))
-        assertEquals(800 to 1200, OverlayAvoid.point(800, 1200, r))
-        assertEquals(200 to 1200, OverlayAvoid.point(200, 1200, null))
+        assertTrue(OverlayAvoid.hits(200, 1200, r)); assertFalse(OverlayAvoid.hits(800, 1200, r)); assertFalse(OverlayAvoid.hits(200, 1200, null))
+        assertTrue("swipe crossing the button", OverlayAvoid.pathHits(600, 1600, 100, 900, r))
+        assertFalse(OverlayAvoid.pathHits(700, 2000, 700, 500, r))
     }
 
     @Test fun realUsageAndCacheHitParsed() {

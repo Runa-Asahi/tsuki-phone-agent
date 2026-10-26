@@ -46,11 +46,15 @@ object ObsFormat {
 
 /** OCR-noise-robust screen diff: same-position re-reads and timers are NOT changes. */
 object SemanticDiff {
-    /** Non-text state changes OCR/tree text diffs miss: keyboard shown/hidden, an input field tapped. */
-    fun stateChange(imeBefore: Int?, imeAfter: Int?, tappedEditable: Boolean): String? = when {
-        imeBefore == null && imeAfter != null -> "键盘已弹出（输入框已获得焦点），可以直接 type"
+    /**
+     * Non-text state changes that OCR/tree text diffs miss, from verified signals only:
+     * the IME window (A11y windows) and the input-focused node (findFocus(FOCUS_INPUT)).
+     */
+    fun stateChange(imeBefore: Int?, imeAfter: Int?, focusBefore: Boolean, focusAfter: Boolean): String? = when {
+        imeBefore == null && imeAfter != null -> "键盘已弹出，输入框已获得焦点，可以直接 type"
         imeBefore != null && imeAfter == null -> "键盘已收起"
-        tappedEditable -> "点的是输入框，焦点可能已进入（可直接 type）"
+        !focusBefore && focusAfter -> "输入框已获得焦点（系统确认），可以直接 type"
+        focusBefore && !focusAfter -> "输入框失去焦点"
         else -> null
     }
 
@@ -117,14 +121,71 @@ class TaskMemory(private val max: Int = 8) {
     fun text(): String? = if (facts.isEmpty()) null else facts.joinToString("；")
 }
 
-/** Prompt-cache friendly transcript: append-only, reset (one cache miss) when it grows past [MAX]. */
-object Transcript {
-    const val MAX = 12
-    fun append(turns: MutableList<ChatMessage>, obs: String, answer: String) {
-        if (turns.size + 2 > MAX) turns.clear()
+/**
+ * Prompt-cache friendly step transcript, modelled on DeepSeek Harness compaction
+ * (packages/compaction/compaction-basic: condense the oldest span into one checkpoint, keep recent turns;
+ * compaction-tool-result-pruner: head/tail-trim oversized results; compaction-image-offload: drop old images).
+ *
+ * Between compactions the request is append-only (request N+1 = request N + answer + new observation), so the
+ * provider prefix cache covers everything except the newest screen. When the transcript exceeds [MAX] messages,
+ * one compaction starts a new series: older pairs become a structured checkpoint built from the model's own
+ * scratchpad fields (state/action/expect/goal_match), and the retained pairs' screens are head/tail-pruned
+ * and marked stale so old screens do not distract the model.
+ */
+class Transcript {
+    var checkpoint: String? = null; private set
+    private val turns = ArrayList<ChatMessage>()
+    var series = 0; private set
+
+    fun size() = turns.size
+    fun note(text: String) { turns += ChatMessage("user", text) }
+
+    fun append(obs: String, answer: String, progress: () -> String = { "" }) {
         turns += ChatMessage("user", obs); turns += ChatMessage("assistant", answer)
+        if (turns.size > MAX) compact(progress())
     }
-    fun window(turns: List<ChatMessage>): List<ChatMessage> = turns.toList()
+
+    fun window(): List<ChatMessage> = listOfNotNull(checkpoint?.let { ChatMessage("user", it) }) + turns
+
+    fun clear() { turns.clear(); checkpoint = null; series++ }
+
+    private fun compact(progress: String) {
+        val keepFrom = (turns.size - RETAIN_MSGS).coerceAtLeast(0).let { if (turns[it].role == "assistant") it + 1 else it }
+        val old = turns.subList(0, keepFrom).toList()
+        val kept = turns.subList(keepFrom, turns.size).map { m ->
+            if (m.role == "user") ChatMessage("user", "（较早的屏幕，已过时，仅供参考）\n" + prune(m.content)) else m
+        }
+        val lines = old.filter { it.role == "assistant" }.mapNotNull { stepLine(it.content) }
+        checkpoint = buildString {
+            appendLine("<checkpoint>")
+            appendLine("## 已做过的步骤（较早部分已压缩）")
+            (checkpoint?.let { prev -> prev.lines().filter { it.startsWith("- ") } } ?: emptyList()).takeLast(12).forEach { appendLine(it) }
+            lines.forEach { appendLine("- $it") }
+            if (progress.isNotBlank()) appendLine("## 进度\n$progress")
+            append("</checkpoint>")
+        }
+        turns.clear(); turns.addAll(kept); series++
+    }
+
+    companion object {
+        const val MAX = 12
+        const val RETAIN_MSGS = 4
+        const val HEAD = 700
+        const val TAIL = 200
+
+        /** Head/tail trim like the harness tool-result pruner. */
+        fun prune(text: String): String = if (text.length <= HEAD + TAIL + 20) text else
+            text.take(HEAD) + "\n…（中间已省略）…\n" + text.takeLast(TAIL)
+
+        /** One line per earlier step from the model's own JSON scratchpad. */
+        fun stepLine(answer: String): String? = try {
+            val o = org.json.JSONObject(answer.substring(answer.indexOf('{'), answer.lastIndexOf('}') + 1))
+            val a = o.optJSONObject("action")
+            val act = a?.let { x -> x.optString("type") + listOf("node_id", "text", "x", "y", "url", "action", "name").mapNotNull { k -> x.opt(k)?.toString()?.takeIf { it.isNotBlank() }?.let { "$k=$it" } }.joinToString(",", " ") }
+            listOfNotNull(o.optString("state").takeIf { it.isNotBlank() }?.let { "在「$it」" }, act?.let { "做了 $it" },
+                o.optString("expect").takeIf { it.isNotBlank() }?.let { "预期 $it" }).joinToString("，").ifBlank { null }
+        } catch (_: Exception) { null }
+    }
 }
 
 /** Reads the model's own goal_match judgement; only a clear leading "否/no" counts. */

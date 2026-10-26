@@ -112,7 +112,7 @@ class A11yDevice(
         val budget = intArrayOf(1500)
         walkDeadline = System.currentTimeMillis() + 1500
         val items = ScreenItems.leaves(roots.map { toRaw(it, 0, budget) }, w, h)
-        return Screen(fg, w, h, items, if (items.isEmpty()) "none" else "tree", imeTop())
+        return Screen(fg, w, h, items, if (items.isEmpty()) "none" else "tree", imeTop(), s.editableFocused())
     }
 
     private fun dimen(name: String): Int {
@@ -193,7 +193,7 @@ class A11yDevice(
         )
         val ms = System.currentTimeMillis() - t0
         log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}）文字=${items.size}")
-        val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop())
+        val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop(), s.editableFocused())
         ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg; ocrCacheGen = actionGen
         return out
     }
@@ -235,7 +235,7 @@ class A11yDevice(
         val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
         val items = com.runasakura.phoneagent.ocr.OcrPost.process(scaled, (shotTop * sy).toInt(), (shotBottom * sy).toInt() + 1, ignore, overlayExclude())
         log("OCR 细节区重识别 ${System.currentTimeMillis() - t0}ms 文字=${items.size}")
-        val out = Screen(shotPkg, w, h, items, "ocr", imeTop())
+        val out = Screen(shotPkg, w, h, items, "ocr", imeTop(), s.editableFocused())
         refined = out; ocrCache = out; lastScreen = out
         return out
     }
@@ -326,6 +326,15 @@ class A11yDevice(
         while (t.textCount < 3 && System.currentTimeMillis() - start < budget) {
             delay(300); t = treeScreen()
         }
+        if (t.textCount >= 3 && !quiet) {
+            // The UI never went quiet (animation/player): accept the read only when two frames agree semantically.
+            repeat(2) {
+                delay(250); val t2 = treeScreen()
+                val stable = !com.runasakura.phoneagent.agent.SemanticDiff.compare(t.items, t2.items).meaningful
+                t = t2
+                if (stable) { TaskTiming.count("两帧一致"); return@repeat }
+            }
+        }
         if (t.textCount >= 3) {
             val ms = System.currentTimeMillis() - start
             Diagnostics.observe(t.pkg, "tree", t.textCount)
@@ -351,11 +360,8 @@ class A11yDevice(
         fun record(pkg: String, quiet: Boolean) { busy[pkg] = if (quiet) 0 else (busy[pkg] ?: 0) + 1 }
     }
 
-    /** Never let an injected tap land on our own emergency-stop button. */
-    private fun avoidOverlay(x: Int, y: Int): Pair<Int, Int> {
-        val r = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.bounds ?: return x to y
-        return if (r.contains(x, y)) (r.right + 12) to y else x to y
-    }
+    /** Overlay handling lives in the service gesture layer (overlay steps aside); coordinates stay exact. */
+    private fun avoidOverlay(x: Int, y: Int): Pair<Int, Int> = x to y
 
     override suspend fun tap(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
         invalidateOcr("tap")

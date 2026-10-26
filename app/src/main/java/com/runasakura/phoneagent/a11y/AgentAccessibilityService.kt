@@ -461,9 +461,15 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     // Every injected gesture avoids our own floating stop button (a tap there used to cancel the task).
-    fun tap(x: Int, y: Int): Boolean { val (ax, ay) = com.runasakura.phoneagent.overlay.OverlayAvoid.point(x, y, overlayRect()); return gestureClick(ax, ay, 50) }
+    fun tap(x: Int, y: Int): Boolean = clearOfOverlay(com.runasakura.phoneagent.overlay.OverlayAvoid.hits(x, y, overlayRect())) { gestureClick(x, y, 50) }
 
-    fun longPress(x: Int, y: Int): Boolean { val (ax, ay) = com.runasakura.phoneagent.overlay.OverlayAvoid.point(x, y, overlayRect()); return gestureClick(ax, ay, 600) }
+    fun longPress(x: Int, y: Int): Boolean = clearOfOverlay(com.runasakura.phoneagent.overlay.OverlayAvoid.hits(x, y, overlayRect())) { gestureClick(x, y, 600) }
+
+    /** Exact coordinates; when the gesture would touch our stop button, the button steps aside for its duration. */
+    private fun clearOfOverlay(hits: Boolean, g: () -> Boolean): Boolean {
+        val ov = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.active
+        return if (hits && ov != null) ov.withPassThrough(g) else g()
+    }
 
     private fun overlayRect(): IntArray? = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.bounds?.let { intArrayOf(it.left, it.top, it.right, it.bottom) }
 
@@ -493,7 +499,10 @@ class AgentAccessibilityService : AccessibilityService() {
         return longPress(r.centerX(), r.centerY())
     }
 
-    fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 300): Boolean {
+    fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 300): Boolean =
+        clearOfOverlay(com.runasakura.phoneagent.overlay.OverlayAvoid.pathHits(x1, y1, x2, y2, overlayRect())) { swipeRaw(x1, y1, x2, y2, durationMs) }
+
+    private fun swipeRaw(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long = 300): Boolean {
         val path = Path().apply {
             moveTo(x1.toFloat(), y1.toFloat())
             lineTo(x2.toFloat(), y2.toFloat())
