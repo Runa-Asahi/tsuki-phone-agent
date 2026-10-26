@@ -62,6 +62,7 @@ class MessagingFlow(
         private const val PLUS_X = 0.95
         /** WeChat 表情 button sits left of 「+」. */
         private const val EMOJI_X = 0.86
+        private val TIME = Regex("^(昨天|前天|星期.|周.|上午|下午|晚上)?\\d{1,2}[:：-]\\d{2}$|^\\d{1,2}月\\d{1,2}日.*$")
         val CALL_MARKERS = listOf("等待对方接受邀请", "正在呼叫", "挂断", "切到语音通话", "免提", "通话中")
         val CONTACT_SECTIONS = setOf("联系人", "最常使用", "好友", "更多联系人")
         private const val SEND = "发送"
@@ -612,6 +613,20 @@ class MessagingFlow(
         val after = d.fieldText()
         return if (after != null && Text.norm(after).isNotEmpty()) fail("点击发送后输入框仍有内容，未确认发出")
         else Outcome(true, "已向「$contact」发送表情" + if (after == null) "（未能核验，请看一眼手机）" else "（输入框已清空）", verified = after != null)
+    }
+
+    /** 「看X最后一条消息」: open the verified chat and read the lowest message line above the input bar (read-only). */
+    suspend fun readLast(contact: String): Outcome {
+        containsTitle = null; fuzzyTitle = null; blindPicked = false; titleAnchor = null
+        openChat(contact)?.let { return fail(it) }
+        val s = d.screen()
+        val bar = s.items.filter { it.cy > s.h * 0.85 }.minByOrNull { it.cy }?.cy ?: (s.h * 0.9).toInt()
+        val msgs = s.items.filter { it.cy > s.h * 0.12 && it.cy < bar - 20 && !TIME.matches(Text.norm(it.label)) }
+            .sortedBy { it.cy }
+        val last = msgs.lastOrNull() ?: return fail("聊天里没读到消息")
+        val side = if (last.cx > s.w * 0.55) "我" else contact
+        log("最后一条（$side）：${last.label}")
+        return Outcome(true, "「$contact」聊天最后一条（$side 发）：${last.label}", verified = true)
     }
 
     /** Set when an emoji-only contact was chosen as the unique 联系人 row (name unreadable). */

@@ -602,7 +602,16 @@ class AgentAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Preferred way to open system Settings on Honor MagicOS / Android. */
+    /** 时钟: standard AlarmClock intent (the clock app shows/creates it; SKIP_UI keeps it quick). */
+    fun setAlarm(hour: Int, minute: Int, label: String): Boolean = try {
+        startActivity(Intent(android.provider.AlarmClock.ACTION_SET_ALARM)
+            .putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)
+            .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute)
+            .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label)
+            .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+    } catch (e: Exception) { Log.w(TAG, "set alarm failed: ${e.message}"); false }
+
     /** Open a specific settings page by intent action (read-only navigation). */
     fun launchSettingsAction(action: String): Boolean = try {
         startActivity(Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true

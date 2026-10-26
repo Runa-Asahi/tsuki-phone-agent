@@ -48,7 +48,23 @@ class AgentLoop(
             onLog("目标含敏感语义，开始前请知悉：发送/支付等会二次确认")
         }
 
-        SettingsPages.match(goal)?.let { page ->
+        QuickIntents.alarm(goal)?.let { al ->
+            onLog("闹钟意图：%02d:%02d（系统时钟 Intent）".format(al.hour, al.minute))
+            if (a11y.setAlarm(al.hour, al.minute, al.label)) return Result(true, 1, "已设置 %02d:%02d 的闹钟（由系统时钟创建）".format(al.hour, al.minute))
+            onLog("时钟 Intent 失败，交给模型")
+        }
+        var toggleNote: String? = null
+        QuickIntents.toggle(goal)?.let { (what, on) ->
+            val page = SettingsPages.match("打开$what")
+            if (page != null && a11y.launchSettingsAction(page.action)) {
+                waitForeground(a11y, 2500) { a11y.isSettingsForeground(it) }
+                toggleNote = "已在「${page.label}」设置页。剩余目标：把「$what」开关切换为${if (on) "开启" else "关闭"}；若已经是${if (on) "开启" else "关闭"}状态直接 done。"
+                onLog("开关意图：$what → ${if (on) "开" else "关"}（先开设置页，再由模型拨开关并验收）")
+            }
+        }
+        if (toggleNote != null) {
+            history.clear(); history += ChatMessage("system", SystemPrompt.FOCUSED); history += ChatMessage("user", toggleNote!!)
+        } else SettingsPages.match(goal)?.let { page ->
             onLog("快路径：直接打开「${page.label}」设置页（只打开，不改任何开关）")
             if (a11y.launchSettingsAction(page.action)) {
                 val fg = waitForeground(a11y, 2500) { a11y.isSettingsForeground(it) }
@@ -83,18 +99,24 @@ class AgentLoop(
 
         // ---- Deterministic paths (never call the model here) ----
         val dev = com.runasakura.phoneagent.a11y.A11yDevice(a11y, onLog)
-        CallGoals.parse(goal)?.let { cg ->
+        QuickIntents.readLast(goal)?.takeIf { toggleNote == null }?.let { who ->
+            val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev,
+                com.runasakura.phoneagent.flow.AppProfile.forPackage(MessagingGoals.WECHAT), onLog) { onConfirm(it) }
+            val out = flow.readLast(who)
+            return Result(out.ok, 1, out.summary)
+        }
+        if (toggleNote == null) CallGoals.parse(goal)?.let { cg ->
             val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev,
                 com.runasakura.phoneagent.flow.AppProfile.forPackage(MessagingGoals.WECHAT), onLog) { onConfirm(it) }
             val out = flow.call(cg.contact, cg.video)
             return Result(out.ok, 1, out.summary)
         }
-        val msgGoal = MessagingGoals.parse(goal)
+        val msgGoal = if (toggleNote == null) MessagingGoals.parse(goal) else null
         var targetPkg: String? = null
         if (msgGoal != null && msgGoal.contact != null && msgGoal.message != null) {
             MessagingGoals.validate(msgGoal.contact, msgGoal.message)?.let { return Result(false, 0, it) }
             return runMessaging(dev, msgGoal.packageName, msgGoal.contact, msgGoal.message)
-        } else if (subTarget == null) {
+        } else if (subTarget == null && toggleNote == null) {
             // Generic: 打开/启动/进入 <任意已安装 App>[，进入X，发送Y…]
             val appName = AppResolver.extractAppName(goal)
             if (appName != null) {
@@ -211,6 +233,8 @@ class AgentLoop(
                 onLog("界面文本少于3项，附带截图（仅 VL 模型会使用）")
                 try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
             } else null
+            // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
+            if (cloudPlanText == null && goal.length <= 10) cloudPlanText = ""
             if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
                 cloudPlanText = router.cloudPlan(goal, snap.compressedText)?.let { st ->
                     onLog("云端规划（本机按此执行）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")

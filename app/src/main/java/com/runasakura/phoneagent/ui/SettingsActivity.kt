@@ -102,6 +102,8 @@ class SettingsActivity : AppCompatActivity() {
             prefs.cloudBaseUrl = binding.cloudUrl.text.toString().trim()
             prefs.cloudApiKey = binding.cloudKey.text.toString().trim()
             prefs.cloudModel = binding.cloudModel.text.toString().trim()
+            CloudProviders.modelWarning(prefs.cloudModel, emptyList(), CloudProviders.byId(prefs.cloudProvider).takeIf { it.models.isNotEmpty() })
+                ?.let { Toast.makeText(this, "⚠ $it（可点「测试连接」核对）", Toast.LENGTH_LONG).show() }
             if (CloudProviders.isReasoner(prefs.cloudModel)) Toast.makeText(this, "提示：推理模型较慢，建议日常用 chat 类模型", Toast.LENGTH_LONG).show()
             prefs.cloudProvider = CloudProviders.effectiveProvider(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)
             prefs.maxSteps = binding.maxSteps.text.toString().toIntOrNull() ?: 25
