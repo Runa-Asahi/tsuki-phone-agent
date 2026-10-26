@@ -96,6 +96,11 @@ class AgentPreferences(context: Context) {
     fun setAppMemory(pkg: String, v: String) = sp.edit().putString("appmem_$pkg", v.take(4000)).apply()
     fun clearAppMemory() { val e = sp.edit(); sp.all.keys.filter { it.startsWith("appmem_") }.forEach { e.remove(it) }; e.apply() }
 
+    /** DeepSeek thinking mode for agent steps (user choice; default off = faster). */
+    var cloudThinking: Boolean
+        get() = sp.getBoolean("cloud_thinking", false)
+        set(v) = sp.edit().putBoolean("cloud_thinking", v).apply()
+
     var confirmAlarm: Boolean
         get() = sp.getBoolean("confirm_alarm", true)
         set(v) = sp.edit().putBoolean("confirm_alarm", v).apply()

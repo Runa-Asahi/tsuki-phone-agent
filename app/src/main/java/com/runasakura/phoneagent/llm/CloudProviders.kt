@@ -9,7 +9,7 @@ object CloudProviders {
     val ALL = listOf(
         Preset(AgentPreferences.PROVIDER_NONE, "不使用云端", "", "", emptyList()),
         Preset(AgentPreferences.PROVIDER_DEEPSEEK, "DeepSeek", AgentPreferences.DEEPSEEK_BASE, AgentPreferences.DEEPSEEK_MODEL,
-            // api-docs.deepseek.com (2026-10): deepseek-flash, deepseek-v4-pro; deepseek-chat/-reasoner are legacy aliases.
+            // api-docs.deepseek.com/quick_start/pricing (2026-10): deepseek-flash (= DeepSeek-V4.1-Flash-1017) and deepseek-v4-pro.
             listOf("deepseek-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner")),
         Preset(PROVIDER_QWEN, "通义千问（阿里云百炼）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus",
             listOf("qwen-plus", "qwen-turbo", "qwen-max", "qwen-flash", "qwen3-vl-plus", "qwen-vl-max")),
@@ -93,7 +93,7 @@ object CloudProviders {
     fun clientFor(prefs: AgentPreferences): CloudClient? {
         if (!ready(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)) return null
         val m = effectiveModel(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey, prefs.cloudModel)
-        return CloudClient(prefs.cloudBaseUrl, prefs.cloudApiKey, m)
+        return CloudClient(prefs.cloudBaseUrl, prefs.cloudApiKey, m, thinking = prefs.cloudThinking)
     }
 
     fun mask(k: String) = when { k.isEmpty() -> "未配置"; k.length <= 8 -> "已配置(****)"; else -> "已配置(" + k.take(4) + "…" + k.takeLast(4) + ")" }

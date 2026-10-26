@@ -62,6 +62,7 @@
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:textStyle="bold" android:text="视觉辅助模型（可选，推荐）" />
             <CheckBox android:id="@+id/visionLocal" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="本机 MNN 视觉模型看图（文字大脑仍用云端）" />
             <EditText android:id="@+id/visionLocalModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:hint="本机 VL 模型名（留空=MNN 当前模型），如 Qwen2.5-VL-3B-Instruct-MNN" />
+            <CheckBox android:id="@+id/cloudThinking" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="DeepSeek 思考模式（更准但更慢，默认关）" />
             <CheckBox android:id="@+id/confirmAlarm" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="设置闹钟前先确认" />
             <TextView android:id="@+id/visionTip" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" />
             <EditText android:id="@+id/visionUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:hint="https://dashscope.aliyuncs.com/compatible-mode/v1" />

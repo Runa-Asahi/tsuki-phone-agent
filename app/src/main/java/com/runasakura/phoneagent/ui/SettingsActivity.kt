@@ -41,6 +41,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.visionLocal.isChecked = prefs.visionLocal
         binding.visionLocalModel.setText(prefs.visionLocalModel)
         binding.confirmAlarm.isChecked = prefs.confirmAlarm
+        binding.cloudThinking.isChecked = prefs.cloudThinking
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
@@ -120,6 +121,7 @@ class SettingsActivity : AppCompatActivity() {
             prefs.visionLocal = binding.visionLocal.isChecked
             prefs.visionLocalModel = binding.visionLocalModel.text.toString()
             prefs.confirmAlarm = binding.confirmAlarm.isChecked
+            prefs.cloudThinking = binding.cloudThinking.isChecked
             binding.visionKey.text.toString().trim().takeIf { it.isNotEmpty() }?.let { prefs.visionApiKey = it }
             prefs.routeMode = modes[binding.routeMode.selectedItemPosition]
             Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
