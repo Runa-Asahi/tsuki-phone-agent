@@ -232,12 +232,14 @@ class SettingsActivity : AppCompatActivity() {
         val all = prefs.allAppMemory()
         if (all.isEmpty()) { android.widget.Toast.makeText(this, "还没有学到任何应用经验", android.widget.Toast.LENGTH_SHORT).show(); return }
         val pkgs = all.keys.sorted()
-        val labels = pkgs.map { p -> val m = com.runasakura.phoneagent.agent.AppMemory.decode(all[p]); "$p\n经验 ${m.facts.size} 条 · 路线 ${m.paths.size} 条" }.toTypedArray()
+        fun name(p: String) = if (p == com.runasakura.phoneagent.agent.AppMemory.GLOBAL) "通用界面经验（跨应用）" else p
+        val labels = pkgs.map { p -> val m = com.runasakura.phoneagent.agent.AppMemory.decode(all[p]); "${name(p)}\n经验 ${m.facts.size} 条 · 路线 ${m.paths.size} 条" }.toTypedArray()
         com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("应用经验（点一项查看）")
             .setItems(labels) { _, i ->
                 val p = pkgs[i]; val m = com.runasakura.phoneagent.agent.AppMemory.decode(all[p])
-                val body = (m.facts.map { "• $it" } + m.paths.map { "→ ${it.substringBefore("=>")}：${it.substringAfter("=>")}" }).joinToString("\n").ifBlank { "（空）" }
-                com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle(p).setMessage(body)
+                fun badge(c: Int) = if (c >= 2) "（已验证 $c 次）" else "（未验证）"
+                val body = (m.factEntries.map { "• ${it.text}${badge(it.conf)}" } + m.pathEntries.map { "→ ${it.text.substringBefore("=>")}：${it.text.substringAfter("=>")}${badge(it.conf)}" }).joinToString("\n").ifBlank { "（空）" }
+                com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle(name(p)).setMessage(body)
                     .setPositiveButton("关闭", null)
                     .setNegativeButton("删除此应用经验") { _, _ -> prefs.clearAppMemory(p) }.show()
             }

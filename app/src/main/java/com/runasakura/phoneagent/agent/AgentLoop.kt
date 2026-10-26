@@ -68,9 +68,14 @@ class AgentLoop(
         val lesson = router.lesson(goal, appLabel, traj, outcome, memory.all() + guard.deadLabels().map { "「$it」无效" })
         val base = runCatching { AppMemory.decode(prefs.appMemory(pkg)) }.getOrNull() ?: AppMemory.EMPTY
         val facts = lesson?.facts.orEmpty()
+        // Failure: routes reused this time lose confidence; facts shown this time are demoted (unverified ones dropped).
         val m = if (r.success) base.merge(facts, goal, lesson?.route ?: traj)
-            else (if (reusedPath) base.penalize(goal) else base).merge(facts, null, null)
+            else (if (reusedPath) base.penalize(goal) else base).decayShown(goal).merge(facts, null, null)
         prefs.setAppMemory(pkg, m.encode())
+        lesson?.patterns?.takeIf { it.isNotEmpty() }?.let { ps ->
+            val g = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)) }.getOrNull() ?: AppMemory.EMPTY
+            prefs.setAppMemory(AppMemory.GLOBAL, g.merge(ps, null, null).encode())
+        }
         if (lesson == null) { onLog(when {
             r.success -> "经验沉淀：记录本次路线（未经模型整理）"
             reusedPath -> "失败：已降低复用路线的可信度"
@@ -984,9 +989,19 @@ class AgentLoop(
             appendLine("/no_think")
             appendLine("# 用户目标\n$goal")
             appMem?.hint(goal)?.let { appendLine("# 以往经验\n$it") }
+            globalHint?.let { appendLine("# 通用界面经验\n$it") }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
             // Soft per-app hints (data file) once per package per task: they stay in the cached transcript afterwards.
-            if (snap.packageName.isNotBlank() && hintedPkgs.add(snap.packageName)) AppHints.forPackage(snap.packageName)?.let { appendLine("# 应用提示\n$it") }
+            if (snap.packageName.isNotBlank() && hintedPkgs.add(snap.packageName)) {
+                AppHints.forPackage(snap.packageName)?.let { appendLine("# 应用提示\n$it") }
+                // Fast adaptation: an app reached mid-task (launched by the model, share target…) brings its own
+                // experience too, and becomes the learning target when the task had none.
+                if (!AppResolver.isAgentOrBrain(snap.packageName) && snap.packageName != "com.android.systemui" && !snap.packageName.contains("launcher")) {
+                    if (targetPkgForMemory == null) targetPkgForMemory = snap.packageName
+                    if (snap.packageName != targetPkgForMemory || appMem == null)
+                        runCatching { AppMemory.decode(prefs.appMemory(snap.packageName)) }.getOrNull()?.hint(goal)?.let { appendLine("# 此应用以往经验\n$it") }
+                }
+            }
             appendLine("# 本步 第${step}步 屏幕${snap.screenWidth}x${snap.screenHeight} 包${snap.packageName}")
             // The append-only transcript already carries the model's own previous answers (actions, screen kind,
             // goal_match); repeating them here every step only cost tokens. Only after a reset (empty transcript).
@@ -1164,6 +1179,8 @@ class AgentLoop(
     }
 
     private val hintedPkgs = HashSet<String>()
+    /** Cross-app UI strategies learned from earlier tasks (loaded once per task; constant → prefix-cache friendly). */
+    private val globalHint: String? by lazy { runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)).hint("", maxFacts = 4) }.getOrNull()?.replace("此应用以往经验：", "") }
 
     /** Shizuku backend active for this task (decided at task start; each use re-checks the live binder). */
     private var shellOn = false

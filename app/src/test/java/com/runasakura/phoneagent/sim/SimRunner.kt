@@ -49,10 +49,14 @@ class Scenario(
     val garbage: (Int) -> String? = { null },
     /** Shizuku backend available (a [SimShell] over the world). */
     val shell: Boolean = false,
+    /** Reply of the experience-writer call (default: nothing learned). */
+    val lesson: String = """{"route":"","facts":[]}""",
+    /** Pre-existing learned memory (package → encoded AppMemory). */
+    val memory: Map<String, String> = emptyMap(),
 )
 
 class SimRun(val result: AgentLoop.Result, val logs: List<String>, val world: SimWorld, val stepPrompts: List<JSONArray>,
-             val confirms: List<String>, val calls: Map<String, Int>)
+             val confirms: List<String>, val calls: Map<String, Int>, val settings: MemorySettings? = null)
 
 object SimRunner {
     fun run(sc: Scenario): SimRun {
@@ -83,7 +87,7 @@ object SimRunner {
                 "intent" -> sc.intent
                 "plan" -> """{"steps":["按目标操作"]}"""
                 "judge" -> if (sc.done(world)) """{"done":true,"reason":"屏幕显示已完成"}""" else """{"done":false,"reason":"还没完成","next":"继续"}"""
-                "lesson" -> """{"route":"","facts":[]}"""
+                "lesson" -> sc.lesson
                 "checkpoint" -> """{"done":["已完成前几步"],"facts":["进度由模型整理"],"next":"继续目标"}"""
                 else -> """{"none":true}"""
             }
@@ -101,10 +105,10 @@ object SimRunner {
         val local = object : LlmClient { override val name = "mnn_local"
             override suspend fun chat(messages: List<ChatMessage>, temperature: Double) = LlmResponse("", name, 0, "unused") }
         val router = LlmRouter({ AgentPreferences.ROUTE_CLOUD_ONLY }, local, cloud).also { it.log = { m -> logs += m } }
-        val settings = MemorySettings(maxSteps = sc.maxSteps, modelCheckpoint = sc.modelCheckpoint)
+        val settings = MemorySettings(maxSteps = sc.maxSteps, modelCheckpoint = sc.modelCheckpoint).also { st -> sc.memory.forEach { (k, v) -> st.setAppMemory(k, v) } }
         val loop = AgentLoop(settings, router, SafetyGate(settings), onLog = { logs += it },
             onConfirm = { confirms += it; sc.confirm }, isStopped = { world.flags["stop"] == true }, phoneProvider = { phone }, pace = 0.0)
         val r = runBlocking { withTimeout(60_000) { loop.run(sc.goal) } }
-        return SimRun(r, logs, world, prompts, confirms, calls)
+        return SimRun(r, logs, world, prompts, confirms, calls, settings)
     }
 }
