@@ -111,8 +111,9 @@
     <string name="orb_toggle">任务时显示悬浮月亮球（关闭则用简洁胶囊）</string>
     <string name="orb_opacity">悬浮球不透明度</string>
     <string name="local_title">本机模型（Tsuki 内置）</string>
-    <string name="local_desc">模型直接在 Tsuki 里运行（MNN 引擎），不依赖 MNN Chat，也不会因 MNN Chat 在后台被限速而失联。默认 Qwen3-VL-2B（约 1.5 GB，能看图）。「云端为主、本机为辅」下它在后台并行看图、离线时兜底，从不拖慢一步。</string>
-    <string name="local_download">下载 Qwen3-VL-2B</string>
+    <string name="local_desc">点一次「下载」即可从魔塔社区（ModelScope）匿名拉取推荐模型 Qwen3-VL-2B（约 1.5 GB，可看图），断点续传 + sha256 校验，公开模型无需登录。也可「使用已下载的模型」（扫描下载/文档里已复制出的 MNN 目录）或手动导入文件夹。模型在 Tsuki 进程内推理，不受 MNN Chat 后台限速影响。</string>
+    <string name="local_download">一键下载推荐模型</string>
+    <string name="local_use_found">使用已下载的模型</string>
     <string name="local_import">导入模型文件夹</string>
     <string name="local_warm">预热 / 体检</string>
     <string name="local_delete">删除</string>

@@ -262,13 +262,24 @@ class SettingsActivity : AppCompatActivity() {
         for ((id, label) in engines) binding.localEngine.addView(com.google.android.material.chip.Chip(this).apply {
             text = label; isCheckable = true; isChecked = prefs.localEngine == id; minHeight = (48 * resources.displayMetrics.density).toInt()
             setOnClickListener { prefs.localEngine = id; refreshLocal() } })
+        // One tap: start (or cancel) the recommended ModelScope download. No confirmation dialog.
         binding.btnLocalDownload.setOnClickListener {
             if (com.runasakura.phoneagent.service.ModelDownloadService.state.value.running) com.runasakura.phoneagent.service.ModelDownloadService.cancel(this)
-            else com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("下载 Qwen3-VL-2B-Instruct（MNN）")
-                .setMessage("约 1.5 GB，来自 ModelScope（MNN/Qwen3-VL-2B-Instruct-MNN），逐个文件 sha256 校验，可断点续传。建议连接 Wi-Fi。\n\nMNN Chat 已下载的模型在它的私有目录里，其他应用读不到；如果你用文件管理器把模型文件夹复制出来，也可以用「导入模型文件夹」。")
-                .setPositiveButton("下载") { _, _ -> com.runasakura.phoneagent.service.ModelDownloadService.download(this) }.setNegativeButton("取消", null).show()
+            else {
+                binding.localStatus.text = "开始从魔塔社区下载 ${com.runasakura.phoneagent.llm.ModelStore.DEFAULT_LABEL}…"
+                com.runasakura.phoneagent.service.ModelDownloadService.download(this)
+            }
         }
         binding.btnLocalImport.setOnClickListener { pickModelDir.launch(null) }
+        // Offer any complete MNN model already sitting in Downloads / Documents (copied out of MNN Chat).
+        binding.btnLocalUseFound.setOnClickListener {
+            val found = com.runasakura.phoneagent.llm.ModelStore.findExisting(this)
+            if (found.isEmpty()) { binding.localStatus.text = "未在下载/文档目录找到可用模型（MNN Chat 私有目录其他应用读不到，请先复制出来或点上方下载）"; return@setOnClickListener }
+            val labels = found.map { "${it.dir.name}（${it.where} · ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(it.dir) / 1_000_000} MB）" }.toTypedArray()
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("使用已下载的模型")
+                .setItems(labels) { _, which -> com.runasakura.phoneagent.service.ModelDownloadService.adopt(this, found[which].dir.absolutePath) }
+                .setNegativeButton("取消", null).show()
+        }
         binding.btnLocalWarm.setOnClickListener {
             binding.localStatus.text = "预热中…"
             lifecycleScope.launch {
@@ -307,13 +318,22 @@ class SettingsActivity : AppCompatActivity() {
         val prefs = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
         val embedded = prefs.localEngine == AgentPreferences.LOCAL_EMBEDDED
         val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this)
-        for (b in listOf(binding.btnLocalDownload, binding.btnLocalImport, binding.btnLocalWarm, binding.btnLocalDelete)) b.isEnabled = embedded
+        for (b in listOf(binding.btnLocalDownload, binding.btnLocalImport, binding.btnLocalUseFound, binding.btnLocalWarm, binding.btnLocalDelete)) b.isEnabled = embedded
         binding.btnLocalWarm.isEnabled = embedded && dir != null; binding.btnLocalDelete.isEnabled = embedded && dir != null
         if (keepMsg) return
         binding.localStatus.text = when {
             !embedded -> "使用 MNN Chat 的 API（下面的地址）。MNN Chat 在后台会被系统限速。"
             !com.runasakura.phoneagent.llm.EmbeddedMnn.available -> "本设备不支持内置推理（需要 arm64）"
-            else -> com.runasakura.phoneagent.llm.LocalWarmup.status(this) + (dir?.let { " · ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(it) / 1_000_000} MB" + if (com.runasakura.phoneagent.llm.ModelStore.isVision(it)) " · 可看图" else "" } ?: "")
+            dir != null -> com.runasakura.phoneagent.llm.LocalWarmup.status(this) + " · ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(dir) / 1_000_000} MB" + if (com.runasakura.phoneagent.llm.ModelStore.isVision(dir)) " · 可看图" else ""
+            else -> {
+                val part = com.runasakura.phoneagent.llm.ModelStore.partialBytes(this)
+                val found = com.runasakura.phoneagent.llm.ModelStore.findExisting(this).size
+                buildString {
+                    append("尚未安装。点「一键下载」从魔塔社区拉取（公开，无需登录）")
+                    if (part > 0) append("；已缓存 ${part / 1_000_000} MB，可续传")
+                    if (found > 0) append("；或点「使用已下载的模型」（发现 $found 个）")
+                }
+            }
         }
     }
 

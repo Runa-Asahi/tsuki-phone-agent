@@ -30,15 +30,23 @@ class ModelDownloadService : Service() {
         startFg("准备中…", 0, 0)
         if (job?.isActive == true) return START_NOT_STICKY
         val tree = intent?.getStringExtra(EXTRA_TREE)?.let(Uri::parse)
+        val adopt = intent?.getStringExtra(EXTRA_ADOPT)
         val repo = intent?.getStringExtra(EXTRA_REPO) ?: ModelStore.DEFAULT_REPO
         job = scope.launch {
-            state.value = State(true, msg = if (tree != null) "导入中…" else "下载中…")
+            state.value = State(true, msg = when { adopt != null -> "正在使用已有模型…"; tree != null -> "导入中…"; else -> "从魔塔社区下载…" })
             try {
                 val cb: (ModelStore.Progress) -> Unit = { p ->
-                    state.value = State(true, p.done, p.total, p.file)
-                    startFg(p.file, p.done, p.total)
+                    val speed = if (p.bps > 0) " · ${p.bps / 1_000_000} MB/s" else ""
+                    val eta = if (p.bps > 0 && p.total > p.done) " · 约 ${(p.total - p.done) / p.bps}s" else ""
+                    val msg = "${p.file}$speed$eta"
+                    state.value = State(true, p.done, p.total, msg)
+                    startFg(msg, p.done, p.total)
                 }
-                val d = if (tree != null) ModelStore.import(this@ModelDownloadService, tree, cb) else ModelStore.download(this@ModelDownloadService, repo, cb)
+                val d = when {
+                    adopt != null -> ModelStore.adopt(this@ModelDownloadService, java.io.File(adopt), cb)
+                    tree != null -> ModelStore.import(this@ModelDownloadService, tree, cb)
+                    else -> ModelStore.download(this@ModelDownloadService, repo, cb)
+                }
                 state.value = State(false, msg = "完成：${d.name}（${ModelStore.sizeOf(d) / 1_000_000} MB）")
                 com.runasakura.phoneagent.llm.LocalWarmup.kick(applicationContext)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
@@ -63,10 +71,11 @@ class ModelDownloadService : Service() {
 
     companion object {
         private const val ID = 4311
-        const val EXTRA_TREE = "tree"; const val EXTRA_REPO = "repo"; const val ACTION_CANCEL = "cancel"
+        const val EXTRA_TREE = "tree"; const val EXTRA_REPO = "repo"; const val EXTRA_ADOPT = "adopt"; const val ACTION_CANCEL = "cancel"
         val state = MutableStateFlow(State(false))
         fun download(ctx: Context) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java))
         fun import(ctx: Context, tree: Uri) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_TREE, tree.toString()))
+        fun adopt(ctx: Context, path: String) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_ADOPT, path))
         fun cancel(ctx: Context) = ctx.startService(Intent(ctx, ModelDownloadService::class.java).setAction(ACTION_CANCEL))
     }
 }

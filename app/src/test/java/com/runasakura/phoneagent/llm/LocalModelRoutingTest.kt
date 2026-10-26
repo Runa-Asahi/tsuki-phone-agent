@@ -99,4 +99,16 @@ class LocalModelRoutingTest {
         assertEquals("你好", MnnText.clean("<think>想</think>\n你好<|im_end|>"))
         assertFalse(EmbeddedMnn.available)   // JVM: no arm64 lib, client degrades instead of crashing
     }
+
+    @Test fun modelStoreSkipsDotAndNested() {
+        val json = """{"Data":{"Files":[
+            {"Path":"config.json","Size":10,"Sha256":"a","Type":"blob"},
+            {"Path":".gitattributes","Size":1,"Sha256":"b","Type":"blob"},
+            {"Path":"sub/x.bin","Size":9,"Sha256":"c","Type":"blob"},
+            {"Path":"README.md","Size":2,"Sha256":"d","Type":"blob"},
+            {"Path":"llm.mnn.weight","Size":100,"Sha256":"e","Type":"blob"}
+        ]}}"""
+        val f = ModelStore.parseFiles(json)
+        assertEquals(listOf("config.json", "llm.mnn.weight"), f.map { it.path })
+    }
 }
