@@ -162,6 +162,14 @@ class MainActivity : AppCompatActivity() {
             binding.mnnStatus.setTextColor(ContextCompat.getColor(this, if (cloudOk) R.color.ok_green else R.color.err_red))
             return
         }
+        if (p.localEngine == com.runasakura.phoneagent.prefs.AgentPreferences.LOCAL_EMBEDDED) {
+            val st = com.runasakura.phoneagent.llm.LocalWarmup.status(this)
+            val has = com.runasakura.phoneagent.llm.ModelStore.selected(this) != null
+            binding.mnnStatus.text = "本机 " + st + if (cloudOk && mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY) " + 云端" else ""
+            binding.mnnStatus.setTextColor(TsukiTheme.color(this, if (has || cloudOk) R.color.ok_green else R.color.warn_amber))
+            if (has) com.runasakura.phoneagent.llm.LocalWarmup.kick(applicationContext)   // keep-warm while the app is open
+            return
+        }
         binding.mnnStatus.text = "检测中…"
         lifecycleScope.launch {
             val m = try {

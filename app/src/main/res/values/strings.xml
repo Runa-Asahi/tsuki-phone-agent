@@ -110,4 +110,10 @@
     <string name="setup_title">开始之前</string>
     <string name="orb_toggle">任务时显示悬浮月亮球（关闭则用简洁胶囊）</string>
     <string name="orb_opacity">悬浮球不透明度</string>
+    <string name="local_title">本机模型（Tsuki 内置）</string>
+    <string name="local_desc">模型直接在 Tsuki 里运行（MNN 引擎），不依赖 MNN Chat，也不会因 MNN Chat 在后台被限速而失联。默认 Qwen3-VL-2B（约 1.5 GB，能看图）。「云端为主、本机为辅」下它在后台并行看图、离线时兜底，从不拖慢一步。</string>
+    <string name="local_download">下载 Qwen3-VL-2B</string>
+    <string name="local_import">导入模型文件夹</string>
+    <string name="local_warm">预热 / 体检</string>
+    <string name="local_delete">删除</string>
 </resources>

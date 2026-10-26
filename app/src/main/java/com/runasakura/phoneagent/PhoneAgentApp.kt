@@ -10,6 +10,15 @@ class PhoneAgentApp : Application() {
     lateinit var prefs: AgentPreferences
         private set
 
+    /** Memory pressure: drop the warm on-device model (≈1–2 GB) unless it is mid-inference; it reloads on next use. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        @Suppress("DEPRECATION")
+        val heavy = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND || level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+        if (heavy && com.runasakura.phoneagent.llm.EmbeddedMnn.state == com.runasakura.phoneagent.llm.EmbeddedMnn.State.READY &&
+            !com.runasakura.phoneagent.service.AgentForegroundService.isRunning()) com.runasakura.phoneagent.llm.EmbeddedMnn.release()
+    }
+
     override fun onCreate() {
         super.onCreate()
         com.runasakura.phoneagent.ui.TsukiTheme.init(this)

@@ -99,7 +99,13 @@ class AgentForegroundService : Service() {
         overlay = EmergencyStopOverlay(overlayCtx, { requestStop("悬浮窗「急停」被点击") }, { togglePause() }, {
             startActivity(android.content.Intent(this, com.runasakura.phoneagent.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }).also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
-        val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
+        // Local engine: embedded MNN inside Tsuki (default; runs in this foreground-service process) or MNN Chat's API.
+        val embedded = prefs.localEngine == AgentPreferences.LOCAL_EMBEDDED
+        val app = applicationContext
+        val local: com.runasakura.phoneagent.llm.LlmClient = if (embedded)
+            com.runasakura.phoneagent.llm.EmbeddedMnnClient(app, { com.runasakura.phoneagent.llm.ModelStore.selected(app) })
+            else LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
+        if (embedded && com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) com.runasakura.phoneagent.llm.LocalWarmup.kick(app) { log(it) }
         val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)
         cloud?.onRetry = { code, n, wait ->
             log("云端${code.zh}，${"%.1f".format(wait / 1000.0)}s 后自动重试（$n/3）")
@@ -110,7 +116,11 @@ class AgentForegroundService : Service() {
         log("大脑：$brain" + if (cloud == null && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY) "（云端未就绪）" else "")
         val router = LlmRouter({ prefs.routeMode }, local, cloud).also { r -> r.log = { log(it) } }
         router.vision = com.runasakura.phoneagent.llm.CloudProviders.visionClientFor(prefs)
-        if (prefs.visionLocal) {
+        val embeddedVision = embedded && com.runasakura.phoneagent.llm.ModelStore.selected(app)?.let { com.runasakura.phoneagent.llm.ModelStore.isVision(it) } == true
+        if (embeddedVision && com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) {
+            router.visionSkill = com.runasakura.phoneagent.llm.EmbeddedMnnClient(app, { com.runasakura.phoneagent.llm.ModelStore.selected(app) }, maxTokens = 400)
+            log("看图技能：Tsuki 内置本机模型 ${com.runasakura.phoneagent.llm.ModelStore.selected(app)?.name}（不依赖 MNN Chat，后台并行，不阻塞决策）")
+        } else if (prefs.visionLocal) {
             router.visionSkill = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.visionLocalModel.ifBlank { prefs.mnnModel }, maxTokens = 400)
             if (com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) log("看图技能：本机 MNN 视觉模型 ${prefs.visionLocalModel.ifBlank { prefs.mnnModel }}（需在 MNN Chat 里加载 VL 模型并开启 API）")
         }
@@ -143,9 +153,13 @@ class AgentForegroundService : Service() {
             broadcastStatus("running", "开始：$goal")
             if (!com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) {
                 log("仅云端：跳过本机 MNN 检测")
+            } else if (local !is LocalMnnClient) {
+                log("本机模型：" + com.runasakura.phoneagent.llm.LocalWarmup.status(app) + "（Tsuki 内置，后台预热，不阻塞任务）")
+                com.runasakura.phoneagent.util.Diagnostics.model = "$brain | 本机=" + (com.runasakura.phoneagent.llm.ModelStore.selected(app)?.name ?: "未安装")
             } else try {
-                val live = local.probe()
-                val m = live ?: local.resolveModel()
+                // Bounded: a backgrounded MNN Chat answered /v1/models after 75 s on PPG-AN00 (00:29:51 → 00:31:06).
+                val live = kotlinx.coroutines.withTimeoutOrNull(3_000) { local.probe() }
+                val m = live ?: (kotlinx.coroutines.withTimeoutOrNull(1_000) { local.resolveModel() } ?: "未响应")
                 log(if (live != null) "MNN 当前模型：$live" else if (cloud != null) "本机 MNN 未连接：本次由云端模型 ${prefs.cloudModel} 负责" else "本机 MNN 未连接，且未配置云端模型：需要模型判断的步骤会失败")
                 com.runasakura.phoneagent.util.Diagnostics.model = "$brain | MNN=$m"
                 if (m.contains("reason", true) || m.contains("think", true) || m.contains("distill", true)) {

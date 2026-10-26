@@ -45,15 +45,17 @@ class SettingsActivity : AppCompatActivity() {
         binding.modelCheckpoint.isChecked = prefs.modelCheckpoint
         setupShizuku()
         setupKeepAlive()
+        setupLocalModel()
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
+            AgentPreferences.ROUTE_CLOUD_ASSIST,
             AgentPreferences.ROUTE_HYBRID,
             AgentPreferences.ROUTE_LOCAL_ONLY,
             AgentPreferences.ROUTE_CLOUD_ONLY
         )
         binding.routeMode.adapter = ArrayAdapter(this, R.layout.item_spinner,
-            modes.map { com.runasakura.phoneagent.llm.RoutePolicy.label(it) + if (it == AgentPreferences.ROUTE_HYBRID) "（推荐）" else "" })
+            modes.map { com.runasakura.phoneagent.llm.RoutePolicy.label(it) + if (it == AgentPreferences.ROUTE_CLOUD_ASSIST) "（推荐）" else "" })
         val cur = if (prefs.routeMode == AgentPreferences.ROUTE_LOCAL_FIRST) AgentPreferences.ROUTE_HYBRID else prefs.routeMode
         binding.routeMode.setSelection(modes.indexOf(cur).coerceAtLeast(0))
 
@@ -247,6 +249,72 @@ class SettingsActivity : AppCompatActivity() {
             }
             .setNegativeButton("全部清除") { _, _ -> prefs.clearAppMemory() }
             .setPositiveButton("关闭", null).show()
+    }
+
+    private val pickModelDir = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) com.runasakura.phoneagent.service.ModelDownloadService.import(this, uri)
+    }
+
+    /** 本机模型 card: engine choice (embedded / MNN Chat API), status, download / import / warm-up / delete. */
+    private fun setupLocalModel() {
+        val prefs = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
+        val engines = listOf(AgentPreferences.LOCAL_EMBEDDED to "Tsuki 内置（推荐）", AgentPreferences.LOCAL_MNN_CHAT to "MNN Chat API")
+        for ((id, label) in engines) binding.localEngine.addView(com.google.android.material.chip.Chip(this).apply {
+            text = label; isCheckable = true; isChecked = prefs.localEngine == id; minHeight = (48 * resources.displayMetrics.density).toInt()
+            setOnClickListener { prefs.localEngine = id; refreshLocal() } })
+        binding.btnLocalDownload.setOnClickListener {
+            if (com.runasakura.phoneagent.service.ModelDownloadService.state.value.running) com.runasakura.phoneagent.service.ModelDownloadService.cancel(this)
+            else com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("下载 Qwen3-VL-2B-Instruct（MNN）")
+                .setMessage("约 1.5 GB，来自 ModelScope（MNN/Qwen3-VL-2B-Instruct-MNN），逐个文件 sha256 校验，可断点续传。建议连接 Wi-Fi。\n\nMNN Chat 已下载的模型在它的私有目录里，其他应用读不到；如果你用文件管理器把模型文件夹复制出来，也可以用「导入模型文件夹」。")
+                .setPositiveButton("下载") { _, _ -> com.runasakura.phoneagent.service.ModelDownloadService.download(this) }.setNegativeButton("取消", null).show()
+        }
+        binding.btnLocalImport.setOnClickListener { pickModelDir.launch(null) }
+        binding.btnLocalWarm.setOnClickListener {
+            binding.localStatus.text = "预热中…"
+            lifecycleScope.launch {
+                val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this@SettingsActivity)
+                val msg = if (dir == null) "还没有本机模型" else try {
+                    val t0 = System.currentTimeMillis()
+                    val ok = com.runasakura.phoneagent.llm.EmbeddedMnn.ensureLoaded(applicationContext, dir)
+                    if (!ok) "加载失败：${com.runasakura.phoneagent.llm.EmbeddedMnn.lastError}" else {
+                        val t1 = System.currentTimeMillis()
+                        val out = com.runasakura.phoneagent.llm.EmbeddedMnn.chat(applicationContext, listOf(com.runasakura.phoneagent.llm.ChatMessage("user", "用一句话介绍你自己")), 48)
+                        "体检通过：加载 ${t1 - t0}ms，生成 ${System.currentTimeMillis() - t1}ms：${com.runasakura.phoneagent.llm.MnnText.clean(out).take(40)}"
+                    }
+                } catch (e: Throwable) { "体检失败：${e.message}" }
+                binding.localStatus.text = msg
+            }
+        }
+        binding.btnLocalDelete.setOnClickListener {
+            val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this) ?: return@setOnClickListener
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("删除 ${dir.name}？")
+                .setMessage("释放约 ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(dir) / 1_000_000} MB，之后可重新下载。")
+                .setPositiveButton("删除") { _, _ -> com.runasakura.phoneagent.llm.ModelStore.delete(this, dir); refreshLocal() }.setNegativeButton("取消", null).show()
+        }
+        lifecycleScope.launch {
+            com.runasakura.phoneagent.service.ModelDownloadService.state.collect { st ->
+                binding.localProgress.visibility = if (st.running) android.view.View.VISIBLE else android.view.View.GONE
+                if (st.total > 0) binding.localProgress.setProgressCompat((st.done * 1000 / st.total).toInt(), true) else binding.localProgress.isIndeterminate = st.running
+                binding.btnLocalDownload.text = if (st.running) "取消下载" else getString(R.string.local_download)
+                if (st.running) binding.localStatus.text = "${st.msg} · ${st.done / 1_000_000}/${st.total / 1_000_000} MB"
+                else if (st.msg.isNotBlank()) { binding.localStatus.text = st.msg; refreshLocal(keepMsg = true) }
+            }
+        }
+        refreshLocal()
+    }
+
+    private fun refreshLocal(keepMsg: Boolean = false) {
+        val prefs = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
+        val embedded = prefs.localEngine == AgentPreferences.LOCAL_EMBEDDED
+        val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this)
+        for (b in listOf(binding.btnLocalDownload, binding.btnLocalImport, binding.btnLocalWarm, binding.btnLocalDelete)) b.isEnabled = embedded
+        binding.btnLocalWarm.isEnabled = embedded && dir != null; binding.btnLocalDelete.isEnabled = embedded && dir != null
+        if (keepMsg) return
+        binding.localStatus.text = when {
+            !embedded -> "使用 MNN Chat 的 API（下面的地址）。MNN Chat 在后台会被系统限速。"
+            !com.runasakura.phoneagent.llm.EmbeddedMnn.available -> "本设备不支持内置推理（需要 arm64）"
+            else -> com.runasakura.phoneagent.llm.LocalWarmup.status(this) + (dir?.let { " · ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(it) / 1_000_000} MB" + if (com.runasakura.phoneagent.llm.ModelStore.isVision(it)) " · 可看图" else "" } ?: "")
+        }
     }
 
     /** Palette + light/dark chips. Both apply immediately: palette retints live, a night-mode change recreates. */

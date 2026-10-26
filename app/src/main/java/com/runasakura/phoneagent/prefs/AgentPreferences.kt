@@ -42,9 +42,13 @@ class AgentPreferences(context: Context) : AgentSettings {
         get() = sp.getString(KEY_MNN_MODEL, "mnn-local") ?: "mnn-local"
         set(v) = sp.edit().putString(KEY_MNN_MODEL, v).apply()
 
+    var localEngine: String
+        get() = sp.getString("local_engine", LOCAL_EMBEDDED) ?: LOCAL_EMBEDDED
+        set(v) = sp.edit().putString("local_engine", v).apply()
+
     var routeMode: String
         get() = sp.getString(KEY_ROUTE, null)
-            ?: if (cloudApiKey.isNotBlank()) ROUTE_HYBRID else ROUTE_LOCAL_ONLY // recommended default with a key
+            ?: if (cloudApiKey.isNotBlank()) ROUTE_CLOUD_ASSIST else ROUTE_LOCAL_ONLY // recommended default with a key
         set(v) = sp.edit().putString(KEY_ROUTE, v).apply()
 
     /** none | deepseek | openai_compatible */
@@ -148,6 +152,11 @@ class AgentPreferences(context: Context) : AgentSettings {
         const val ROUTE_HYBRID = "hybrid"
         const val ROUTE_LOCAL_ONLY = "local_only"
         const val ROUTE_CLOUD_ONLY = "cloud_only"
+        /** Cloud decides every step; the on-device model assists in parallel (screen reading, offline fallback). */
+        const val ROUTE_CLOUD_ASSIST = "cloud_assist"
+        /** Local engine: embedded (MNN inside Tsuki) or the MNN Chat HTTP API. */
+        const val LOCAL_EMBEDDED = "embedded"
+        const val LOCAL_MNN_CHAT = "mnn_chat"
 
         const val PROVIDER_NONE = "none"
         const val PROVIDER_DEEPSEEK = "deepseek"

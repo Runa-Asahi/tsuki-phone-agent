@@ -15,12 +15,12 @@ android {
         versionName = "0.9.0-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Honor PPG-AN00 / Android 16: document 16KB page alignment for future .so embeds
-        ndk {
-            // no native code in MVP; kept for MNN JNI later
-            abiFilters += listOf("arm64-v8a")
-        }
+        // On-device LLM (MNN) is arm64 only; 16 KB page aligned for Android 15+/16.
+        ndk { abiFilters += listOf("arm64-v8a") }
+        externalNativeBuild { cmake { arguments += listOf("-DANDROID_STL=c++_shared"); cppFlags += listOf("-std=c++17") } }
     }
+    ndkVersion = "27.2.12479018"
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
 
     buildTypes {
         release {
@@ -68,6 +68,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("org.json:json:20240303")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     // Bundled (offline, no GMS) Chinese OCR for apps that hide their accessibility tree (e.g. WeChat)

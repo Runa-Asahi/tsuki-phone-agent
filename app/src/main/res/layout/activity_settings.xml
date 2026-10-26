@@ -124,6 +124,21 @@
         </com.google.android.material.card.MaterialCardView>
         <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:accessibilityHeading="true" android:text="@string/local_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/local_desc" />
+            <com.google.android.material.chip.ChipGroup android:id="@+id/localEngine" android:layout_width="match_parent" android:layout_height="wrap_content" app:singleSelection="true" app:selectionRequired="true" />
+            <TextView android:id="@+id/localStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/localProgress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:visibility="gone" android:max="1000" />
+            <com.google.android.material.chip.ChipGroup android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalDownload" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_download" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalImport" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_import" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalWarm" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_warm" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalDelete" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_delete" />
+            </com.google.android.material.chip.ChipGroup>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
             <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_28" />
             <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_29" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/warn_amber" android:text="@string/model_hint" />
