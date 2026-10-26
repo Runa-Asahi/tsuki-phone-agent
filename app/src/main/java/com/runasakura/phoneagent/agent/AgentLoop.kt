@@ -1,5 +1,6 @@
 package com.runasakura.phoneagent.agent
 
+import kotlinx.coroutines.launch
 import android.util.Log
 import com.runasakura.phoneagent.a11y.AgentAccessibilityService
 import com.runasakura.phoneagent.llm.ChatMessage
@@ -43,7 +44,28 @@ class AgentLoop(
         val summary: String
     )
 
+    /** Runs the task, then lets the model turn the trajectory into reusable per-app experience. */
     suspend fun run(goalIn: String): Result {
+        val r = runTask(goalIn)
+        // Off the critical path: the result is shown immediately, learning finishes in the background.
+        if (!isStopped()) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { learnFrom(goalIn, r) } }
+        return r
+    }
+
+    /** Experience replay: success → distilled route; failure → reflection lessons. Both stored per app, model-written. */
+    private suspend fun learnFrom(goal: String, r: Result) {
+        val pkg = targetPkgForMemory ?: return
+        val traj = stepsRef?.progress().orEmpty()
+        if (traj.isBlank() || modelSteps == 0) return
+        val outcome = if (r.success) "成功" else "失败：${r.summary.take(80)}"
+        val lesson = router.lesson(goal, appLabel, traj, outcome, memory.all() + guard.deadLabels().map { "「$it」无效" }) ?: return
+        val base = runCatching { AppMemory.decode(prefs.appMemory(pkg)) }.getOrNull() ?: AppMemory(emptyList(), emptyList())
+        val m = if (r.success) base.merge(lesson.facts, goal, lesson.route ?: traj) else base.merge(lesson.facts, null, null)
+        prefs.setAppMemory(pkg, m.encode())
+        onLog((if (r.success) "经验沉淀：" else "失败反思：") + (lesson.route?.let { "路线=$it；" } ?: "") + lesson.facts.joinToString("；"))
+    }
+
+    private suspend fun runTask(goalIn: String): Result {
         var goal = GoalRewrite.normalize(goalIn)
         if (goal != goalIn) onLog("目标规范化：$goal")
         val a11y = AgentAccessibilityService.require()
@@ -302,7 +324,7 @@ class AgentLoop(
                 com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)
             val wantSkill = !vision && hardScreen && router.visionSkill != null && !router.skillSidelined
             val shot = if ((vision && hardScreen) || wantSkill) {
-                try { a11y.screenshotJpegBase64(if (wantSkill) 640 else 1280) } catch (_: Exception) { null }
+                try { if (wantSkill) a11y.screenshotJpegBase64(640) else a11y.screenshotJpegBase64(1280, sc.items, sc.w, sc.h) } catch (_: Exception) { null }
             } else null
             if (shot != null && vision) onLog("附带截图给云端模型（${prefs.cloudModel} 支持看图）")
             var obsNote = diffNote
@@ -315,7 +337,7 @@ class AgentLoop(
             }
             val brainShot = if (vision) shot else null
             shotThisStep = brainShot != null || obsNote?.contains("视觉描述") == true
-            if (brainShot != null) obsNote = listOfNotNull(obsNote, "已附当前截图：以截图为准（OCR 可能有错字/漏掉无文字按钮）；tap 坐标按屏幕 ${sc.w}x${sc.h}。").joinToString("\n")
+            if (brainShot != null) obsNote = listOfNotNull(obsNote, "已附当前截图（${SetOfMark.NOTE}）：以截图为准（OCR 可能有错字/漏掉无文字按钮）；tap 坐标按屏幕 ${sc.w}x${sc.h}。").joinToString("\n")
             // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
             if (cloudPlanText == null) appMem?.knownPath(goal)?.let { p ->
                 cloudPlanText = "参考步骤（以往成功路线）：$p"; onLog("复用以往成功路线，跳过规划")
@@ -382,7 +404,7 @@ class AgentLoop(
 
             var plan = ActionParser.parse(resp.content)
             plan.memory?.takeIf { it.isNotBlank() }?.let { if (memory.add(it)) onLog("记住：$it") }
-            plan.subgoal?.let { onLog("子目标：$it") }
+            plan.subgoal?.let { onLog("小目标：$it") }
             plan.screen?.let { onLog("界面类型（模型判断）：$it") }
             plan.goalMatch?.let { onLog("与目标是否一致（模型判断）：$it") }
             lastScreenKind = plan.screen; lastGoalMatch = plan.goalMatch

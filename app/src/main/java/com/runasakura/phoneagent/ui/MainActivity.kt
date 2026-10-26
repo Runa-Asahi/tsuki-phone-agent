@@ -81,7 +81,11 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.registerReceiver(
             this, statusReceiver, IntentFilter(AgentForegroundService.ACTION_STATUS), ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        for (ex in SUGGESTIONS) {
+        // Quick chips: recent successful goals first (one-tap replay), then examples.
+        val recentOk = TaskHistory.load(this).filter { it.ok }.map { it.goal }.distinct().take(4)
+        for (g in recentOk) binding.exampleChips.addView(com.google.android.material.chip.Chip(this).apply {
+            text = "↻ " + g.take(16); setOnClickListener { binding.goalInput.setText(g); binding.goalInput.setSelection(g.length) } })
+        for (ex in SUGGESTIONS.filter { it !in recentOk }) {
             val chip = com.google.android.material.chip.Chip(this).apply {
                 text = ex
                 setOnClickListener { binding.goalInput.setText(ex); binding.goalInput.setSelection(ex.length) }
@@ -365,7 +369,7 @@ class MainActivity : AppCompatActivity() {
         is ChatSession.Item.Step -> stepCard(item)
         is ChatSession.Item.Confirm -> android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            background = bubble(0xFFFFF4E5.toInt()); setPadding(dp(14), dp(12), dp(14), dp(10))
+            background = bubble(color(R.color.confirm_bg)); setPadding(dp(14), dp(12), dp(14), dp(10))
             addView(tv("⚠ 需要你确认", 14f, R.color.warn_amber, bold = true))
             addView(tv(item.reason, 14f), lp(6))
             if (item.answer == null) {
@@ -380,7 +384,7 @@ class MainActivity : AppCompatActivity() {
         }
         is ChatSession.Item.Result -> android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            background = bubble(if (item.ok) 0xFFE8F5E9.toInt() else 0xFFFDECEA.toInt()); setPadding(dp(14), dp(12), dp(14), dp(10))
+            background = bubble(color(if (item.ok) R.color.ok_bg else R.color.err_bg)); setPadding(dp(14), dp(12), dp(14), dp(10))
             addView(tv((if (item.ok) "✅ 完成  " else "⛔ 未完成  ") + item.summary, 15f, if (item.ok) R.color.ok_green else R.color.err_red, bold = true))
             item.hint?.let { addView(tv("💡 $it", 13f, R.color.text_secondary), lp(6)) }
             if (!item.ok && item.goal.isNotBlank()) addView(com.google.android.material.button.MaterialButton(this@MainActivity, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
@@ -400,6 +404,8 @@ class MainActivity : AppCompatActivity() {
             android.widget.LinearLayout.LayoutParams(0, -2, 1f))
         head.addView(tv("$dur  ${if (s.expanded) "▾" else "▸"} ${s.details.size}", 12f, R.color.text_secondary))
         addView(head, lp(0, match = true))
+        // Live "what the model is aiming at" line (model's own subgoal + screen read), always visible.
+        s.insight?.let { addView(tv("🎯 $it", 12f, R.color.insight), lp(2)) }
         val shown = if (s.expanded) s.details else s.details.filter { it.startsWith("想法：") }.takeLast(1)
         shown.forEach { d -> addView(tv(d, 12f, if (d.startsWith("✗") || d.contains("错误")) R.color.err_red else R.color.text_secondary).apply {
             setTextIsSelectable(s.expanded); typeface = if (d.startsWith("想法：")) typeface else android.graphics.Typeface.MONOSPACE }, lp(3)) }

@@ -12,7 +12,8 @@ object ChatSession {
         data class Plan(override val id: Long, val lines: MutableList<String>) : Item()
         data class Step(
             override val id: Long, var title: String, val details: MutableList<String>,
-            var state: State = State.RUNNING, val startMs: Long, var endMs: Long? = null, var expanded: Boolean = false
+            var state: State = State.RUNNING, val startMs: Long, var endMs: Long? = null, var expanded: Boolean = false,
+            var insight: String? = null
         ) : Item() { val durationMs get() = (endMs ?: startMs) - startMs }
         data class Confirm(override val id: Long, val reason: String, var answer: Boolean? = null) : Item()
         data class Result(override val id: Long, val ok: Boolean, val summary: String, val hint: String?, val goal: String) : Item()
@@ -61,6 +62,10 @@ object ChatSession {
         val line = line0.trim()
         if (line.isEmpty() || NOISE.any { line.startsWith(it) }) return
         when {
+            line.startsWith("小目标：") -> (currentStep() ?: run { newStep("思考", now); currentStep()!! }).insight = line.substringAfter("：").take(40)
+            line.startsWith("界面类型（模型判断）：") || line.startsWith("与目标是否一致（模型判断）：") ->
+                currentStep()?.details?.add(line.replace("（模型判断）", ""))
+            line.startsWith("经验沉淀：") || line.startsWith("失败反思：") -> items += Item.Note(nextId++, "🧠 " + line)
             PLAN_MARKERS.any { line.startsWith(it) } -> { plan().lines += line; phase = Phase.THINKING }
             STEP.matches(line) -> { val m = STEP.find(line)!!; newStep("第 ${m.groupValues[1]} 步", now); phase = Phase.THINKING }
             NEW_STEP_MARKERS.any { line.startsWith(it) } -> { newStep(line.take(40), now); phase = Phase.ACTING }

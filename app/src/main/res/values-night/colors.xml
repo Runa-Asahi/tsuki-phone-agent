@@ -12,4 +12,8 @@
     <color name="step_accent">#FFD0BCFF</color>
     <color name="purple_500">#FFD0BCFF</color>
     <color name="purple_700">#FF381E72</color>
+    <color name="confirm_bg">#FF3A2E1A</color>
+    <color name="ok_bg">#FF1E3322</color>
+    <color name="err_bg">#FF3B1F1F</color>
+    <color name="insight">#FFEFB8C8</color>
 </resources>

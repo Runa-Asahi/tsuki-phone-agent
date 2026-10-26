@@ -16,4 +16,8 @@
     <color name="warn_amber">#FFB26A00</color>
     <color name="err_red">#FFC62828</color>
     <color name="step_accent">#FF6750A4</color>
+    <color name="confirm_bg">#FFFFF4E5</color>
+    <color name="ok_bg">#FFE8F5E9</color>
+    <color name="err_bg">#FFFDECEA</color>
+    <color name="insight">#FF7D5260</color>
 </resources>

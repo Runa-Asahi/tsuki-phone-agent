@@ -123,10 +123,25 @@ class AgentAccessibilityService : AccessibilityService() {
         screenItems().firstOrNull { it.edit }?.ref as? AccessibilityNodeInfo
 
     /** JPEG base64 of the screen, downscaled (for VL models). */
-    fun screenshotJpegBase64(maxSide: Int = 896): String? {
+    fun screenshotJpegBase64(maxSide: Int = 896, marks: List<com.runasakura.phoneagent.screen.ScreenItem>? = null, screenW: Int = 0, screenH: Int = 0): String? {
         val bmp = takeScreenshotBitmap() ?: return null
         val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height)
-        val scaled = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+        var scaled = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+        if (!marks.isNullOrEmpty() && screenW > 0) runCatching {
+            // Set-of-Mark: draw numbered boxes matching the e-ids of the text list.
+            val m = scaled.copy(Bitmap.Config.ARGB_8888, true)
+            val c = android.graphics.Canvas(m)
+            val stroke = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = 2f; color = 0xFFFF2D55.toInt() }
+            val tag = android.graphics.Paint().apply { color = 0xFFFF2D55.toInt() }
+            val txt = android.graphics.Paint().apply { color = 0xFFFFFFFF.toInt(); textSize = maxOf(12f, m.width / 70f); isFakeBoldText = true; isAntiAlias = true }
+            com.runasakura.phoneagent.agent.SetOfMark.boxes(marks, screenW, screenH, m.width, m.height).forEach { b ->
+                c.drawRect(b.l.toFloat(), b.t.toFloat(), b.r.toFloat(), b.b.toFloat(), stroke)
+                val w = txt.measureText(b.id) + 6
+                c.drawRect(b.l.toFloat(), b.t.toFloat(), b.l + w, b.t + txt.textSize + 4, tag)
+                c.drawText(b.id, b.l + 3f, b.t + txt.textSize, txt)
+            }
+            scaled = m
+        }
         val os = java.io.ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 70, os)
         return android.util.Base64.encodeToString(os.toByteArray(), android.util.Base64.NO_WRAP)
