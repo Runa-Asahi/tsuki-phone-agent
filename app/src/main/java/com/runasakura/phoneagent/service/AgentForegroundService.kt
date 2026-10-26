@@ -34,6 +34,7 @@ class AgentForegroundService : Service() {
         kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Log.e(TAG, "uncaught in agent scope", e); com.runasakura.phoneagent.util.Diagnostics.log("未捕获异常：$e") })
     private var job: Job? = null
     private val stopFlag = AtomicBoolean(false)
+    private val pauseFlag = AtomicBoolean(false)
     private val starting = AtomicBoolean(false)
     private var overlay: EmergencyStopOverlay? = null
 
@@ -45,8 +46,10 @@ class AgentForegroundService : Service() {
                 requestStop()
                 return START_NOT_STICKY
             }
+            ACTION_PAUSE -> { togglePause(); return START_NOT_STICKY }
             ACTION_START -> {
                 val goal = intent.getStringExtra(EXTRA_GOAL).orEmpty()
+                sessionContext = intent.getStringExtra(EXTRA_CONTEXT)
                 if (goal.isBlank()) {
                     stopSelf()
                     return START_NOT_STICKY
@@ -93,7 +96,8 @@ class AgentForegroundService : Service() {
         stopFlag.set(false)
         // Prefer the accessibility overlay (no SYSTEM_ALERT_WINDOW needed)
         val overlayCtx: android.content.Context = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() ?: this
-        overlay = EmergencyStopOverlay(overlayCtx) { requestStop() }.also { it.show() }
+        pauseFlag.set(false)
+        overlay = EmergencyStopOverlay(overlayCtx, { requestStop() }, { togglePause() }).also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
         val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)
@@ -109,10 +113,12 @@ class AgentForegroundService : Service() {
             onLog = { msg ->
                 log(msg)
                 updateNotification(msg.take(60))
+                progressFor(msg)?.let { overlay?.setProgress(it) }
             },
             onConfirm = { reason -> askConfirm(reason) },
-            isStopped = { stopFlag.get() }
-        )
+            isStopped = { stopFlag.get() },
+            isPaused = { pauseFlag.get() }
+        ).also { it.sessionContext = sessionContext }
         val previous = job
         job = scope.launch(Dispatchers.Default) {
             previous?.join()
@@ -159,10 +165,32 @@ class AgentForegroundService : Service() {
         }
     }
 
+    private var sessionContext: String? = null
+    private var stepLabel = ""
+
+    /** Short overlay label: current step + latest action, never raw model output. */
+    private fun progressFor(msg: String): String? = when {
+        msg.startsWith("—— 步骤") -> { stepLabel = msg.removePrefix("—— 步骤 ").substringBefore("/").let { "第${it}步" }; "$stepLabel 思考中…" }
+        msg.startsWith("action:") -> "$stepLabel ${com.runasakura.phoneagent.ui.ActionText.describe(msg.substringAfter(":").trim())}"
+        msg.startsWith("正在理解任务") -> "理解任务…"
+        msg.startsWith("通话流程") || msg.startsWith("表情流程") || msg.startsWith("匹配应用") || msg.startsWith("子目标") -> msg.take(20)
+        msg.startsWith("⏸") -> "已暂停"
+        else -> null
+    }
+
+    private fun togglePause(): Boolean {
+        val p = !pauseFlag.get(); pauseFlag.set(p)
+        com.runasakura.phoneagent.ui.ChatSession.setPaused(p)
+        broadcastStatus("paused", if (p) "1" else "0")
+        overlay?.setProgress(if (p) "已暂停" else "继续…")
+        return p
+    }
+
     private suspend fun askConfirm(reason: String): Boolean {
         com.runasakura.phoneagent.util.Diagnostics.log("[确认] $reason")
         broadcastStatus("confirm-overlay", reason)
         updateNotification("等待确认: ${reason.take(40)}")
+        overlay?.setProgress("等待你确认")
         // Preferred: accessibility overlay drawn by the service (works on top of any app)
         com.runasakura.phoneagent.a11y.AgentAccessibilityService.require()?.confirmOverlay(reason)?.let {
             log(if (it) "用户确认" else "用户拒绝")
@@ -241,6 +269,9 @@ class AgentForegroundService : Service() {
 
     private fun broadcastStatus(type: String, message: String) {
         when (type) { "running" -> running = true; "done", "stopped" -> running = false }
+        if (type == "log") com.runasakura.phoneagent.ui.ChatSession.onLog(message)
+        else if (com.runasakura.phoneagent.ui.ChatSession.onStatus(type, message))
+            com.runasakura.phoneagent.ui.TaskHistory.add(this, com.runasakura.phoneagent.ui.ChatSession.lastGoal.orEmpty(), type == "done", message.substringAfter("): ", message))
         sendBroadcast(
             Intent(ACTION_STATUS)
                 .setPackage(packageName)
@@ -266,6 +297,8 @@ class AgentForegroundService : Service() {
         const val NOTIF_ID = 42
         const val ACTION_START = "com.runasakura.phoneagent.START"
         const val ACTION_STOP = "com.runasakura.phoneagent.STOP"
+        const val ACTION_PAUSE = "com.runasakura.phoneagent.PAUSE"
+        const val EXTRA_CONTEXT = "context"
         const val ACTION_STATUS = "com.runasakura.phoneagent.STATUS"
         const val ACTION_CONFIRM_RESULT = "com.runasakura.phoneagent.CONFIRM_RESULT"
         const val EXTRA_GOAL = "goal"
@@ -276,10 +309,12 @@ class AgentForegroundService : Service() {
         @Volatile
         var pendingConfirm: ((Boolean) -> Unit)? = null
 
-        fun start(context: Context, goal: String) {
+        fun start(context: Context, goal: String, followUp: String? = null) {
+            com.runasakura.phoneagent.ui.ChatSession.startTask(goal)
             val i = Intent(context, AgentForegroundService::class.java)
                 .setAction(ACTION_START)
                 .putExtra(EXTRA_GOAL, goal)
+                .putExtra(EXTRA_CONTEXT, followUp)
             context.startForegroundService(i)
         }
 
@@ -288,7 +323,13 @@ class AgentForegroundService : Service() {
             context.startService(i)
         }
 
+        fun pause(context: Context) {
+            context.startService(Intent(context, AgentForegroundService::class.java).setAction(ACTION_PAUSE))
+        }
+
+        /** First answer wins: inline chat card, overlay or ConfirmActivity. */
         fun deliverConfirm(ok: Boolean) {
+            com.runasakura.phoneagent.a11y.AgentAccessibilityService.activeConfirm?.invoke(ok)
             pendingConfirm?.invoke(ok)
             pendingConfirm = null
         }

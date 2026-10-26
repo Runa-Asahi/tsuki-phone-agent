@@ -183,6 +183,7 @@ class AgentAccessibilityService : AccessibilityService() {
         fun remove() { view?.let { v -> main.post { try { wm.removeView(v) } catch (_: Exception) {} } }; view = null }
         fun finish(ok: Boolean?) {
             if (!answered.compareAndSet(false, true)) return
+            activeConfirm = null
             remove()
             if (cont.isActive) cont.resume(ok) {}
         }
@@ -235,7 +236,8 @@ class AgentAccessibilityService : AccessibilityService() {
                 finish(null)
             }
         }
-        cont.invokeOnCancellation { answered.set(true); remove() }
+        activeConfirm = { ok -> finish(ok) }
+        cont.invokeOnCancellation { answered.set(true); activeConfirm = null; remove() }
     }
 
     /** Self-test helper: can we add/remove an accessibility overlay window? */
@@ -757,6 +759,8 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     companion object {
+        /** Resolves the confirm overlay currently on screen (used by the inline chat card). */
+        @Volatile var activeConfirm: ((Boolean) -> Unit)? = null
         /** Enabled in system settings (may be rebinding even if no instance is attached yet). */
         fun isEnabledInSettings(ctx: android.content.Context): Boolean = enabledIn(
             try { android.provider.Settings.Secure.getString(ctx.contentResolver, android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) } catch (_: Exception) { null },

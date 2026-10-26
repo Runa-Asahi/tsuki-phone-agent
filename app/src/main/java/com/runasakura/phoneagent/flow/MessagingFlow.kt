@@ -617,8 +617,12 @@ class MessagingFlow(
                     val changed = after.items.map { it.label } != s2.items.map { it.label }
                     return Outcome(true, "已向「$contact」发送收藏表情包" + if (changed) "（界面已变化）" else "（未能核验，请看一眼手机）", verified = false)
                 }
-                log("模型未找到收藏表情，改用普通表情"); d.back(); d.afterAction(500)
+                // Do NOT press Back here: on WeChat it closes the whole panel (and sometimes the chat).
+                log("模型未找到收藏表情，切回默认表情页签")
+                val home = loc(s2, "微信表情面板底部页签里最左边的「默认表情/笑脸」页签")
+                if (home != null) { d.tapXY(home.first, home.second); d.afterAction(600) }
                 s = d.screen(); anchor = KeyMatch.find(s, listOf("最近使用", "所有表情")) { it.cy > s.h * 0.4 }
+                if (anchor == null) { s = d.refineScreen(); anchor = KeyMatch.find(s, listOf("最近使用", "所有表情")) { it.cy > s.h * 0.4 } }
             }
         }
         if (anchor == null) { d.back(); return fail("未识别到表情面板（最近使用/所有表情），未发送") }

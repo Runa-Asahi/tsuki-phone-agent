@@ -107,16 +107,19 @@ class LlmRouter(
     }
 
     /** Goal → structured intent: cloud when ready, else local (≤15 s); null on failure (caller uses rules). */
-    suspend fun parseIntent(goal: String): String? {
-        val msgs = listOf(ChatMessage("system", com.runasakura.phoneagent.agent.IntentParser.PROMPT), ChatMessage("user", "目标：$goal"))
+    suspend fun parseIntent(goal: String, context: String? = null): String? {
+        val msgs = listOf(ChatMessage("system", com.runasakura.phoneagent.agent.IntentParser.PROMPT),
+            ChatMessage("user", (context?.let { "（同一会话的上文，仅供理解指代：$it）\n" } ?: "") + "目标：$goal"))
         val c = cloud
         if (c != null && mode != AgentPreferences.ROUTE_LOCAL_ONLY && !(mode == AgentPreferences.ROUTE_LOCAL_FIRST && false)) {
-            val r = c.chat(msgs, 0.0); record("云端解析", r, msgs)
+            val r = withTimeoutOrNull(INTENT_TIMEOUT_MS) { c.chat(msgs, 0.0) }
+                ?: run { log("意图解析超过 ${INTENT_TIMEOUT_MS / 1000}s，改用规则继续"); return null }
+            record("云端解析", r, msgs)
             log("意图解析（云端）${r.latencyMs}ms" + (r.error?.let { " 错误：$it" } ?: ""))
             if (r.error == null && r.content.isNotBlank()) return r.content
         }
         if (mode == AgentPreferences.ROUTE_CLOUD_ONLY || localSidelined) return null
-        val r = withTimeoutOrNull(stallMs) { local.chat(msgs, 0.0) } ?: run { localSidelined = cloud != null; return null }
+        val r = withTimeoutOrNull(minOf(stallMs, INTENT_TIMEOUT_MS * 2)) { local.chat(msgs, 0.0) } ?: run { localSidelined = cloud != null; return null }
         record("本机解析", r, msgs)
         return r.content.takeIf { r.error == null && it.isNotBlank() }
     }
@@ -149,6 +152,7 @@ class LlmRouter(
     }
 
     companion object {
+        const val INTENT_TIMEOUT_MS = 6_000L
         fun parsePoint(content: String, w: Int, h: Int): Pair<Int, Int>? = try {
             val t = content.trim(); val o = org.json.JSONObject(t.substring(t.indexOf('{'), t.lastIndexOf('}') + 1))
             if (o.optBoolean("none", false) || !o.has("x") || !o.has("y")) null

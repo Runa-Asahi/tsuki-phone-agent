@@ -23,8 +23,19 @@ class AgentLoop(
     private val safety: SafetyGate = SafetyGate(prefs),
     private val onLog: (String) -> Unit = {},
     private val onConfirm: suspend (String) -> Boolean = { false },
-    private val isStopped: () -> Boolean = { false }
+    private val isStopped: () -> Boolean = { false },
+    private val isPaused: () -> Boolean = { false }
 ) {
+    /** Earlier turn in the same chat session (follow-up messages). */
+    var sessionContext: String? = null
+
+    private suspend fun waitIfPaused() {
+        if (!isPaused()) return
+        onLog("⏸ 已暂停，点「继续」恢复")
+        while (isPaused() && !isStopped()) delay(300)
+        if (!isStopped()) onLog("▶ 继续执行")
+    }
+
     data class Result(
         val success: Boolean,
         val steps: Int,
@@ -42,7 +53,7 @@ class AgentLoop(
         history += ChatMessage("system", SystemPrompt.TEXT)
         val steps = StepHistory().also { stepsRef = it }
         var uselessConfirms = 0
-        history += ChatMessage("user", "用户目标：$goal")
+        history += ChatMessage("user", (sessionContext?.let { "（同一会话上文，仅供理解指代：$it）\n" } ?: "") + "用户目标：$goal")
 
         if (safety.goalNeedsConfirm(goal)) {
             onLog("目标含敏感语义，开始前请知悉：发送/支付等会二次确认")
@@ -96,7 +107,8 @@ class AgentLoop(
         val dev = com.runasakura.phoneagent.a11y.A11yDevice(a11y, onLog)
         // ---- Model-first goal understanding (rules are only the fallback) ----
         val intent = if (toggleNote != null) null else {
-            val raw = try { router.parseIntent(goal) } catch (e: Exception) { null }
+            onLog("正在理解任务…")
+            val raw = try { router.parseIntent(goal, sessionContext) } catch (e: Exception) { null }
             (raw?.let { IntentParser.parseJson(it, goal) }.also { if (raw != null && it == null) onLog("模型意图不可信/无法解析，改用规则") })
                 ?: IntentParser.ruleBased(goal)
         }
@@ -206,6 +218,8 @@ class AgentLoop(
         val max = prefs.maxSteps
         while (step < max) {
             coroutineContext.ensureActive()
+            if (isStopped()) return Result(false, step, "已急停")
+            waitIfPaused()
             if (isStopped()) return Result(false, step, "已急停")
 
             if (AgentAccessibilityService.require() !== a11y) {

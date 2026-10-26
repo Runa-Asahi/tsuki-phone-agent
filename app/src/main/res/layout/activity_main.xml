@@ -12,135 +12,85 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         app:title="@string/app_name"
-        app:subtitle="本机 MNN · 无障碍 · 离线 OCR"
         app:titleTextColor="@color/text_primary"
         app:subtitleTextColor="@color/text_secondary" />
 
-    <!-- Status cards -->
+    <!-- Slim status strip (tap to fix) -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardA11y" style="@style/StatusCard"
-            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-            android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="无障碍" />
-                <TextView android:id="@+id/a11yStatus" style="@style/StatusValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="检测中…" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardMnn" style="@style/StatusCard"
-            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-            android:layout_marginStart="6dp" android:layout_marginEnd="6dp" android:clickable="true" android:focusable="true">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="大脑" />
-                <TextView android:id="@+id/mnnStatus" style="@style/StatusValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:maxLines="1" android:ellipsize="end" android:text="检测中…" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/cardOcr" style="@style/StatusCard"
-            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-            android:layout_marginStart="6dp">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
-                <TextView style="@style/StatusTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="OCR" />
-                <TextView android:id="@+id/ocrStatus" style="@style/StatusValue" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="离线中文" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="4dp">
+        <LinearLayout android:id="@+id/cardA11y" android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:clickable="true" android:focusable="true">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="无障碍 " />
+            <TextView android:id="@+id/a11yStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:text="检测中…" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/cardMnn" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="horizontal" android:clickable="true" android:focusable="true" android:layout_marginStart="12dp">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="大脑 " />
+            <TextView android:id="@+id/mnnStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:maxLines="1" android:ellipsize="end" android:text="检测中…" />
+        </LinearLayout>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_secondary" android:layout_marginStart="12dp" android:text="OCR " />
+        <TextView android:id="@+id/ocrStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:text="离线中文" />
     </LinearLayout>
 
-    <!-- Task card -->
+    <!-- Conversation -->
+    <ScrollView
+        android:id="@+id/scrollChat"
+        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:fillViewport="true">
+        <LinearLayout
+            android:id="@+id/chatList"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:padding="12dp" />
+    </ScrollView>
+
+    <!-- Composer -->
     <com.google.android.material.card.MaterialCardView
         style="@style/StatusCard"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_margin="12dp">
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginStart="8dp" android:layout_marginEnd="8dp" android:layout_marginBottom="8dp">
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView style="@style/StatusTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="任务" />
                 <com.google.android.material.chip.Chip
                     android:id="@+id/statusText"
                     style="@style/Widget.Material3.Chip.Assist"
                     android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:clickable="false" android:text="@string/status_idle" />
+                <TextView android:id="@+id/sessionHint" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp" android:textSize="11sp" android:textColor="@color/text_secondary" android:maxLines="1" android:ellipsize="end" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPause" style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="36dp" android:text="暂停" />
             </LinearLayout>
-            <com.google.android.material.textfield.TextInputLayout
-                android:id="@+id/goalLayout"
-                style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                app:endIconMode="clear_text">
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/goalInput"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:hint="@string/goal_hint"
-                    android:minLines="2"
-                    android:maxLines="4"
-                    android:inputType="textMultiLine" />
-            </com.google.android.material.textfield.TextInputLayout>
             <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none">
                 <com.google.android.material.chip.ChipGroup
                     android:id="@+id/exampleChips"
                     android:layout_width="wrap_content" android:layout_height="wrap_content"
                     app:singleLine="true" />
             </HorizontalScrollView>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="4dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="bottom">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/goalLayout"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                    android:layout_width="0dp" android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    app:endIconMode="clear_text">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/goalInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="@string/goal_hint"
+                        android:maxLines="4"
+                        android:inputType="textMultiLine" />
+                </com.google.android.material.textfield.TextInputLayout>
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnStart"
-                    android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="2"
-                    android:text="@string/btn_start" app:icon="@android:drawable/ic_media_play" />
+                    android:layout_width="wrap_content" android:layout_height="56dp"
+                    android:layout_marginStart="6dp" android:text="发送" />
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnStop"
-                    style="@style/Widget.Material3.Button.OutlinedButton"
-                    android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1"
-                    android:layout_marginStart="8dp"
-                    android:textColor="@color/err_red" app:strokeColor="@color/err_red"
-                    android:text="@string/btn_stop" />
+                    android:layout_width="wrap_content" android:layout_height="56dp"
+                    android:layout_marginStart="6dp" android:visibility="gone"
+                    app:backgroundTint="@color/err_red" android:text="停止" />
             </LinearLayout>
-        </LinearLayout>
-    </com.google.android.material.card.MaterialCardView>
-
-    <!-- Tools -->
-    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingStart="12dp" android:paddingEnd="12dp" android:scrollbars="none">
-        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnSelfTest" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="自检" />
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnExport" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="导出诊断日志" />
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnOpenA11y" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="@string/btn_a11y" />
-            <com.google.android.material.button.MaterialButton android:id="@+id/btnOverlay" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/btn_overlay" />
-        </LinearLayout>
-    </HorizontalScrollView>
-
-    <!-- Step log -->
-    <com.google.android.material.card.MaterialCardView
-        style="@style/StatusCard"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_margin="12dp"
-        app:cardBackgroundColor="@color/log_bg">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView style="@style/StatusTitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="执行日志" />
-                <com.google.android.material.button.MaterialButton android:id="@+id/btnClearLog" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:minHeight="36dp" android:text="清空" />
-            </LinearLayout>
-            <ScrollView android:id="@+id/scrollLog" android:layout_width="match_parent" android:layout_height="match_parent">
-                <TextView
-                    android:id="@+id/logView"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/log_text"
-                    android:textSize="13sp"
-                    android:lineSpacingExtra="3dp"
-                    android:textIsSelectable="true" />
-            </ScrollView>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 </LinearLayout>
