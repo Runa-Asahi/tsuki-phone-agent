@@ -26,6 +26,8 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
     )
 
     companion object {
+        private val TIME = Regex("(?<!\\d)\\d{1,2}[:：]\\d{2}(?!\\d)")
+        private val PICKER_WORDS = listOf("小时", "分钟", "上午", "下午", "重复", "铃声", "响铃", "贪睡")
         private val ALARM_COMMIT = listOf("保存", "完成", "确定", "确认", "好", "✓", "√", "save", "done", "ok")
         private val CALL_KEYS = listOf("视频通话", "语音通话", "音视频通话", "拨打", "呼叫", "拨号", "打电话")
         /** Model-fallback taps on call buttons always need confirmation (OCR-fuzzy, e.g. 「初麵通话」). */
@@ -99,7 +101,7 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将发起语音/视频通话或拨号，确认后才会拨出")
                 }
                 // ConfirmPolicy (alarm): saving an alarm through an app's UI is confirmed like the system-intent path.
-                if (prefs.confirmAlarm && userGoal.contains("闹钟") && ALARM_COMMIT.any { resolved.trim().equals(it, true) || label.trim().equals(it, true) }) {
+                if (prefs.confirmAlarm && userGoal.contains("闹钟") && looksLikeTimePicker(tree) && ALARM_COMMIT.any { resolved.trim().equals(it, true) || label.trim().equals(it, true) }) {
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将保存闹钟，确认后才会创建")
                 }
                 if (payButtonLabels.any { resolved.equals(it, true) || label.equals(it, true) }) {
@@ -122,6 +124,13 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
         }
         return SafetyResult(SafetyDecision.ALLOW)
     }
+
+    /**
+     * Generic alarm-editing context: the screen shows a clock time or time-picker vocabulary. A 「好」/「确定」 on an
+     * unrelated popup while the goal mentions an alarm is then not a commit and is not confirmed.
+     */
+    fun looksLikeTimePicker(tree: String): Boolean =
+        TIME.containsMatchIn(tree) || PICKER_WORDS.count { tree.contains(it) } >= 2
 
     fun isSendLike(label: String): Boolean =
         sendButtonLabels.any { label.equals(it, true) || label.trim() == it }

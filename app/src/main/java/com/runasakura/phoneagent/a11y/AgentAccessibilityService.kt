@@ -471,7 +471,12 @@ class AgentAccessibilityService : AccessibilityService() {
     /** Exact coordinates; when the gesture would touch our stop button, the button steps aside for its duration. */
     private fun clearOfOverlay(hits: Boolean, g: () -> Boolean): Boolean {
         val ov = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.active
-        return if (hits && ov != null) ov.withPassThrough(g) else g()
+        if (!hits || ov == null) return g()
+        // Step aside for this gesture, then move the pill away from the target so the next gestures / screenshots
+        // on that area are not covered at all (a list being worked through keeps its rows clear).
+        val r = ov.withPassThrough(g)
+        overlayRect()?.let { ov.moveAwayFrom((it[1] + it[3]) / 2) }
+        return r
     }
 
     private fun overlayRect(): IntArray? = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.bounds?.let { intArrayOf(it.left, it.top, it.right, it.bottom) }

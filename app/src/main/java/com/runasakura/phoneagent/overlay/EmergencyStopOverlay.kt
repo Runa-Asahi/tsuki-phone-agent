@@ -58,6 +58,14 @@ class EmergencyStopOverlay(
         if (on) Thread.sleep(60) // let the window manager apply the flag before input arrives
     }
 
+    /** Re-dock the pill to the other half of the screen (pure placement in [OverlayAvoid.dockY]). */
+    fun moveAwayFrom(targetY: Int) {
+        val v = button ?: return; val p = lp ?: return
+        main.post {
+            try { p.y = OverlayAvoid.dockY(targetY, context.resources.displayMetrics.heightPixels); wm.updateViewLayout(v, p) } catch (_: Exception) { }
+        }
+    }
+
     fun show() {
         if (button != null) return
         val a11y = context is android.accessibilityservice.AccessibilityService
@@ -121,6 +129,8 @@ class EmergencyStopOverlay(
 /** Pure helper: does a gesture point (or a swipe path's bounding box) touch the overlay? */
 object OverlayAvoid {
     const val PAD = 8
+    /** Top of the pill after stepping aside: lower third when the target was in the upper half, else upper part. */
+    fun dockY(targetY: Int, screenH: Int): Int = if (targetY < screenH / 2) (screenH * 0.68).toInt() else (screenH * 0.14).toInt()
     fun hits(x: Int, y: Int, r: IntArray?): Boolean =
         r != null && x >= r[0] - PAD && x <= r[2] + PAD && y >= r[1] - PAD && y <= r[3] + PAD
     fun pathHits(x1: Int, y1: Int, x2: Int, y2: Int, r: IntArray?): Boolean {

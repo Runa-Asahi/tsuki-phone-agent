@@ -48,7 +48,7 @@ class SettingsActivity : AppCompatActivity() {
             AgentPreferences.ROUTE_LOCAL_ONLY,
             AgentPreferences.ROUTE_CLOUD_ONLY
         )
-        binding.routeMode.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+        binding.routeMode.adapter = ArrayAdapter(this, R.layout.item_spinner,
             modes.map { com.runasakura.phoneagent.llm.RoutePolicy.label(it) + if (it == AgentPreferences.ROUTE_HYBRID) "（推荐）" else "" })
         val cur = if (prefs.routeMode == AgentPreferences.ROUTE_LOCAL_FIRST) AgentPreferences.ROUTE_HYBRID else prefs.routeMode
         binding.routeMode.setSelection(modes.indexOf(cur).coerceAtLeast(0))
@@ -65,7 +65,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         val providers = CloudProviders.ALL
-        val modelAdapter = ArrayAdapter<String>(this, android.R.layout.simple_dropdown_item_1line, mutableListOf())
+        val modelAdapter = ArrayAdapter<String>(this, R.layout.item_spinner, mutableListOf())
         binding.cloudModel.setAdapter(modelAdapter)
         fun setModelChoices(list: List<String>) {
             modelAdapter.clear(); modelAdapter.addAll(list); modelAdapter.notifyDataSetChanged()
@@ -73,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.cloudModel.setOnClickListener { binding.cloudModel.showDropDown() }
         binding.cloudModel.setOnFocusChangeListener { _, f -> if (f && modelAdapter.count > 0) binding.cloudModel.post { binding.cloudModel.showDropDown() } }
         val initialPos = providers.indexOfFirst { it.id == CloudProviders.effectiveProvider(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey) }.coerceAtLeast(0)
-        binding.cloudProvider.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, providers.map { it.label })
+        binding.cloudProvider.adapter = ArrayAdapter(this, R.layout.item_spinner, providers.map { it.label })
         binding.cloudProvider.setSelection(initialPos)
         setModelChoices(providers[initialPos].models)
         if (binding.cloudModel.text.isNullOrBlank()) binding.cloudModel.setText(providers[initialPos].model)

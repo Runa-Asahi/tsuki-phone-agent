@@ -32,12 +32,17 @@ class Pt55Test {
         assertNotNull(ActionValidator.validate(AgentAction.AskUser(""), emptyList(), 1080, 2400))
     }
     @Test fun alarmSaveNeedsConfirmOnlyWhenEnabled() {
-        val snap = UiSnapshot("p", screenWidth = 1080, screenHeight = 2400, tree = null, compressedText = "[e3] 保存 (980,150)", nodeCount = 1)
+        val snap = UiSnapshot("p", screenWidth = 1080, screenHeight = 2400, tree = null, compressedText = "[e2] 07:00 (540,600)\n[e3] 保存 (980,150)", nodeCount = 2)
         val on = SafetyGate(MemorySettings(confirmAlarm = true)).check(AgentAction.Tap(nodeId = "e3"), snap, "设一个7点的闹钟")
         assertEquals(SafetyDecision.REQUIRE_CONFIRM, on.decision)
         val off = SafetyGate(MemorySettings(confirmAlarm = false)).check(AgentAction.Tap(nodeId = "e3"), snap, "设一个7点的闹钟")
         assertEquals(SafetyDecision.ALLOW, off.decision)
         assertEquals(SafetyDecision.ALLOW, SafetyGate(MemorySettings()).check(AgentAction.Tap(nodeId = "e3"), snap, "写一条笔记并保存").decision)
+        // An unrelated 「好」 popup (no time / picker on screen) is not an alarm commit.
+        val popup = UiSnapshot("p", screenWidth = 1080, screenHeight = 2400, tree = null, compressedText = "[e1] 已开启通知 (540,900)\n[e2] 好 (540,1300)", nodeCount = 2)
+        assertEquals(SafetyDecision.ALLOW, SafetyGate(MemorySettings(confirmAlarm = true)).check(AgentAction.Tap(nodeId = "e2"), popup, "设一个7点的闹钟").decision)
+        assertEquals(1080 * 0 + (2400 * 0.68).toInt(), com.runasakura.phoneagent.overlay.OverlayAvoid.dockY(300, 2400))
+        assertEquals((2400 * 0.14).toInt(), com.runasakura.phoneagent.overlay.OverlayAvoid.dockY(2000, 2400))
     }
     @Test fun openingAnAppIsNotSensitive() {
         assertFalse(SafetyGate(MemorySettings()).goalNeedsConfirm("打开通讯录，找到王五"))

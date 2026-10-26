@@ -53,4 +53,33 @@
     <string name="stop">停止</string>
     <string name="reply_hint">回复 Agent 的问题…</string>
     <string name="followup_hint">继续追问或下一个任务…</string>
+    <string name="ui_1">云端模型</string>
+    <string name="ui_2">主力大脑。只会使用你在这里选的模型，不会自动换成别的模型。API Key 只加密保存在本机，不进日志。</string>
+    <string name="ui_3">服务商</string>
+    <string name="ui_4">Base URL</string>
+    <string name="ui_5">模型（点击选择或直接输入）</string>
+    <string name="ui_6">测试连接</string>
+    <string name="ui_7">获取模型列表</string>
+    <string name="ui_8">运行方式</string>
+    <string name="ui_9">在哪里思考、最多做几步，以及长任务如何节省 token。</string>
+    <string name="ui_10">长任务用模型整理进度</string>
+    <string name="ui_11">默认关。对话很长时，用你选的同一个模型把早先步骤压成要点（多一次小请求）；关闭时用本地规则整理，不额外花 token。</string>
+    <string name="ui_12">DeepSeek 思考模式</string>
+    <string name="ui_13">更准但更慢，默认关。</string>
+    <string name="ui_14">看图能力</string>
+    <string name="ui_15">文字读不懂的界面（游戏、纯图标）可以让模型看截图。</string>
+    <string name="ui_16">游戏、图标多的界面会附截图给支持看图的云端模型；支付/银行类应用永远不截图。</string>
+    <string name="ui_17">本机 MNN 视觉模型看图</string>
+    <string name="ui_18">文字大脑仍用你选的云端模型。</string>
+    <string name="ui_19">本机 VL 模型名（留空=MNN 当前模型）</string>
+    <string name="ui_20">云端视觉 Base URL（可选）</string>
+    <string name="ui_21">视觉模型 API Key（只保存在本机）</string>
+    <string name="ui_22">视觉模型名，如 qwen3-vl-plus</string>
+    <string name="ui_23">安全与确认</string>
+    <string name="ui_24">敏感操作会先停下问你。</string>
+    <string name="ui_25">设置闹钟前先确认</string>
+    <string name="ui_26">发送消息、通话、支付、删除、卸载、下单始终需要确认，不能关闭。</string>
+    <string name="ui_27">查看 / 清除应用经验</string>
+    <string name="ui_28">本机模型（MNN，可选）</string>
+    <string name="ui_29">在手机本地跑小模型，离线可用但较慢。</string>
 </resources>

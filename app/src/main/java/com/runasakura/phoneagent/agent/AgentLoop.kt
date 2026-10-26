@@ -528,7 +528,7 @@ class AgentLoop(
             when (gate.decision) {
                 SafetyDecision.BLOCK_HUMAN -> {
                     onLog("安全闸：人工接管 — ${gate.reason}")
-                    return Result(false, step, gate.reason)
+                    return Result(false, step, gate.reason, needsUser = plan.action is AgentAction.HumanTakeover || gate.reason.contains("验证码"))
                 }
                 SafetyDecision.REQUIRE_CONFIRM -> {
                     onLog("安全闸：等待确认 — ${gate.reason}")

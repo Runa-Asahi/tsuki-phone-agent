@@ -39,11 +39,34 @@ abstract class ShotBase {
         v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
             if (h == null) View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED) else View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
         v.layout(0, 0, v.measuredWidth, v.measuredHeight)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(2))
+        v.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
+            if (h == null) View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED) else View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
+        v.layout(0, 0, v.measuredWidth, v.measuredHeight)
         val bmp = Bitmap.createBitmap(v.measuredWidth, maxOf(1, v.measuredHeight), Bitmap.Config.ARGB_8888)
         bmp.eraseColor(androidx.core.content.ContextCompat.getColor(act, R.color.bg))
         v.draw(Canvas(bmp))
         val dirs = listOf(File("build/ui-shots"), File("/workspace/deliverables/ui-shots")).filter { it.mkdirs() || it.isDirectory }
         for (d in dirs) File(d, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+    /** Fill the settings form like SettingsActivity does (spinners, fields, switches) so the shot shows real content. */
+    fun settingsContent(): View {
+        val root = LayoutInflater.from(act).inflate(R.layout.activity_settings, FrameLayout(act), false)
+        val content = (root.findViewById<View>(R.id.btnSave).parent as LinearLayout).getChildAt(1) as ScrollView
+        val inner = content.getChildAt(0); content.removeView(inner)
+        val prov = com.runasakura.phoneagent.llm.CloudProviders.ALL
+        inner.findViewById<android.widget.Spinner>(R.id.cloudProvider).adapter = android.widget.ArrayAdapter(act, R.layout.item_spinner, prov.map { it.label })
+        inner.findViewById<android.widget.Spinner>(R.id.cloudProvider).setSelection(prov.indexOfFirst { it.id.contains("deepseek", true) }.coerceAtLeast(0), false)
+        inner.findViewById<android.widget.Spinner>(R.id.routeMode).adapter = android.widget.ArrayAdapter(act, R.layout.item_spinner,
+            listOf(com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_CLOUD_ONLY).map { com.runasakura.phoneagent.llm.RoutePolicy.label(it) })
+        inner.findViewById<android.widget.TextView>(R.id.cloudUrl).text = "https://api.deepseek.com"
+        inner.findViewById<android.widget.TextView>(R.id.cloudKey).text = "sk-••••••••"
+        inner.findViewById<android.widget.TextView>(R.id.cloudModel).text = "deepseek-chat"
+        inner.findViewById<android.widget.TextView>(R.id.maxSteps).text = "25"
+        inner.findViewById<android.widget.TextView>(R.id.cloudTestResult).text = "✅ 连接正常（deepseek-chat，0.6s）"
+        inner.findViewById<android.widget.CompoundButton>(R.id.confirmAlarm).isChecked = true
+        inner.findViewById<android.widget.CompoundButton>(R.id.cloudShot).isChecked = true
+        return inner
     }
     private fun renderer() = ChatRenderer(act, {}, {}, {}, {}, animate = false)
 
@@ -105,9 +128,7 @@ class UiScreenshotTest : ShotBase() {
         assertEquals("给他发个消息（补充：张三，晚上见）", ChatSession.composeGoal("张三，晚上见"))
     }
     @Test fun settings() {
-        val root = LayoutInflater.from(act).inflate(R.layout.activity_settings, FrameLayout(act), false)
-        val content = (root.findViewById<View>(R.id.btnSave).parent as LinearLayout).getChildAt(1) as ScrollView
-        val inner = content.getChildAt(0); content.removeView(inner)
+        val inner = settingsContent()
         save("05_settings_full_light", inner, h = null)
         assertNotNull(inner.findViewById<View>(R.id.modelCheckpoint))
     }
@@ -126,9 +147,6 @@ class UiScreenshotDarkTest : ShotBase() {
         main("07_main_empty_dark", {}, running = false)
         ChatSession.clear()
         main("08_main_running_dark", { runningSession() }, running = true)
-        val root = LayoutInflater.from(act).inflate(R.layout.activity_settings, FrameLayout(act), false)
-        val content = (root.findViewById<View>(R.id.btnSave).parent as LinearLayout).getChildAt(1) as ScrollView
-        val inner = content.getChildAt(0); content.removeView(inner)
-        save("09_settings_full_dark", inner, h = null)
+        save("09_settings_full_dark", settingsContent(), h = null)
     }
 }
