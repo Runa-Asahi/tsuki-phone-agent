@@ -110,3 +110,14 @@ class EmergencyStopOverlay(
         @Volatile var bounds: android.graphics.Rect? = null
     }
 }
+
+/** Pure helper: move a tap that would land on the overlay to just outside it (right side, else below). */
+object OverlayAvoid {
+    const val PAD = 16
+    fun point(x: Int, y: Int, r: IntArray?): Pair<Int, Int> {
+        if (r == null) return x to y
+        val (l, t, rr, b) = r.toList()
+        if (x < l || x > rr || y < t || y > b) return x to y
+        return (rr + PAD) to y
+    }
+}

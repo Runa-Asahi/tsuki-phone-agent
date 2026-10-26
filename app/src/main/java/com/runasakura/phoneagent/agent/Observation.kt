@@ -1,5 +1,7 @@
 package com.runasakura.phoneagent.agent
 
+import com.runasakura.phoneagent.llm.ChatMessage
+
 import com.runasakura.phoneagent.flow.Screen
 import com.runasakura.phoneagent.flow.Text
 import com.runasakura.phoneagent.model.AgentAction
@@ -44,6 +46,14 @@ object ObsFormat {
 
 /** OCR-noise-robust screen diff: same-position re-reads and timers are NOT changes. */
 object SemanticDiff {
+    /** Non-text state changes OCR/tree text diffs miss: keyboard shown/hidden, an input field tapped. */
+    fun stateChange(imeBefore: Int?, imeAfter: Int?, tappedEditable: Boolean): String? = when {
+        imeBefore == null && imeAfter != null -> "键盘已弹出（输入框已获得焦点），可以直接 type"
+        imeBefore != null && imeAfter == null -> "键盘已收起"
+        tappedEditable -> "点的是输入框，焦点可能已进入（可直接 type）"
+        else -> null
+    }
+
     data class Result(val added: List<String>, val removed: List<String>) {
         val meaningful get() = added.isNotEmpty() || removed.isNotEmpty()
     }
@@ -105,6 +115,16 @@ class TaskMemory(private val max: Int = 8) {
     }
     fun all(): List<String> = facts.toList()
     fun text(): String? = if (facts.isEmpty()) null else facts.joinToString("；")
+}
+
+/** Prompt-cache friendly transcript: append-only, reset (one cache miss) when it grows past [MAX]. */
+object Transcript {
+    const val MAX = 12
+    fun append(turns: MutableList<ChatMessage>, obs: String, answer: String) {
+        if (turns.size + 2 > MAX) turns.clear()
+        turns += ChatMessage("user", obs); turns += ChatMessage("assistant", answer)
+    }
+    fun window(turns: List<ChatMessage>): List<ChatMessage> = turns.toList()
 }
 
 /** Reads the model's own goal_match judgement; only a clear leading "否/no" counts. */

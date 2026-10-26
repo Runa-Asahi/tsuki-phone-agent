@@ -348,7 +348,8 @@ class AgentLoop(
                 } ?: ""
             }
             // ---- Reflect like a desktop agent: progress check every 6 steps / on loops, then re-plan ----
-            if (router.cloudReady && step > 1 && (step % 6 == 0 || loopStreak == 2)) {
+            if (router.cloudReady && step > 1 && loopStreak == 2) {
+                turns.clear()
                 val v = verify(dev, goal)
                 if (v != null && v.first) { saveAppMemory(goal, true, steps.progress()); return Result(true, step, "目标已达成（验收：${v.second}）") }
                 if (v != null) {
@@ -362,10 +363,12 @@ class AgentLoop(
             onLog("请求模型（${com.runasakura.phoneagent.llm.RoutePolicy.label(router.mode)}${if (router.localSidelined) "，本机已旁路" else ""}）…")
             val useFocused = history.firstOrNull()?.content == SystemPrompt.FOCUSED
             val sys = if (useFocused) SystemPrompt.FOCUSED else SystemPrompt.SHORT
+            val obsText = buildObserveMessage(goal, snap, step, obsNote)
+            pendingObs = obsText
             val msgs = if (useFocused) {
-                // system + first user + last assistant turn only
-                history.take(2) + history.drop(2).takeLast(1) +
-                    ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote), brainShot)
+                // Append-only transcript: each request = previous request + its answer + new observation,
+                // so DeepSeek's prefix cache covers everything but the newest screen.
+                history.take(2) + Transcript.window(turns) + ChatMessage("user", obsText, brainShot)
             } else {
                 // Keep history short for VL: system SHORT + last user observe only
                 listOf(
@@ -378,7 +381,7 @@ class AgentLoop(
             // or after the previous step's invalid/unparseable output.
             val lowConf = sc.items.size < 3  // almost nothing readable (OCR-only alone is not low-confidence)
             val escalate = escalateNext || steps.stuckCount >= 2 || lowConf || steps.looping || (vision && brainShot != null)
-            if (escalate && router.canEscalate) onLog("升级到云端：" + when {
+            if (escalate && router.canEscalate && router.localUsable) onLog("改用云端：" + when {
                 escalateNext -> "上一步本机输出无效或低置信（重复同一动作）"
                 lowConf -> "界面文字过少（低置信）"
                 else -> "界面连续无变化" })
@@ -392,7 +395,7 @@ class AgentLoop(
                     ChatMessage("user", "目标：$goal" + (cloudPlanText?.takeIf { it.isNotBlank() }?.let { "\n$it" } ?: "")),
                     ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote) + "\n已附截图（屏幕 ${sc.w}x${sc.h}，坐标按此）。", it))) }
             } else null
-            if (!needEyes && step == 3 && !router.visionReady && (sc.w > sc.h || sc.items.size < 6)) onLog("💡 " + com.runasakura.phoneagent.llm.CloudProviders.VISION_TIP)
+            if (!needEyes && step == 3 && !router.visionReady && !vision && (sc.w > sc.h || sc.items.size < 6)) onLog("💡 " + com.runasakura.phoneagent.llm.CloudProviders.VISION_TIP)
             // Model is always the user's choice in settings (no automatic switch to another model).
             var resp = eyes ?: planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
             logLlm(resp)
@@ -452,6 +455,7 @@ class AgentLoop(
             invalidStreak = 0
 
             history += ChatMessage("assistant", resp.content)
+            pendingObs?.let { Transcript.append(turns, it, resp.content) }; pendingObs = null
 
             // Rewrite ambiguous tap on "设置" while still in our app → system settings launch
             plan = rewriteSettingsAmbiguity(plan, snap, goal)
@@ -463,7 +467,7 @@ class AgentLoop(
                     onLog("⚠ 疑似注入：拦截输入「${ty.text.take(40)}」——不在用户目标中")
                     if (injectionBlocks >= 2) return Result(false, step, "疑似注入：模型多次尝试输入用户目标之外的文字，已停止")
                     while (history.size > 2 && history.last().role == "assistant") history.removeAt(history.lastIndex)
-                    history += ChatMessage("user", "上一步被拦截：只能输入用户目标里的文字。")
+                    history += ChatMessage("user", "上一步被拦截：只能输入用户目标里的文字。"); turns += ChatMessage("user", "上一步被拦截：只能输入用户目标里的文字。")
                     continue
                 }
                 lastTyped = ty.text
@@ -499,7 +503,7 @@ class AgentLoop(
                     if (v != null && !v.first) {
                         doneRejections++
                         onLog("模型说完成，但验收未通过：${v.second}（继续）")
-                        history += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。")
+                        history += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。"); turns += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。")
                         continue
                     }
                     saveAppMemory(goal, true, steps.progress())
@@ -722,6 +726,9 @@ class AgentLoop(
     // ---- R1: semantic outcome tracking ----
     private val guard = NoEffectGuard()
     private var prevItems: List<com.runasakura.phoneagent.screen.ScreenItem>? = null
+    private var prevIme: Int? = null
+    private val turns = ArrayList<ChatMessage>()
+    private var pendingObs: String? = null
     private var lastExec: Triple<AgentAction, String?, String>? = null
     private var invalidStreak = 0
     private var lookNext = false
@@ -757,12 +764,15 @@ class AgentLoop(
     /** Honest outcome of the previous action; no-ops are remembered and refused later. */
     private fun semanticNote(sc: com.runasakura.phoneagent.flow.Screen): String? {
         val prev = prevItems; prevItems = sc.items
+        val imeBefore = prevIme; prevIme = sc.imeTop
         lastNoEffect = false
         val le = lastExec ?: return null
         lastExec = null
         if (prev == null) return "上一步：${le.third}"
         val exp = lastExpect?.let { "（你预期：$it —— 对照下面判断是否达到）" } ?: ""
         val d = SemanticDiff.compare(prev, sc.items)
+        val stateNote = SemanticDiff.stateChange(imeBefore, sc.imeTop, (le.first as? AgentAction.Tap)?.let { t -> prev.firstOrNull { it.id == t.nodeId }?.edit } == true)
+        if (!d.meaningful && stateNote != null) return "上一步：${le.third}$exp → 文字没变，但$stateNote"
         return if (!d.meaningful) {
             guard.record(le.first, le.second, le.third); lastNoEffect = true
             "上一步：${le.third}$exp → 界面没有实质变化（只是 OCR 抖动）= 这个动作无效，不要再做"

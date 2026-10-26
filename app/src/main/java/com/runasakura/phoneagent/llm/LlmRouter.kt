@@ -99,15 +99,29 @@ class LlmRouter(
     /** Per-task stats: backend → [calls, ok, totalMs, approxTokensIn, approxTokensOut]. */
     val stats = linkedMapOf<String, LongArray>()
 
+    /** Local model configured and not sidelined (for honest "改用云端" logs). */
+    val localUsable: Boolean get() = mode != AgentPreferences.ROUTE_CLOUD_ONLY && !localSidelined
+
+    /** Real usage from the provider body when present: (prompt, completion, cacheHit). */
+    fun usage(raw: String?): Triple<Long, Long, Long>? = try {
+        val u = org.json.JSONObject(raw ?: "").optJSONObject("usage")
+        u?.let { Triple(it.optLong("prompt_tokens"), it.optLong("completion_tokens"), it.optLong("prompt_cache_hit_tokens")) }
+    } catch (_: Exception) { null }
+
     private fun record(b: String, r: LlmResponse, msgs: List<ChatMessage>) {
-        val s = stats.getOrPut(b) { LongArray(5) }
+        val s = stats.getOrPut(b) { LongArray(6) }
+        usage(r.rawBody)?.let { (p, c, h) ->
+            com.runasakura.phoneagent.util.TaskTiming.add("模型(" + b + ")", r.latencyMs)
+            s[0]++; if (r.error == null && r.content.isNotBlank()) s[1]++; s[2] += r.latencyMs
+            s[3] += p; s[4] += c; s[5] += h; return
+        }
         com.runasakura.phoneagent.util.TaskTiming.add("模型(" + b + ")", r.latencyMs)
         s[0]++; if (r.error == null && r.content.isNotBlank()) s[1]++; s[2] += r.latencyMs
         s[3] += msgs.sumOf { approxTokens(it.content) }.toLong(); s[4] += approxTokens(r.content).toLong()
     }
 
     fun summary(): String = if (stats.isEmpty()) "本次未调用模型" else stats.entries.joinToString("；") { (b, s) ->
-        "$b ${s[0]}次 成功${s[1]} 平均${if (s[0] > 0) s[2] / s[0] else 0}ms ≈入${s[3]}/出${s[4]} tokens"
+        "$b ${s[0]}次 成功${s[1]} 平均${if (s[0] > 0) s[2] / s[0] else 0}ms 入${s[3]}/出${s[4]} tokens" + (if (s.size > 5 && s[5] > 0) " 缓存命中${s[5]}(${s[5] * 100 / maxOf(1, s[3])}%)" else "")
     }
 
     suspend fun plan(

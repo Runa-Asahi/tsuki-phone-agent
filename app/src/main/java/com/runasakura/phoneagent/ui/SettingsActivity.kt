@@ -54,6 +54,7 @@ class SettingsActivity : AppCompatActivity() {
         val cur = if (prefs.routeMode == AgentPreferences.ROUTE_LOCAL_FIRST) AgentPreferences.ROUTE_HYBRID else prefs.routeMode
         binding.routeMode.setSelection(modes.indexOf(cur).coerceAtLeast(0))
 
+        binding.btnAppMemory.setOnClickListener { showAppMemory() }
         binding.btnTestCloud.setOnClickListener {
             val url = binding.cloudUrl.text.toString().trim(); val key = binding.cloudKey.text.toString().trim()
             val model = binding.cloudModel.text.toString().trim().ifBlank { CloudProviders.byId(CloudProviders.effectiveProvider(prefs.cloudProvider, url, key)).model }
@@ -127,5 +128,24 @@ class SettingsActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
             finish()
         }
+    }
+
+    /** Per-app experience written by the model: view, delete one app, or clear all. */
+    private fun showAppMemory() {
+        val prefs = PhoneAgentApp.instance.prefs
+        val all = prefs.allAppMemory()
+        if (all.isEmpty()) { android.widget.Toast.makeText(this, "还没有学到任何应用经验", android.widget.Toast.LENGTH_SHORT).show(); return }
+        val pkgs = all.keys.sorted()
+        val labels = pkgs.map { p -> val m = com.runasakura.phoneagent.agent.AppMemory.decode(all[p]); "$p\n经验 ${m.facts.size} 条 · 路线 ${m.paths.size} 条" }.toTypedArray()
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("应用经验（点一项查看）")
+            .setItems(labels) { _, i ->
+                val p = pkgs[i]; val m = com.runasakura.phoneagent.agent.AppMemory.decode(all[p])
+                val body = (m.facts.map { "• $it" } + m.paths.map { "→ ${it.substringBefore("=>")}：${it.substringAfter("=>")}" }).joinToString("\n").ifBlank { "（空）" }
+                com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle(p).setMessage(body)
+                    .setPositiveButton("关闭", null)
+                    .setNegativeButton("删除此应用经验") { _, _ -> prefs.clearAppMemory(p) }.show()
+            }
+            .setNegativeButton("全部清除") { _, _ -> prefs.clearAppMemory() }
+            .setPositiveButton("关闭", null).show()
     }
 }

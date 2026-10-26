@@ -314,7 +314,11 @@ class A11yDevice(
     }
 
     private suspend fun screenFresh(): Screen {
-        TaskTiming.time("等待界面稳定") { s.awaitSettle(300, 1200) }
+        // Adaptive: apps that never go quiet (players, banners, animations) only get a short wait next time.
+        val pkgNow = s.lastPackage
+        val maxWait = SettleBudget.maxMs(pkgNow)
+        val quiet = TaskTiming.time("等待界面稳定") { s.awaitSettle(250, maxWait) }
+        SettleBudget.record(pkgNow, quiet)
         val start = System.currentTimeMillis()
         var t = treeScreen()
         // Known-blind apps skip polling; others poll ≤0.9 s (a fresh launch rarely builds its tree later than that).
@@ -339,6 +343,13 @@ class A11yDevice(
     }
 
     // ---------- actions ----------
+
+    /** Per-app settle budget: 1200 ms until an app is seen animating twice in a row, then 450 ms. */
+    object SettleBudget {
+        private val busy = HashMap<String, Int>()
+        fun maxMs(pkg: String): Long = if ((busy[pkg] ?: 0) >= 2) 450L else 1200L
+        fun record(pkg: String, quiet: Boolean) { busy[pkg] = if (quiet) 0 else (busy[pkg] ?: 0) + 1 }
+    }
 
     /** Never let an injected tap land on our own emergency-stop button. */
     private fun avoidOverlay(x: Int, y: Int): Pair<Int, Int> {

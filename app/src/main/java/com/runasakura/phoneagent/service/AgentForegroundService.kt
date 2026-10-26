@@ -43,7 +43,7 @@ class AgentForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                requestStop()
+                requestStop(intent.getStringExtra(EXTRA_REASON) ?: "通知栏「停止」")
                 return START_NOT_STICKY
             }
             ACTION_PAUSE -> { togglePause(); return START_NOT_STICKY }
@@ -80,7 +80,6 @@ class AgentForegroundService : Service() {
             stopSelf()
             return
         }
-        log("提示：若任务中微信/QQ 被系统杀掉，请到设置→电池→应用启动管理，允许 Phone Agent「自启动/关联启动/后台活动」")
         // Cancel any previous loop (and its in-flight MNN call) before starting a new one
         job?.let {
             if (it.isActive) {
@@ -92,12 +91,12 @@ class AgentForegroundService : Service() {
         pendingConfirm = null
         overlay?.hide()
         overlay = null
-        starting.set(true)
+        starting.set(true); stopReason = null
         stopFlag.set(false)
         // Prefer the accessibility overlay (no SYSTEM_ALERT_WINDOW needed)
         val overlayCtx: android.content.Context = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() ?: this
         pauseFlag.set(false)
-        overlay = EmergencyStopOverlay(overlayCtx, { requestStop() }, { togglePause() }).also { it.show() }
+        overlay = EmergencyStopOverlay(overlayCtx, { requestStop("悬浮窗「急停」被点击") }, { togglePause() }).also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
         val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)
@@ -109,7 +108,7 @@ class AgentForegroundService : Service() {
         router.vision = com.runasakura.phoneagent.llm.CloudProviders.visionClientFor(prefs)
         if (prefs.visionLocal) {
             router.visionSkill = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.visionLocalModel.ifBlank { prefs.mnnModel }, maxTokens = 400)
-            log("看图技能：本机 MNN 视觉模型 ${prefs.visionLocalModel.ifBlank { prefs.mnnModel }}（需在 MNN Chat 里加载 VL 模型并开启 API）")
+            if (com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) log("看图技能：本机 MNN 视觉模型 ${prefs.visionLocalModel.ifBlank { prefs.mnnModel }}（需在 MNN Chat 里加载 VL 模型并开启 API）")
         }
         if (router.vision != null) log("视觉辅助：${prefs.visionModel}（截图${if (prefs.allowCloudScreenshot) "已允许" else "未允许，视觉不会使用"}）")
         val loop = AgentLoop(
@@ -143,7 +142,7 @@ class AgentForegroundService : Service() {
             } else try {
                 val live = local.probe()
                 val m = live ?: local.resolveModel()
-                log(if (live != null) "MNN 当前模型：$live" else "MNN 未启动（发消息/打开应用等确定性任务不需要；复杂任务的模型兜底会不可用）")
+                log(if (live != null) "MNN 当前模型：$live" else if (cloud != null) "本机 MNN 未连接：本次由云端模型 ${prefs.cloudModel} 负责" else "本机 MNN 未连接，且未配置云端模型：需要模型判断的步骤会失败")
                 com.runasakura.phoneagent.util.Diagnostics.model = "$brain | MNN=$m"
                 if (m.contains("reason", true) || m.contains("think", true) || m.contains("distill", true)) {
                     log("提示：推理(Reasoning)模型会输出长思考，建议换 Qwen3 1.7B/4B 或 Qwen2.5 Instruct（MNN）")
@@ -155,7 +154,7 @@ class AgentForegroundService : Service() {
                 kotlinx.coroutines.withTimeoutOrNull(TASK_TIMEOUT_MS) { loop.run(goal) }
                     ?: AgentLoop.Result(false, 0, "任务超时（${TASK_TIMEOUT_MS / 60000} 分钟），已停止")
             } catch (e: kotlinx.coroutines.CancellationException) {
-                AgentLoop.Result(false, 0, "已取消")
+                AgentLoop.Result(false, 0, "已停止（${stopReason ?: "任务被取消"}）")
             } catch (e: Throwable) {
                 Log.e(TAG, "loop error", e)
                 AgentLoop.Result(false, 0, if (e is OutOfMemoryError) "内存不足，已停止" else e.message ?: e.toString())
@@ -232,7 +231,11 @@ class AgentForegroundService : Service() {
             }
         }
 
-    fun requestStop() {
+    @Volatile private var stopReason: String? = null
+
+    fun requestStop(reason: String = "用户停止") {
+        stopReason = reason
+        log("停止原因：$reason")
         stopFlag.set(true)
         starting.set(false)
         job?.cancel() // cancels in-flight OkHttp call via coroutine cancellation
@@ -293,6 +296,7 @@ class AgentForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        if (job?.isActive == true) { stopReason = stopReason ?: "服务被系统结束"; log("停止原因：$stopReason") }
         running = false
         stopFlag.set(true)
         job?.cancel()
@@ -309,6 +313,7 @@ class AgentForegroundService : Service() {
         const val NOTIF_ID = 42
         const val ACTION_START = "com.runasakura.phoneagent.START"
         const val ACTION_STOP = "com.runasakura.phoneagent.STOP"
+        const val EXTRA_REASON = "stop_reason"
         const val ACTION_PAUSE = "com.runasakura.phoneagent.PAUSE"
         const val EXTRA_CONTEXT = "context"
         const val ACTION_STATUS = "com.runasakura.phoneagent.STATUS"
@@ -330,8 +335,8 @@ class AgentForegroundService : Service() {
             context.startForegroundService(i)
         }
 
-        fun stop(context: Context) {
-            val i = Intent(context, AgentForegroundService::class.java).setAction(ACTION_STOP)
+        fun stop(context: Context, reason: String = "App 内「停止」按钮") {
+            val i = Intent(context, AgentForegroundService::class.java).setAction(ACTION_STOP).putExtra(EXTRA_REASON, reason)
             context.startService(i)
         }
 

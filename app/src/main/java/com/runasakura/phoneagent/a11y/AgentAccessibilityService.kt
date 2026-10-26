@@ -36,7 +36,8 @@ import kotlin.math.min
 class AgentAccessibilityService : AccessibilityService() {
 
     @Volatile
-    private var lastPackage: String = ""
+    var lastPackage: String = ""
+        private set
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -170,12 +171,14 @@ class AgentAccessibilityService : AccessibilityService() {
     fun isReady(): Boolean = true
 
     /** Wait until no accessibility events for [quietMs] (max [maxMs]). */
-    suspend fun awaitSettle(quietMs: Long = 400, maxMs: Long = 1500) {
+    /** Returns true when the UI went quiet, false when it was still animating at [maxMs]. */
+    suspend fun awaitSettle(quietMs: Long = 400, maxMs: Long = 1500): Boolean {
         val start = System.currentTimeMillis()
         while (System.currentTimeMillis() - start < maxMs) {
-            if (System.currentTimeMillis() - lastEventAt >= quietMs) return
+            if (System.currentTimeMillis() - lastEventAt >= quietMs) return true
             kotlinx.coroutines.delay(50)
         }
+        return false
     }
 
     /** Clear per-task caches so a new task never reuses stale nodes/ids/packages. */
@@ -457,9 +460,12 @@ class AgentAccessibilityService : AccessibilityService() {
             ?: list?.firstOrNull()
     }
 
-    fun tap(x: Int, y: Int): Boolean = gestureClick(x, y, 50)
+    // Every injected gesture avoids our own floating stop button (a tap there used to cancel the task).
+    fun tap(x: Int, y: Int): Boolean { val (ax, ay) = com.runasakura.phoneagent.overlay.OverlayAvoid.point(x, y, overlayRect()); return gestureClick(ax, ay, 50) }
 
-    fun longPress(x: Int, y: Int): Boolean = gestureClick(x, y, 600)
+    fun longPress(x: Int, y: Int): Boolean { val (ax, ay) = com.runasakura.phoneagent.overlay.OverlayAvoid.point(x, y, overlayRect()); return gestureClick(ax, ay, 600) }
+
+    private fun overlayRect(): IntArray? = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.bounds?.let { intArrayOf(it.left, it.top, it.right, it.bottom) }
 
     fun doubleTap(x: Int, y: Int): Boolean {
         if (!gestureClick(x, y, 40)) return false

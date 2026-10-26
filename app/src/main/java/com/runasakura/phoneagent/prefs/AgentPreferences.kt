@@ -94,6 +94,9 @@ class AgentPreferences(context: Context) {
     /** Per-app learned memory (see AppMemory); plain UI facts only. */
     fun appMemory(pkg: String): String? = sp.getString("appmem_$pkg", null)
     fun setAppMemory(pkg: String, v: String) = sp.edit().putString("appmem_$pkg", v.take(4000)).apply()
+    fun allAppMemory(): Map<String, String> = sp.all.filterKeys { it.startsWith("appmem_") }
+        .mapKeys { it.key.removePrefix("appmem_") }.mapValues { it.value?.toString().orEmpty() }
+    fun clearAppMemory(pkg: String) = sp.edit().remove("appmem_$pkg").apply()
     fun clearAppMemory() { val e = sp.edit(); sp.all.keys.filter { it.startsWith("appmem_") }.forEach { e.remove(it) }; e.apply() }
 
     /** DeepSeek thinking mode for agent steps (user choice; default off = faster). */

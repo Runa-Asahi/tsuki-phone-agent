@@ -34,7 +34,7 @@ class MainActivity : AppCompatActivity() {
                 if (!on) {
                     UiLog.add("⚠ 无障碍服务已断开（常见于刚更新 APK）。请到系统设置重新打开本服务。")
                     Toast.makeText(this@MainActivity, "无障碍服务已断开，请重新开启", Toast.LENGTH_LONG).show()
-                    AgentForegroundService.stop(this@MainActivity)
+                    AgentForegroundService.stop(this@MainActivity, "无障碍服务断开")
                 }
             }
         }
