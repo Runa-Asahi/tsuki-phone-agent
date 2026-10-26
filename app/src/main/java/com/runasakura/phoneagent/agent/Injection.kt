@@ -28,13 +28,26 @@ object Injection {
     private fun key(s: String) = Text.norm(s).replace(Regex("[\\s，。,.!！?？:：\"“”'‘’「」]"), "")
 
     /** A type action is allowed only when its text comes from the user's goal. */
-    fun typeAllowed(text: String, goal: String): Boolean {
+    fun typeAllowed(text: String, goal: String, seen: String = ""): Boolean {
         val t = key(text)
         if (t.isEmpty()) return true
         if (key(goal).contains(t)) return true
+        // Information the task itself gathered (read on an earlier screen, e.g. a value to carry into another app):
+        // every number/word of the text was seen in the goal or on this task's screens, and it carries no injection.
+        if (seen.isNotEmpty() && detect(text) == null && fromSources(t, key(goal) + "\u0000" + key(seen))) return true
         // Goals that ask the agent to WRITE something (总结/记录/写/笔记/备忘…) legitimately type model-composed text,
         // as long as that text itself carries no injection markers. Messages to people still go through ConfirmPolicy.
         return composeGoal(goal) && detect(text) == null
+    }
+
+    /** All digit runs and latin words of [t] occur in [src], and ≥90% of its CJK characters do. Pure. */
+    fun fromSources(t0: String, src0: String): Boolean {
+        val t = t0.lowercase(); val src = src0.lowercase()
+        val tokens = Regex("[0-9][0-9.:%°/-]*|[a-z]+").findAll(t).map { it.value }.toList()
+        if (tokens.any { !src.contains(it) }) return false
+        val cjk = t.filter { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN }
+        if (cjk.isEmpty()) return tokens.isNotEmpty()
+        return cjk.count { src.indexOf(it) >= 0 } >= cjk.length * 0.9
     }
 
     private val COMPOSE = Regex("总结|记录|记下|写(一|个|篇|下|入|进|到|成|点)?|笔记|备忘|草稿|起草|编写|整理|摘要|翻译|润色|日记|计划|清单")

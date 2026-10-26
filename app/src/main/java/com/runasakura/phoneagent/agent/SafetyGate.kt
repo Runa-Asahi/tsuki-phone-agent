@@ -58,6 +58,9 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
         "com.chinamworld.bocmbci"
     )
 
+    private val codeGoal = Regex("验证码|动态码|校验码|短信码|\\bcode\\b|\\botp\\b", RegexOption.IGNORE_CASE)
+    fun goalAboutCode(goal: String) = codeGoal.containsMatchIn(goal)
+
     fun check(action: AgentAction, snapshot: UiSnapshot?, userGoal: String): SafetyResult {
         val pkg = snapshot?.packageName.orEmpty()
         val blocked = (prefs.sensitivePackages + hardBlock)
@@ -67,7 +70,9 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
         }
 
         val tree = snapshot?.compressedText.orEmpty()
-        if (otpKeywords.any { tree.contains(it, ignoreCase = true) }) {
+        // Verification-code screens stop automation unless the user's own goal is about entering/using that code
+        // (e.g. "把验证码填到 X") — then the code is the user's data and the task may proceed.
+        if (otpKeywords.any { tree.contains(it, ignoreCase = true) } && !goalAboutCode(userGoal)) {
             return SafetyResult(SafetyDecision.BLOCK_HUMAN, "检测到验证码/登录页，停止自动点击")
         }
 

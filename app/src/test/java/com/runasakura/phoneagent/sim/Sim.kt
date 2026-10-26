@@ -65,7 +65,16 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
             e.x, e.y, tap = source == "tree" && (e.onTap != null || e.edit), edit = source == "tree" && e.edit, scroll = false, ref = e, bw = e.w, bh = e.h)
     }
 
+    /** Long press: runs a per-label "long:" handler when the screen defines one (context menus), else a tap. */
+    fun longAt(x: Int, y: Int): Boolean {
+        val e = current().els(this).firstOrNull { kotlin.math.abs(it.x - x) <= it.w / 2 && kotlin.math.abs(it.y - y) <= it.h / 2 }
+        val h = e?.let { flags["long:${it.label}"] as? (SimWorld.() -> Unit) } ?: return tapAt(x, y)
+        log += "long:${e.label}"; h(this); return true
+    }
+
     fun tapAt(x: Int, y: Int): Boolean {
+        // An open keyboard covers the bottom of the screen: taps there hit the keyboard, not the app.
+        if (flags["imeCovers"] == true && focused != null && y > h - 900) { log += "tap:keyboard"; return true }
         val e = current().els(this).firstOrNull { kotlin.math.abs(it.x - x) <= it.w / 2 && kotlin.math.abs(it.y - y) <= it.h / 2 } ?: return true
         log += "tap:${e.label}"
         if (flags["fail:${e.label}"] == true) return false
@@ -93,7 +102,7 @@ class SimPhone(val world: SimWorld) : Phone {
     override fun foregroundPackage() = if (world.systemPanel != null) "com.android.systemui" else world.fg
     override fun dumpUiTree(): UiSnapshot = UiSnapshot(foregroundPackage(), screenWidth = world.w, screenHeight = world.h, tree = null,
         compressedText = world.items().joinToString("\n") { it.label }, nodeCount = world.items().size)
-    override fun screenshotJpegBase64(maxSide: Int, marks: List<ScreenItem>?, screenW: Int, screenH: Int): String? = null
+    override fun screenshotJpegBase64(maxSide: Int, marks: List<ScreenItem>?, screenW: Int, screenH: Int): String? = if (world.flags["shots"] == true) "AAAA" else null
     override fun resolveApp(name: String) = world.apps.firstOrNull { it.label == name || it.label.contains(name) || name.contains(it.label) }
         ?.let { AppResolver.AppMatch(it.label, it.pkg, 90) }
     override fun launchApp(pkg: String): Boolean { world.launch(pkg); return world.fg == pkg }
@@ -104,7 +113,7 @@ class SimPhone(val world: SimWorld) : Phone {
     override fun isSettingsForeground(pkg: String) = false
     override fun setAlarm(hour: Int, minute: Int, label: String) = false
     override fun tap(x: Int, y: Int) = world.tapAt(x, y)
-    override fun longPress(x: Int, y: Int) = world.tapAt(x, y)
+    override fun longPress(x: Int, y: Int) = world.longAt(x, y)
     override fun doubleTap(x: Int, y: Int) = world.tapAt(x, y)
     override fun swipe(x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Long): Boolean {
         world.log += "swipe:${if (y2 < y1) "down" else "up"}"; world.flags["scroll"] = ((world.flags["scroll"] as? Int) ?: 0) + if (y2 < y1) 1 else -1; return true
@@ -125,7 +134,10 @@ class SimPhone(val world: SimWorld) : Phone {
         1 -> back(); 2 -> home()
         else -> false
     }
-    override fun openUri(uri: String, pkg: String?) = false
+    override fun openUri(uri: String, pkg: String?): Boolean {
+        val b = world.flags["browserPkg"] as? String ?: return false
+        world.flags["url"] = uri; world.launch(b); return world.fg == b
+    }
     override fun fireIntent(action: String, data: String?) = false
     override fun setClipboard(text: String): Boolean { world.clipboard = text; return true }
     override fun readClipboard(): String? = null   // like Android 10+ for a background a11y service
@@ -141,7 +153,7 @@ class SimPhone(val world: SimWorld) : Phone {
         }
         override suspend fun tap(item: ScreenItem) = world.tapAt(item.cx, item.cy)
         override suspend fun tapXY(x: Int, y: Int) = world.tapAt(x, y)
-        override suspend fun longPress(item: ScreenItem) = world.tapAt(item.cx, item.cy)
+        override suspend fun longPress(item: ScreenItem) = world.longAt(item.cx, item.cy)
         override suspend fun type(text: String, hintX: Int?, hintY: Int?, attempt: Int): Boolean {
         if (hintX != null && hintY != null) world.tapAt(hintX, hintY)
         return this@SimPhone.typeText(text, null)

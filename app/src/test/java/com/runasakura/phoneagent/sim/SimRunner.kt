@@ -53,6 +53,8 @@ class Scenario(
     val lesson: String = """{"route":"","facts":[]}""",
     /** Pre-existing learned memory (package → encoded AppMemory). */
     val memory: Map<String, String> = emptyMap(),
+    /** User allowed screenshots to the (vision-capable) cloud model; the sim returns a dummy image. */
+    val shots: Boolean = false,
 )
 
 class SimRun(val result: AgentLoop.Result, val logs: List<String>, val world: SimWorld, val stepPrompts: List<JSONArray>,
@@ -105,7 +107,7 @@ object SimRunner {
         val local = object : LlmClient { override val name = "mnn_local"
             override suspend fun chat(messages: List<ChatMessage>, temperature: Double) = LlmResponse("", name, 0, "unused") }
         val router = LlmRouter({ AgentPreferences.ROUTE_CLOUD_ONLY }, local, cloud).also { it.log = { m -> logs += m } }
-        val settings = MemorySettings(maxSteps = sc.maxSteps, modelCheckpoint = sc.modelCheckpoint).also { st -> sc.memory.forEach { (k, v) -> st.setAppMemory(k, v) } }
+        val settings = MemorySettings(maxSteps = sc.maxSteps, modelCheckpoint = sc.modelCheckpoint, allowCloudScreenshot = sc.shots).also { st -> sc.memory.forEach { (k, v) -> st.setAppMemory(k, v) } }
         val loop = AgentLoop(settings, router, SafetyGate(settings), onLog = { logs += it },
             onConfirm = { confirms += it; sc.confirm }, isStopped = { world.flags["stop"] == true }, phoneProvider = { phone }, pace = 0.0)
         val r = runBlocking { withTimeout(60_000) { loop.run(sc.goal) } }

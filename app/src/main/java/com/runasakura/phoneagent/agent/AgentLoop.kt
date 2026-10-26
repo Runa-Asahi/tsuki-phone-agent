@@ -324,6 +324,7 @@ class AgentLoop(
             lastScreen = sc
             a11y.lastItems = sc.items
             obsItems = sc.items
+            if (seenText.length < 20_000) sc.items.forEach { seenText.append(it.label).append('\n') }
             val snap = UiSnapshot(
                 packageName = sc.pkg, screenWidth = sc.w, screenHeight = sc.h, tree = null,
                 compressedText = buildDump(sc), nodeCount = sc.items.size,
@@ -348,7 +349,14 @@ class AgentLoop(
             if (steps.isLoadingNow) { onLog("页面加载中，额外等待"); pause(1500) }
             if (steps.stuck) return Result(false, step, "连续多次动作后界面无变化，已停止以免乱点")
             if (sc.isEmpty() && !AppResolver.isAgentOrBrain(sc.pkg)) {
-                return Result(false, step, "读不到界面（无障碍树与 OCR 均为空），为避免盲猜不调用模型")
+                // Custom-drawn views can have no tree AND defeat OCR. If the user's model can see screenshots (or a vision
+                // helper is configured), let it look instead of giving up; only a fully blind screen stops the task.
+                val canSee = (router.cloudReady && prefs.allowCloudScreenshot && com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)) ||
+                    router.visionSkill != null || router.visionReady
+                val probe = if (canSee) try { a11y.screenshotJpegBase64(320) } catch (_: Exception) { null } else null
+                if (probe == null) return Result(false, step, "读不到界面（无障碍树与 OCR 均为空），为避免盲猜不调用模型")
+                if (emptyLooks++ >= 6) return Result(false, step, "界面一直读不到文字，看图多次仍未完成，已停止")
+                onLog("界面没有可读文字：改为看截图（坐标按屏幕 ${sc.w}x${sc.h}）"); lookNext = true
             }
 
             // Goal already satisfied?
@@ -533,7 +541,7 @@ class AgentLoop(
 
             val ty = plan.action as? AgentAction.Type
             if (ty != null) {
-                if (!Injection.typeAllowed(ty.text, goal) && ty.text != copied) {
+                if (!Injection.typeAllowed(ty.text, goal, seenText.toString()) && ty.text != copied) {
                     injectionBlocks++
                     onLog("⚠ 疑似注入：拦截输入「${ty.text.take(40)}」——不在用户目标中")
                     if (injectionBlocks >= 2) return Result(false, step, "疑似注入：模型多次尝试输入用户目标之外的文字，已停止")
@@ -635,7 +643,7 @@ class AgentLoop(
                 else -> {
                     val before = a11y.foregroundPackage()
                     lastExecError = null; tapped = null
-                    val ok = execute(a11y, action, snap)
+                    val ok = execute(a11y, keyboardSafe(action, sc, dev, a11y), snap)
                     onlineAdapt(action, tapped ?: targetLabel(action, sc) ?: (action as? AgentAction.LongPress)?.let { lp ->
                         lp.nodeId?.let { id -> sc.items.firstOrNull { it.id == id }?.label } ?: if (lp.x != null && lp.y != null) LayoutHints.labelNear(sc, lp.x, lp.y, 60) else null }, ok)
                     val desc = ActionDesc.of(action, tapped) + if (ok) "" else " ✗执行失败：${lastExecError ?: "未知原因"}"
@@ -836,7 +844,27 @@ class AgentLoop(
     private var pendingObs: String? = null
     private var lastExec: Triple<AgentAction, String?, String>? = null
     private var invalidStreak = 0
+    /**
+     * A tap aimed at something the soft keyboard covers would hit the keyboard. Hide it first (back), re-read the
+     * screen and re-target the same label (layouts move when the IME closes). Generic: no app knowledge.
+     */
+    private suspend fun keyboardSafe(action: AgentAction, sc: com.runasakura.phoneagent.flow.Screen, dev: com.runasakura.phoneagent.flow.Device,
+                                     a11y: com.runasakura.phoneagent.a11y.Phone): AgentAction {
+        val ime = sc.imeTop ?: return action
+        val t = action as? AgentAction.Tap ?: return action
+        val item = t.nodeId?.let { id -> sc.items.firstOrNull { it.id == id } }
+        val y = item?.cy ?: t.y ?: return action
+        if (y < ime || item?.edit == true) return action
+        onLog("目标被软键盘遮挡：先收起键盘再点")
+        dev.back(); pause(500)
+        val s2 = dev.screen(); a11y.lastItems = s2.items; obsItems = s2.items
+        if (item == null) return action
+        val again = s2.items.firstOrNull { it.label == item.label } ?: return action
+        return t.copy(nodeId = again.id, x = null, y = null)
+    }
+
     private var lookNext = false
+    private var emptyLooks = 0
     private var shotThisStep = false
     private var lastNoEffect = false
     private var appLabel: String? = null
@@ -1210,6 +1238,8 @@ class AgentLoop(
     }
 
     private val hintedPkgs = HashSet<String>()
+    /** Text seen on this task's screens: data the model may carry into another field/app (see Injection.typeAllowed). */
+    private val seenText = StringBuilder()
     /** Effective steps of this run (the screen changed after them) — distilled into a skill on success. */
     private val effective = ArrayList<String>()
     private var skill: Skill? = null
