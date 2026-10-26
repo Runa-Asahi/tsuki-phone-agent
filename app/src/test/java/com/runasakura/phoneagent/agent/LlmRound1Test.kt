@@ -18,7 +18,7 @@ class LlmRound1Test {
 
     @Test fun lineHasSizeAndRegionButNoKeywordRoles() {
         val line = ObsFormat.line(it("e2", "好的!", 1400, 1000, 300, 90), 2800, 1264)
-        assertTrue(line, line.contains("300x90") && line.contains("下中") && !line.contains("【"))
+        assertTrue(line, line.contains("300x90") && line.contains("(1400,1000)") && !line.contains("下中") && !line.contains("【"))
     }
 
     @Test fun guardRefusesRepeatedNoOpAcrossOcrVariants() {

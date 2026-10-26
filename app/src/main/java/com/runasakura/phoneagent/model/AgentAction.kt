@@ -36,6 +36,8 @@ sealed class AgentAction {
     data class Fail(val reason: String) : AgentAction()
     data class AskConfirm(val reason: String, val pendingAction: AgentAction? = null) : AgentAction()
     data class HumanTakeover(val reason: String) : AgentAction()
+    /** The goal is ambiguous / missing information only the user has: stop and ask instead of guessing. */
+    data class AskUser(val question: String) : AgentAction()
 }
 
 data class PlanStep(

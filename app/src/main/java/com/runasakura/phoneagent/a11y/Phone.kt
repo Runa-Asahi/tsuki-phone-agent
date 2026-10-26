@@ -47,6 +47,8 @@ interface Phone {
     fun readClipboard(): String?
     fun imeEnter(): Boolean
     fun volume(name: String): Boolean
+    /** Is [pkg] the home screen / launcher (a crash or exit lands there; it is never part of a task)? */
+    fun isHome(pkg: String): Boolean = false
 }
 
 /** The phone through the live AccessibilityService. */
@@ -78,6 +80,10 @@ class ServicePhone(private val s: AgentAccessibilityService) : Phone {
     override fun tapText(text: String) = s.findByText(text)?.let { s.tapNode(it) } ?: false
     override fun typeText(text: String, nodeId: String?) = s.typeText(text, nodeId?.let { s.findNodeById(it) })
     override fun clearText(nodeId: String?) = s.clearText(nodeId?.let { s.findNodeById(it) })
+    override fun isHome(pkg: String): Boolean = pkg.isNotBlank() && (runCatching {
+        s.packageManager.resolveActivity(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME), 0)
+            ?.activityInfo?.packageName == pkg
+    }.getOrDefault(false) || pkg.contains("launcher", ignoreCase = true))
     override fun back() = s.back()
     override fun home() = s.home()
     override fun recents() = s.recents()

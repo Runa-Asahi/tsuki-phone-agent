@@ -146,6 +146,7 @@ object ActionParser {
             "ask_confirm" -> AgentAction.AskConfirm(
                 actionObj.optString("reason").ifBlank { "需要确认" }
             )
+            "ask_user", "ask", "clarify", "question" -> AgentAction.AskUser(actionObj.optString("question").ifBlank { actionObj.optString("text") }.ifBlank { actionObj.optString("reason") }.trim())
             "human_takeover" -> AgentAction.HumanTakeover(
                 actionObj.optString("reason").ifBlank { "需要人工接管" }
             )

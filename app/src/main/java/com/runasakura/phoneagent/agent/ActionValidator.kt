@@ -53,6 +53,7 @@ object ActionValidator {
             else -> null
         }
         is AgentAction.Intent -> if (!Regex("[A-Za-z0-9_.]+").matches(a.action) || !a.action.contains('.')) "intent 需要完整的 action（如 android.settings.WIFI_SETTINGS）" else null
+        is AgentAction.AskUser -> if (a.question.isBlank()) "ask_user 需要 question（要问用户的问题）" else null
         is AgentAction.Copy -> if (items.none { it.id == a.nodeId }) "copy 的 node_id ${a.nodeId} 不存在" else null
         is AgentAction.Paste -> if (!a.nodeId.isNullOrBlank() && items.none { it.id == a.nodeId }) "node_id ${a.nodeId} 不存在" else null
         is AgentAction.SetClipboard -> if (a.text.isBlank()) "set_clipboard 需要 text" else null

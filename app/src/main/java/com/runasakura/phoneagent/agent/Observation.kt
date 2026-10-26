@@ -23,7 +23,7 @@ object ObsFormat {
         append('[').append(it.id).append("] ").append(it.label.ifBlank { "(输入框)" })
         append(" (").append(it.cx).append(',').append(it.cy).append(')')
         if (it.bw > 0) append(" ").append(it.bw).append('x').append(it.bh)
-        append(' ').append(region(it.cx, it.cy, w, h))
+        // (No 3x3 region word: the centre coordinate already says where it is — 2–3 tokens saved per element.)
         if (it.edit) append(" edit")
     }
 

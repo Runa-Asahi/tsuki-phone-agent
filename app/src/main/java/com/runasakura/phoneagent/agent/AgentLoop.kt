@@ -46,12 +46,14 @@ class AgentLoop(
     data class Result(
         val success: Boolean,
         val steps: Int,
-        val summary: String
+        val summary: String,
+        /** The model asked the user a question ([summary]); the chat shows it as a question and the reply continues. */
+        val needsUser: Boolean = false
     )
 
     /** Runs the task, then lets the model turn the trajectory into reusable per-app experience. */
     suspend fun run(goalIn: String): Result {
-        val r = runTask(goalIn)
+        val r = try { runTask(goalIn) } catch (_: com.runasakura.phoneagent.flow.StopRequested) { onLog("■ 已急停"); Result(false, 0, "已急停") }
         // Off the critical path: the result is shown immediately, learning finishes in the background.
         if (!isStopped()) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { learnFrom(goalIn, r) } }
         return r
@@ -153,7 +155,7 @@ class AgentLoop(
         }
 
         // ---- Deterministic paths (never call the model here) ----
-        val dev = a11y.device(onLog)
+        val dev = com.runasakura.phoneagent.flow.StopGuardDevice(a11y.device(onLog), isStopped)
         // ---- Model-first goal understanding (rules are only the fallback) ----
         val intent = if (toggleNote != null) null else {
             onLog("正在理解任务…")
@@ -570,7 +572,8 @@ class AgentLoop(
                     }
                     return Result(false, step, action.reason)
                 }
-                is AgentAction.HumanTakeover -> return Result(false, step, action.reason)
+                is AgentAction.HumanTakeover -> return Result(false, step, action.reason, needsUser = true)
+                is AgentAction.AskUser -> { onLog("需要你补充信息：${action.question}"); return Result(false, step, action.question, needsUser = true) }
                 is AgentAction.AskConfirm -> {
                     // Only real send/pay/delete confirms are shown. Null-pending / vague
                     // "确认节点" asks from small models are ignored (PPG-AN00 PDD 22:14 loop).
@@ -626,6 +629,15 @@ class AgentLoop(
                     }
                     val after = a11y.dumpUiTree()
                     onLog("执行后前台=${after.packageName}")
+                    // A tap that hands off to ANOTHER app (share sheet target, "open in app"…) makes that app part of
+                    // the task instead of being dragged back. The model judges whether it was intended (ad redirect → back).
+                    val fgNow = after.packageName
+                    if (ok && (action is AgentAction.Tap || action is AgentAction.LongPress || action is AgentAction.DoubleTap || action is AgentAction.Key) &&
+                        fgNow.isNotBlank() && fgNow != before && fgNow !in taskApps && !a11y.isHome(fgNow) && !AppResolver.isAgentOrBrain(fgNow) && fgNow != "com.android.systemui") {
+                        taskApps += fgNow
+                        onLog("点击后进入了另一个应用 $fgNow，作为本任务的一部分继续")
+                        toolNote = listOfNotNull(toolNote, "刚才的点击打开了另一个应用（$fgNow）。如果这是你要的（分享/跳转目标）就继续；如果是广告或误跳转，用 back 返回。").joinToString("\n")
+                    }
                     if (goalReachedSettings(goal, after) && a11y.isSettingsForeground(after.packageName)) {
                         return Result(true, step, "已打开系统设置 (${after.packageName})")
                     }
@@ -851,8 +863,8 @@ class AgentLoop(
             "上一步：${le.third}$exp → 界面没有实质变化${if (exact) "" else "（只是 OCR 抖动）"}= 这个动作无效，不要再做"
         } else buildString {
             append("上一步：").append(le.third).append(exp).append(" → 界面有变化")
-            if (d.added.isNotEmpty()) append(" 新出现:").append(d.added.take(6).joinToString("、"))
-            if (d.removed.isNotEmpty()) append(" 消失:").append(d.removed.take(6).joinToString("、"))
+            if (d.added.isNotEmpty()) append(" 新出现:").append(d.added.distinct().take(6).joinToString("、"))
+            if (d.removed.isNotEmpty()) append(" 消失:").append(d.removed.distinct().take(6).joinToString("、"))
         }
     }
 
@@ -967,8 +979,12 @@ class AgentLoop(
             appMem?.hint(goal)?.let { appendLine("# 以往经验\n$it") }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
             appendLine("# 本步 第${step}步 屏幕${snap.screenWidth}x${snap.screenHeight} 包${snap.packageName}")
-            stepsRef?.progress()?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
-            lastScreenKind?.let { k -> appendLine("上一步你判断：界面=$k；目标一致=${lastGoalMatch ?: "未判断"}") }
+            // The append-only transcript already carries the model's own previous answers (actions, screen kind,
+            // goal_match); repeating them here every step only cost tokens. Only after a reset (empty transcript).
+            if (transcript.size() == 0) {
+                stepsRef?.progress()?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
+                lastScreenKind?.let { k -> appendLine("上一步你判断：界面=$k；目标一致=${lastGoalMatch ?: "未判断"}") }
+            }
             diffNote?.let { appendLine(it) }
             guard.summary()?.let { appendLine(it) }
             stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。换一种方式。") }

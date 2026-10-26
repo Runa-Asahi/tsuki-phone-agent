@@ -26,6 +26,7 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
     )
 
     companion object {
+        private val ALARM_COMMIT = listOf("保存", "完成", "确定", "确认", "好", "✓", "√", "save", "done", "ok")
         private val CALL_KEYS = listOf("视频通话", "语音通话", "音视频通话", "拨打", "呼叫", "拨号", "打电话")
         /** Model-fallback taps on call buttons always need confirmation (OCR-fuzzy, e.g. 「初麵通话」). */
         fun isCallLike(label: String): Boolean {
@@ -97,6 +98,10 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
                 if (isCallLike(resolved) || isCallLike(label)) {
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将发起语音/视频通话或拨号，确认后才会拨出")
                 }
+                // ConfirmPolicy (alarm): saving an alarm through an app's UI is confirmed like the system-intent path.
+                if (prefs.confirmAlarm && userGoal.contains("闹钟") && ALARM_COMMIT.any { resolved.trim().equals(it, true) || label.trim().equals(it, true) }) {
+                    return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将保存闹钟，确认后才会创建")
+                }
                 if (payButtonLabels.any { resolved.equals(it, true) || label.equals(it, true) }) {
                     return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "即将点击支付/转账类按钮，确认后才会执行")
                 }
@@ -129,6 +134,6 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
         return triggers.any { context.contains(it, ignoreCase = true) }
     }
 
-    fun goalNeedsConfirm(goal: String): Boolean =
-        confirmKeywords.any { goal.contains(it, ignoreCase = true) }
+    /** 「打开通讯录」 contains 「开通」: drop the verb 打开 first so ordinary goals don't get a false sensitivity warning. */
+    fun goalNeedsConfirm(goal: String): Boolean = goal.replace("打开", " ").let { g -> confirmKeywords.any { g.contains(it, ignoreCase = true) } }
 }

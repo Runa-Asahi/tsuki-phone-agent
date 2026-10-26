@@ -130,3 +130,23 @@ object Text {
 
     fun eq(a: String, b: String) = norm(a) == norm(b)
 }
+
+/** Thrown by [StopGuardDevice] when the user pressed stop: unwinds deterministic multi-gesture paths at once. */
+class StopRequested : RuntimeException("已急停")
+
+/**
+ * Checks the stop flag before every gesture/observation, so long deterministic paths (scroll-to-find, search
+ * prefix, recovery) stop within one gesture instead of finishing their loops after the user pressed stop.
+ */
+class StopGuardDevice(private val d: Device, private val stopped: () -> Boolean) : Device by d {
+    private fun check() { if (stopped()) throw StopRequested() }
+    override suspend fun screen(): Screen { check(); return d.screen() }
+    override suspend fun refineScreen(): Screen { check(); return d.refineScreen() }
+    override suspend fun tap(item: ScreenItem): Boolean { check(); return d.tap(item) }
+    override suspend fun tapXY(x: Int, y: Int): Boolean { check(); return d.tapXY(x, y) }
+    override suspend fun longPress(item: ScreenItem): Boolean { check(); return d.longPress(item) }
+    override suspend fun type(text: String, hintX: Int?, hintY: Int?, attempt: Int): Boolean { check(); return d.type(text, hintX, hintY, attempt) }
+    override suspend fun scroll(forward: Boolean) { check(); d.scroll(forward) }
+    override suspend fun back() { check(); d.back() }
+    override suspend fun bringToFront(pkg: String, label: String, force: Boolean): Boolean { check(); return d.bringToFront(pkg, label, force) }
+}

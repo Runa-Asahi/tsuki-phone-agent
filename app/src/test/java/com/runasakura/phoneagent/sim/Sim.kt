@@ -35,6 +35,7 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
     val flags = HashMap<String, Any>()
     var reads = 0                                    // observations so far (timers tick on reads)
     var systemPanel: SimScreen? = null               // notification shade / quick settings over the app
+    var source = "tree"                              // "ocr" = webview/game with no accessibility tree
 
     fun app(pkg: String) = apps.first { it.pkg == pkg }
     fun screenName(): String = systemPanel?.name ?: stacks[fg]?.lastOrNull() ?: "launcher"
@@ -52,6 +53,7 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
     }
     fun crash() { stacks[fg]?.clear(); log += "crash:$fg"; fg = launcher }
     fun back() {
+        if (focused != null && flags["imeOpen"] != false) { focused = null; log += "back:ime"; return }   // like Android: back hides the keyboard first
         if (systemPanel != null) { systemPanel = null; return }
         val st = stacks[fg] ?: return
         if (st.size > 1) { st.removeLast(); log += "back:${st.last()}" } else { fg = launcher; log += "back:launcher" }
@@ -60,7 +62,7 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
 
     fun items(): List<ScreenItem> = current().els(this).mapIndexed { i, e ->
         ScreenItem("e${i + 1}", if (e.edit) fields[e.label]?.takeIf { it.isNotBlank() } ?: e.label else e.label,
-            e.x, e.y, tap = e.onTap != null || e.edit, edit = e.edit, scroll = false, ref = e, bw = e.w, bh = e.h)
+            e.x, e.y, tap = source == "tree" && (e.onTap != null || e.edit), edit = source == "tree" && e.edit, scroll = false, ref = e, bw = e.w, bh = e.h)
     }
 
     fun tapAt(x: Int, y: Int): Boolean {
@@ -125,12 +127,13 @@ class SimPhone(val world: SimWorld) : Phone {
     override fun readClipboard(): String? = null   // like Android 10+ for a background a11y service
     override fun imeEnter(): Boolean { val f = world.focused ?: return false; world.log += "enter:$f"; (world.flags["enter:$f"] as? (SimWorld.() -> Unit))?.invoke(world); return true }
     override fun volume(name: String) = true
+    override fun isHome(pkg: String) = pkg == world.launcher
 
     val dev = object : Device {
         override suspend fun screen(): Screen {
         world.reads++; (world.flags["onRead"] as? (SimWorld.() -> Unit))?.invoke(world)
         val items = world.items(); this@SimPhone.lastItems = items
-        return Screen(this@SimPhone.foregroundPackage(), world.w, world.h, items, "tree", if (world.focused != null) world.h - 900 else null, world.focused != null)
+        return Screen(this@SimPhone.foregroundPackage(), world.w, world.h, items, world.source, if (world.focused != null) world.h - 900 else null, world.focused != null)
         }
         override suspend fun tap(item: ScreenItem) = world.tapAt(item.cx, item.cy)
         override suspend fun tapXY(x: Int, y: Int) = world.tapAt(x, y)

@@ -40,6 +40,10 @@ object GoalSplitter {
     private val TYPE_IN = Regex("^(?:然后|接着|再|并)?在(.{1,12}?)(?:里|中|内|上)?(?:输入|填写|填入)[：:\\s]*(.+)$", RegexOption.DOT_MATCHES_ALL)
     private val TYPE = Regex("^(?:然后|接着|再|并)?(?:输入|填写|打字)[：:\\s]*(.+)$", RegexOption.DOT_MATCHES_ALL)
 
+    private val TYPE_TAIL = Regex("[，,；;]\\s*(?:然后|接着|再)(?=(?:$VERBS|提交|保存|确定|完成))")
+    /** 「内容：X」「密码：X」 → X (a short field label before a colon is not part of the text). */
+    private val FIELD_LABEL = Regex("^[^：:，,\\s]{1,6}[：:]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
+
     fun split(goal: String): List<Subgoal> {
         val g = goal.trim()
         val segs = mutableListOf<Pair<Int, String>>() // start offset, text
@@ -60,8 +64,16 @@ object GoalSplitter {
             val m = SEND.find(seg) ?: TYPE.find(seg)
             if (m != null) {
                 val bodyStart = start + lead + m.groups[1]!!.range.first
-                val text = g.substring(bodyStart).trim().trimEnd('。')
-                out += Subgoal.Send(text, m.value.let { SEND.matches(seg) })
+                var text = g.substring(bodyStart).trim().trimEnd('。')
+                val send = SEND.matches(seg)
+                var rest: String? = null
+                if (!send) {
+                    // Form text (not a chat message): 「填写内容：X，然后提交」 → type X, then the remaining step.
+                    TYPE_TAIL.find(text)?.let { t -> rest = text.substring(t.range.first).trimStart('，', ',', '；', ';', ' '); text = text.substring(0, t.range.first).trim() }
+                    FIELD_LABEL.matchEntire(text)?.let { text = it.groupValues[1].trim() }
+                }
+                out += Subgoal.Send(text, send)
+                rest?.takeIf { it.isNotBlank() }?.let { out += classify(it) }
                 break
             }
             out += classify(seg)

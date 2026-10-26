@@ -41,4 +41,31 @@ class SimulatorTest {
         assertTrue(show(r), r.confirms.any { it.contains("8848") })
         assertFalse(show(r), r.logs.any { it.contains("重新启动 ${Scenarios.MEMO}") || it.contains("不是目标应用，重新启动") })
     }
+
+    // ---- batch 2 ----
+    private fun fails(sc: Scenario): SimRun { val r = SimRunner.run(sc); assertFalse(show(r), r.result.success); return r }
+    @Test fun loginWallHandsOver() { val r = fails(Scenarios2.loginWall); assertTrue(show(r), r.result.summary.contains("登录")); assertFalse(r.world.log.any { it.startsWith("type:") }) }
+    @Test fun permissionDialog() { ok(Scenarios2.permission) }
+    @Test fun keyboardCoversButton() { val r = ok(Scenarios2.keyboardCover); assertTrue(show(r), r.world.log.contains("back:ime")) }
+    @Test fun bottomSheet() { ok(Scenarios2.bottomSheet) }
+    @Test fun webviewOcrOnly() { ok(Scenarios2.webviewOcr) }
+    @Test fun landscapeGame() { ok(Scenarios2.landscape) }
+    @Test fun settingsToggle() { ok(Scenarios2.settingsToggle) }
+    @Test fun notificationReplyConfirmed() { val r = ok(Scenarios2.notificationReply); assertTrue(show(r), r.confirms.any { it.contains("马上到") }) }
+    @Test fun alarmViaUiNeedsConfirm() { val r = ok(Scenarios2.alarmConfirm); assertTrue(show(r), r.confirms.isNotEmpty()) }
+    @Test fun alarmDeclinedNotSaved() { val r = fails(Scenarios2.alarmDeclined); assertNull(show(r), r.world.flags["alarm"]) }
+    @Test fun longChatListScroll() { ok(Scenarios2.longChatScroll) }
+    @Test fun emptySearchFailsCleanly() { val r = fails(Scenarios2.emptySearch); assertTrue(show(r), r.result.summary.contains("没有结果")); assertTrue(show(r), r.result.steps <= 6) }
+    @Test fun ambiguousGoalAsksUser() {
+        val r = fails(Scenarios2.ambiguous); assertTrue(show(r), r.result.needsUser); assertTrue(r.result.summary.contains("张三还是李四"))
+        assertNull(r.world.flags["sent"])
+    }
+    @Test fun networkFlapping() { ok(Scenarios2.flapping) }
+    @Test fun malformedOutputRecovers() { ok(Scenarios2.malformedThenOk) }
+    @Test fun malformedOutputStops() { val r = fails(Scenarios2.malformedAlways); assertTrue(show(r), r.result.steps <= 6) }
+    @Test fun userStopMidTask() { val r = fails(Scenarios2.userStop); assertTrue(show(r), r.result.summary.contains("急停")); assertTrue(show(r), r.world.reads <= 4) }
+    @Test fun crossAppShareSheet() {
+        val r = ok(Scenarios2.shareSheet); assertTrue(show(r), r.confirms.isNotEmpty())
+        assertFalse(show(r), r.logs.any { it.contains("不是目标应用，重新启动") })
+    }
 }

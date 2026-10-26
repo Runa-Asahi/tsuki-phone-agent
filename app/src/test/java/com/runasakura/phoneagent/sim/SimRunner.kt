@@ -44,6 +44,9 @@ class Scenario(
     val fault: (Int) -> Int? = { null },
     val maxSteps: Int = 20,
     val modelCheckpoint: Boolean = false,
+    val w: Int = 1080, val h: Int = 2400,
+    /** Fault for the n-th step request returning a 200 with this body instead of the policy (malformed output). */
+    val garbage: (Int) -> String? = { null },
 )
 
 class SimRun(val result: AgentLoop.Result, val logs: List<String>, val world: SimWorld, val stepPrompts: List<JSONArray>,
@@ -51,7 +54,7 @@ class SimRun(val result: AgentLoop.Result, val logs: List<String>, val world: Si
 
 object SimRunner {
     fun run(sc: Scenario): SimRun {
-        val world = SimWorld(sc.apps).also(sc.setup)
+        val world = SimWorld(sc.apps, sc.w, sc.h).also(sc.setup)
         val phone = SimPhone(world)
         val logs = ArrayList<String>(); val prompts = ArrayList<JSONArray>(); val confirms = ArrayList<String>()
         val calls = HashMap<String, Int>()
@@ -73,7 +76,7 @@ object SimRunner {
             calls[kind] = (calls[kind] ?: 0) + 1
             var code = 200
             val content = when (kind) {
-                "step" -> { val n = stepN++; val f = sc.fault(n); if (f != null) { code = f; "" } else { prompts += msgs; sc.policy(Obs(last), world) } }
+                "step" -> { val n = stepN++; val f = sc.fault(n); if (f != null) { code = f; "" } else { prompts += msgs; sc.garbage(n) ?: sc.policy(Obs(last), world) } }
                 "intent" -> sc.intent
                 "plan" -> """{"steps":["按目标操作"]}"""
                 "judge" -> if (sc.done(world)) """{"done":true,"reason":"屏幕显示已完成"}""" else """{"done":false,"reason":"还没完成","next":"继续"}"""
@@ -97,7 +100,7 @@ object SimRunner {
         val router = LlmRouter({ AgentPreferences.ROUTE_CLOUD_ONLY }, local, cloud).also { it.log = { m -> logs += m } }
         val settings = MemorySettings(maxSteps = sc.maxSteps, modelCheckpoint = sc.modelCheckpoint)
         val loop = AgentLoop(settings, router, SafetyGate(settings), onLog = { logs += it },
-            onConfirm = { confirms += it; sc.confirm }, phoneProvider = { phone }, pace = 0.0)
+            onConfirm = { confirms += it; sc.confirm }, isStopped = { world.flags["stop"] == true }, phoneProvider = { phone }, pace = 0.0)
         val r = runBlocking { withTimeout(60_000) { loop.run(sc.goal) } }
         return SimRun(r, logs, world, prompts, confirms, calls)
     }
