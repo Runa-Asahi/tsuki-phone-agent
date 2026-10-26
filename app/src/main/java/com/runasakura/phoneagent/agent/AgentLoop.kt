@@ -58,10 +58,13 @@ class AgentLoop(
         val traj = stepsRef?.progress().orEmpty()
         if (traj.isBlank() || modelSteps == 0) return
         val outcome = if (r.success) "成功" else "失败：${r.summary.take(80)}"
-        val lesson = router.lesson(goal, appLabel, traj, outcome, memory.all() + guard.deadLabels().map { "「$it」无效" }) ?: return
-        val base = runCatching { AppMemory.decode(prefs.appMemory(pkg)) }.getOrNull() ?: AppMemory(emptyList(), emptyList())
-        val m = if (r.success) base.merge(lesson.facts, goal, lesson.route ?: traj) else base.merge(lesson.facts, null, null)
+        val lesson = router.lesson(goal, appLabel, traj, outcome, memory.all() + guard.deadLabels().map { "「$it」无效" })
+        val base = runCatching { AppMemory.decode(prefs.appMemory(pkg)) }.getOrNull() ?: AppMemory.EMPTY
+        val facts = lesson?.facts.orEmpty()
+        val m = if (r.success) base.merge(facts, goal, lesson?.route ?: traj)
+            else (if (reusedPath) base.penalize(goal) else base).merge(facts, null, null)
         prefs.setAppMemory(pkg, m.encode())
+        if (lesson == null) { onLog(if (r.success) "经验沉淀：记录本次路线（未经模型整理）" else "失败：已降低复用路线的可信度"); return }
         onLog((if (r.success) "经验沉淀：" else "失败反思：") + (lesson.route?.let { "路线=$it；" } ?: "") + lesson.facts.joinToString("；"))
     }
 
@@ -340,7 +343,7 @@ class AgentLoop(
             if (brainShot != null) obsNote = listOfNotNull(obsNote, "已附当前截图（${SetOfMark.NOTE}）：以截图为准（OCR 可能有错字/漏掉无文字按钮）；tap 坐标按屏幕 ${sc.w}x${sc.h}。").joinToString("\n")
             // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
             if (cloudPlanText == null) appMem?.knownPath(goal)?.let { p ->
-                cloudPlanText = "参考步骤（以往成功路线）：$p"; onLog("复用以往成功路线，跳过规划")
+                cloudPlanText = "参考步骤（以往成功路线，已验证）：$p"; reusedPath = true; onLog("复用已验证的成功路线，跳过规划")
             }
             if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
                 cloudPlanText = router.cloudPlan(goal, snap.compressedText, appLabel, memory.text())?.let { st ->
@@ -561,6 +564,7 @@ class AgentLoop(
                     val desc = ActionDesc.of(action, tapped) + if (ok) "" else " ✗执行失败：${lastExecError ?: "未知原因"}"
                     steps.recordAction(desc, ok)
                     lastExec = Triple(action, tapped ?: targetLabel(action, sc), ActionDesc.of(action, tapped))
+                    repeatReminder.observe(action)?.let { r -> toolNote = listOfNotNull(toolNote, r).joinToString("\n"); onLog(r) }
                     // Generic: the same target twice in a row without reaching the goal = treat as ineffective
                     // (catches "confirm without selecting" even when OCR churn makes the screen look changed).
                     val k = guard.key(action, lastExec!!.second)
@@ -736,6 +740,7 @@ class AgentLoop(
     private var prevIme: Int? = null
     private var prevFocus = false
     private var verifyNext = false
+    private val repeatReminder = RepeatReminder()
     private var cleanShotNext = false
     private val transcript = Transcript()
     private var pendingObs: String? = null
@@ -751,6 +756,7 @@ class AgentLoop(
     private var lastGoalMatch: String? = null
     private var prevExecKey: String? = null
     private var appMem: AppMemory? = null
+    private var reusedPath = false
 
     /** Persist what this task learned about the app (facts, useless actions, and the path on success). */
     private fun saveAppMemory(goal: String, success: Boolean, path: String) {
@@ -758,7 +764,8 @@ class AgentLoop(
         val facts = memory.all() + guard.deadLabels().map { "「$it」点了没反应" }
         if (facts.isEmpty() && !success) return
         runCatching {
-            val m = (appMem ?: AppMemory(emptyList(), emptyList())).merge(facts, if (success) goal else null, path.takeIf { success })
+            // Facts only: the route is recorded once, by learnFrom(), so one success counts once.
+            val m = (appMem ?: AppMemory.EMPTY).merge(facts, null, null)
             prefs.setAppMemory(pkg, m.encode())
         }
     }

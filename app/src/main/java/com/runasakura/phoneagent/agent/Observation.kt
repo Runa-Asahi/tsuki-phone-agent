@@ -193,3 +193,23 @@ object GoalMatch {
     fun saysYes(v: String?): Boolean { val t = v?.trim()?.lowercase() ?: return false; return t.startsWith("是") || t.startsWith("yes") || t.startsWith("一致") }
     fun saysNo(v: String?): Boolean { val t = v?.trim()?.lowercase() ?: return false; return t.startsWith("否") || t.startsWith("no") || t.startsWith("不一致") }
 }
+
+/**
+ * Advisory loop nudge after DeepSeek Harness packages/guard/repeat-tool-reminder: counts consecutive
+ * identical actions (same type + canonical arguments) and reminds at 3, 5 and 8 repeats. It never blocks;
+ * NoEffectGuard remains the hard stop for actions proven useless.
+ */
+class RepeatReminder(private val thresholds: List<Int> = listOf(3, 5, 8)) {
+    private var lastKey: String? = null
+    private var count = 0
+    fun reset() { lastKey = null; count = 0 }
+    fun observe(a: com.runasakura.phoneagent.model.AgentAction): String? {
+        val k = a.toString()
+        count = if (k == lastKey) count + 1 else 1; lastKey = k
+        return when {
+            count !in thresholds -> null
+            count == thresholds.first() -> "提醒：同一动作已连续做了 $count 次。先分析上一次的结果，再决定是否继续。"
+            else -> "提醒：动作 ${k.take(120)} 已连续 $count 次。换一种方法、收集更多信息（look/scroll_find），或结束任务（done/fail）。"
+        }
+    }
+}

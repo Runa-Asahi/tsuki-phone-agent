@@ -33,11 +33,11 @@ class BrawlReplayTest {
     }
 
     @Test fun appMemoryRoundTripAndReuse() {
-        val m = AppMemory(emptyList(), emptyList()).merge(listOf("今日不再弹出是复选框", "「返回」会弹退出确认"), "打开荒野乱斗开一局宝石争霸", "点好的 → 点模式 → 选宝石争霸 → 点对战")
+        val m = AppMemory.EMPTY.merge(listOf("今日不再弹出是复选框", "「返回」会弹退出确认"), "打开荒野乱斗开一局宝石争霸", "点好的 → 点模式 → 选宝石争霸 → 点对战")
         val d = AppMemory.decode(m.encode())
         assertEquals(2, d.facts.size)
-        assertNotNull(d.knownPath("打开荒野乱斗开一局宝石争霸"))
-        assertTrue(d.hint("打开荒野乱斗开一局宝石争霸")!!.contains("复选框"))
+        assertNull("one success is not enough to skip planning", d.knownPath("打开荒野乱斗开一局宝石争霸"))
+        assertTrue(d.hint("打开荒野乱斗开一局宝石争霸")!!.contains("复选框（未验证）"))
         val d2 = d.merge(listOf("今日不再弹出是复选框。"), null, null)
         assertEquals(2, d2.facts.size)
     }
