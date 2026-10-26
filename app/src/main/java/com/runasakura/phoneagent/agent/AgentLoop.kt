@@ -57,6 +57,7 @@ class AgentLoop(
         // Off the critical path: the result is shown immediately, learning finishes in the background.
         // A user stop still teaches something (a correction), but makes no model call.
         val stopped = isStopped()
+        planJob?.cancel()
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { learnFrom(goalIn, r, modelCall = !stopped) } }
         return r
     }
@@ -419,6 +420,7 @@ class AgentLoop(
             } else null
             if (shot != null && vision) onLog("附带截图给云端模型（${prefs.cloudModel} 支持看图）")
             var obsNote = diffNote
+            planNote?.let { obsNote = listOfNotNull(obsNote, "$it（仅供参考，以屏幕为准）").joinToString("\n"); planNote = null }
             if (wantSkill && shot != null) {
                 onLog("看图技能：本机视觉模型描述屏幕…")
                 router.describeScreen(goal, shot, sc.w, sc.h)?.let { d ->
@@ -433,10 +435,17 @@ class AgentLoop(
             if (cloudPlanText == null) appMem?.knownPath(goal)?.let { p ->
                 cloudPlanText = "参考步骤（以往成功路线，已验证）：$p"; reusedPath = true; onLog("复用已验证的成功路线，跳过规划")
             }
-            if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
-                cloudPlanText = router.cloudPlan(goal, snap.compressedText, appLabel, memory.text())?.let { st ->
-                    onLog("云端规划（本机按此执行）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")
+            // Parallel planning: the route plan runs concurrently with the first step call instead of before it
+            // (saves one model round-trip of latency per task); its result is handed to the step model once.
+            if (cloudPlanText == null && planJob == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
+                val screenText = snap.compressedText; val mem = memory.text()
+                planJob = planScope.async { runCatching { router.cloudPlan(goal, screenText, appLabel, mem) }.getOrNull() }
+            }
+            planJob?.takeIf { cloudPlanText == null && it.isCompleted }?.let { j ->
+                cloudPlanText = j.await()?.let { st ->
+                    onLog("云端规划（并行完成）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")
                 } ?: ""
+                cloudPlanText?.takeIf { it.isNotBlank() }?.let { planNote = it }
             }
             // ---- Reflect like a desktop agent: progress check every 6 steps / on loops, then re-plan ----
             // Verify on loops, and right after the model itself judged goal_match=是 (cheap, catches premature success).
@@ -447,11 +456,17 @@ class AgentLoop(
                 verifyNext = false
                 val v = verify(dev, goal)
                 if (v != null && v.first) { saveAppMemory(goal, true, steps.progress()); return Result(true, step, "目标已达成（验收：${v.second}）") }
-                if (v != null) {
+                if (v != null && loopStreak != 2 && step - lastReplanStep < 4) {
+                    // A replan costs a full model round-trip; right after another one it rarely adds anything new.
+                    // Hand the judge's reason to the step model instead (no extra call).
+                    onLog("反思：未达成（${v.second}），把验收意见交给下一步（距上次规划不足 4 步，不重新规划）")
+                    obsNote = listOfNotNull(obsNote, "验收意见：尚未完成整个目标（${v.second.take(80)}）").joinToString("\n")
+                } else if (v != null) {
+                    lastReplanStep = step
                     onLog("反思：未达成（${v.second}），重新规划路线")
                     router.cloudPlan("$goal\n（已尝试：${steps.progress()}；未达成原因：${v.second}。请给出一条不同的路线）", snap.compressedText, appLabel,
                         listOfNotNull(memory.text(), guard.summary()).joinToString("；"))?.let { st ->
-                        onLog("新规划：" + st.joinToString(" → ")); cloudPlanText = "参考步骤（重新规划）：" + st.joinToString("；")
+                        onLog("新规划：" + st.joinToString(" → ")); cloudPlanText = "参考步骤（重新规划）：" + st.joinToString("；"); planNote = cloudPlanText
                     }
                 }
             }
@@ -526,21 +541,19 @@ class AgentLoop(
             }
             lastActionKey = actKey
             var tries = 0
+            var retryMsgs: List<ChatMessage>? = null
             while (err != null && tries < 2) {
                 tries++
                 onLog("动作无效：$err —— 附错误说明重问（$tries/2）")
+                // Retry IN the same conversation: the model keeps the step history (it saw that Back already failed)
+                // and the request reuses the cached prefix — only the rejected answer + a short correction are new.
+                retryMsgs = (retryMsgs ?: msgs) + ChatMessage("assistant", resp.content) + ChatMessage("user",
+                    "上次输出被拒绝：$err\n" + (guard.summary()?.let { "$it\n" } ?: "") +
+                        Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn) + "\n" +
+                        (if (!canSee()) "本次无法看截图，不要输出 look。\n" else "") +
+                        "从可选项里选一个没试过的动作，只用上面屏幕列表的 e 编号，只输出一行 JSON。")
                 resp = planWithTimeout(
-                    listOf(
-                        ChatMessage("system", sysPrompt),
-                        ChatMessage(
-                            "user",
-                            "${Injection.wrap(snap.compressedText)}\n目标：$goal\n上次输出错误：$err\n" +
-                                (guard.summary()?.let { "$it\n" } ?: "") +
-                                Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn) + "\n" +
-                                (if (!canSee()) "本次无法看截图，不要输出 look。\n" else "") +
-                                "必须从上面的可选项里选一个没试过的动作；请只用上面列表中的 e 编号，只输出一行 JSON。"
-                        )
-                    ),
+                    retryMsgs!!,
                     forceCloud = router.canEscalate, // parse/validation failure → retry on the user-configured cloud model
                     temperature = 0.1
                 )
@@ -570,6 +583,7 @@ class AgentLoop(
 
             history += ChatMessage("assistant", resp.content)
             val folded = pendingObs?.let { transcript.append(it, resp.content) { steps.progress() } }; pendingObs = null
+            if (folded != null) refreshStable = true   // older observations were folded: re-send goal/guard/layout once
             if (folded != null && prefs.modelCheckpoint && router.cloudReady) {
                 router.checkpoint(goal, folded.filter { it.role == "assistant" }.joinToString("\n") { it.content.take(300) }, memory.text())
                     ?.let { transcript.replaceCheckpoint(it); onLog("对话已压缩：检查点由模型整理") }
@@ -925,6 +939,11 @@ class AgentLoop(
     private var refineNext = false
     private var reconnects = 0
     private var prevYes = false
+    private var lastLayout: String? = null
+    private var lastGuard: String? = null
+    private var noVisionNoted = false
+    private var refreshStable = false
+    private var lastReplanStep = -100
     private var prevSig = 0
     private var verifiedSig = 1
     /** Coordinate taps without any detected element, allowed only when no vision path exists (bounded). */
@@ -1097,6 +1116,9 @@ class AgentLoop(
     private var escalateNext = false
     private var lastActionKey: String? = null
     private var cloudPlanText: String? = null
+    private var planNote: String? = null
+    private var planJob: kotlinx.coroutines.Deferred<List<String>?>? = null
+    private val planScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var doneRejections = 0
     private var lastScreen: com.runasakura.phoneagent.flow.Screen? = null
     private var stepsRef: StepHistory? = null
@@ -1123,7 +1145,12 @@ class AgentLoop(
         // Order: task-stable context first (prefix-cache friendly), then per-step feedback, screen list last.
         return buildString {
             appendLine("/no_think")
-            appendLine("# 用户目标\n$goal")
+            // Task-stable lines are sent once and then live in the cached transcript prefix; after a reset (empty
+            // transcript) they are re-sent. Saves ~60–120 tokens per step without the model losing them.
+            val fresh = transcript.size() == 0 || refreshStable
+            refreshStable = false
+            if (fresh) { lastLayout = null; lastGuard = null; noVisionNoted = false }
+            if (fresh) appendLine("# 用户目标\n$goal")
             // Learned memory is task-stable: injected once (first observation / after a reset) and then carried by the
             // cached transcript prefix instead of being re-sent with every step.
             if (transcript.size() == 0) {
@@ -1132,8 +1159,9 @@ class AgentLoop(
             }
             skill?.suggestion(effective, obsItems.map { it.label })?.let { appendLine(it) }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
-            if (!canSee() && (snap.lowConfidence || obsItems.size < 8))
-                appendLine("⚠ 本次无法看截图：不要输出 look。无文字的按钮见列表里的〔…按钮·无文字〕/〔角落图标〕候选，直接用其 e 编号；都不对时可用坐标做探索性点击（thought 写明依据）。")
+            if (!canSee() && !noVisionNoted && (snap.lowConfidence || lastScreen?.source != "tree")) {
+                noVisionNoted = true
+                appendLine("⚠ 本次无法看截图：不要输出 look。无文字的按钮见列表里的〔…按钮·无文字〕/〔角落图标〕候选，直接用其 e 编号；都不对时可用坐标做探索性点击（thought 写明依据）。") }
             // Soft per-app hints (data file) once per package per task: they stay in the cached transcript afterwards.
             if (snap.packageName.isNotBlank() && hintedPkgs.add(snap.packageName)) {
                 AppHints.forPackage(snap.packageName)?.let { appendLine("# 应用提示\n$it") }
@@ -1155,10 +1183,10 @@ class AgentLoop(
                 lastScreenKind?.let { k -> appendLine("上一步你判断：界面=$k；目标一致=${lastGoalMatch ?: "未判断"}") }
             }
             diffNote?.let { appendLine(it) }
-            guard.summary()?.let { appendLine(it) }
+            guard.summary()?.let { if (it != lastGuard) { lastGuard = it; appendLine(it) } }
             stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。换一种方式。" + (lastFailedAction?.let { a -> Alternatives.forFailure(a, lastFailError)?.let { " $it" } } ?: "")) }
             stepsRef?.loopHint()?.let { appendLine(it) }
-            lastScreen?.let { appendLine(LayoutHints.describe(it)) }
+            lastScreen?.let { LayoutHints.describe(it).let { h -> if (h != lastLayout) { lastLayout = h; appendLine(h) } } }
             val raw = snap.compressedText.take(1600).ifBlank { "(空)" }
             Injection.detect(raw)?.let {
                 onLog("⚠ 疑似注入：屏幕文字含「${it.take(30)}」，已作为不可信数据处理")
