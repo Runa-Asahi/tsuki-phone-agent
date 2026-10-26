@@ -97,7 +97,11 @@ class MainActivity : AppCompatActivity() {
         }
         binding.btnPause.setOnClickListener { AgentForegroundService.pause(this) }
 
-        if (Build.VERSION.SDK_INT >= 33) {
+        // Ask for notifications ONCE (it used to re-prompt on every launch).
+        val asked = getSharedPreferences("ui", 0)
+        if (Build.VERSION.SDK_INT >= 33 && !asked.getBoolean("notif_asked", false) &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            asked.edit().putBoolean("notif_asked", true).apply()
             ActivityCompat.requestPermissions(
                 this,
                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),

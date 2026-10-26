@@ -128,6 +128,10 @@ class A11yDevice(
     private fun cropBands(bmpH: Int): Pair<Int, Int> =
         com.runasakura.phoneagent.ocr.CropBands.compute(bmpH, dimen("status_bar_height"), dimen("navigation_bar_height"))
 
+    /** Our own floating stop/progress window must never become part of the observation. */
+    private fun overlayExclude(): IntArray? = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.bounds?.let {
+        intArrayOf(it.left - 8, it.top - 8, it.right + 8, it.bottom + 8) }
+
     private suspend fun ocrScreen(pkg: String): Screen? {
         // Reuse OCR until a new accessibility event (UI change) arrives
         if (ocrCache != null && ocrCachePkg == pkg &&
@@ -151,7 +155,9 @@ class A11yDevice(
         val off = if (crop === bmp) 0 else top
         // Half resolution for Chinese OCR speed (scale coords back). Cap long side at 720.
         val longSide = maxOf(crop.width, crop.height)
-        val scaleDown = if (longSide > 960) 960f / longSide else 1f
+        // Landscape (games/video): text is tiny relative to the long side → keep far more pixels.
+        val cap = if (crop.width > crop.height) 1600 else 960
+        val scaleDown = if (longSide > cap) cap.toFloat() / longSide else 1f
         val small = if (scaleDown < 0.99f) {
             android.graphics.Bitmap.createScaledBitmap(
                 crop, (crop.width * scaleDown).toInt().coerceAtLeast(1),
@@ -181,7 +187,7 @@ class A11yDevice(
         }
         val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
         val items = com.runasakura.phoneagent.ocr.OcrPost.process(
-            scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore
+            scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore, overlayExclude()
         )
         val ms = System.currentTimeMillis() - t0
         log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}）文字=${items.size}")
@@ -224,7 +230,7 @@ class A11yDevice(
         val sx = w.toFloat() / bmp.width; val sy = h.toFloat() / bmp.height
         val scaled = merged.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * sx).toInt(), (it.t * sy).toInt(), (it.r * sx).toInt(), (it.b * sy).toInt()) }
         val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))
-        val items = com.runasakura.phoneagent.ocr.OcrPost.process(scaled, (shotTop * sy).toInt(), (shotBottom * sy).toInt() + 1, ignore)
+        val items = com.runasakura.phoneagent.ocr.OcrPost.process(scaled, (shotTop * sy).toInt(), (shotBottom * sy).toInt() + 1, ignore, overlayExclude())
         log("OCR 细节区重识别 ${System.currentTimeMillis() - t0}ms 文字=${items.size}")
         val out = Screen(shotPkg, w, h, items, "ocr", imeTop())
         refined = out; ocrCache = out; lastScreen = out

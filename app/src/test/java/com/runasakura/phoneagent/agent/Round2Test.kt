@@ -3,6 +3,7 @@ package com.runasakura.phoneagent.agent
 import com.runasakura.phoneagent.flow.Screen
 import com.runasakura.phoneagent.llm.CloudProviders
 import com.runasakura.phoneagent.screen.ScreenItem
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -30,7 +31,9 @@ class Round2Test {
         val h = StepHistory()
         repeat(3) { h.recordAction("Tap(x=1)") }
         assertTrue(h.looping); assertTrue(h.progress().startsWith("已执行：1."))
-        h.recordAction("Back"); assertFalse(h.looping)
+        h.recordAction("Back"); assertTrue("loop window is 6 actions", h.looping)
+        assertNotNull(h.loopHint())
+        repeat(4) { h.recordAction("Swipe$it") }; assertFalse(h.looping)
     }
 
     @Test fun visionModels() {

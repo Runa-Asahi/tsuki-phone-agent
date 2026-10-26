@@ -18,6 +18,13 @@ class StepHistory(private val maxLabels: Int = 6) {
 
     companion object {
         const val STUCK_LIMIT = 4
+        private val TIMER = Regex("^[\\d:：\\sA-Za-z时分秒天小吋.,，()（）\\-]+$")
+        fun volatile(s: String) = s.any { it.isDigit() } && TIMER.matches(s)
+        fun similar(a: String, b: String): Boolean {
+            if (a == b) return true
+            val x = a.toSet(); val y = b.toSet()
+            return (x intersect y).size.toDouble() / (x union y).size >= 0.5
+        }
         private val LOADING = Regex("加载中|正在加载|载入中|请稍候|请稍等|正在刷新|刷新中|Loading|loading|努力加载|拼命加载")
         fun isLoading(labels: Collection<String>) = labels.any { LOADING.containsMatchIn(it.trim()) && it.trim().length <= 12 }
     }
@@ -26,12 +33,31 @@ class StepHistory(private val maxLabels: Int = 6) {
     fun progress(): String = if (actions.isEmpty()) "" else
         "已执行：" + actions.toList().takeLast(5).mapIndexed { i, a -> "${i + 1}.${a.take(40)}" }.joinToString(" ")
 
-    /** Same action issued ≥3 times in a row (even if the screen changed) → likely a loop. */
-    val looping: Boolean get() = actions.size >= 3 && actions.takeLast(3).toSet().size == 1
+    private val failures = ArrayDeque<String>()
+    private var lastFail: String? = null
 
-    fun recordAction(desc: String) {
+    /** Same target ≥3 times within the last 6 actions (ids change each step, targets don't) → loop. */
+    val looping: Boolean get() {
+        val recent = actions.toList().takeLast(6).map { it.substringBefore(" ✗") }.filter { !it.startsWith("等待") }
+        return recent.groupingBy { it }.eachCount().any { it.value >= 3 }
+    }
+
+    /** Number of failed executions in the last 4 actions. */
+    val recentFailures: Int get() = actions.toList().takeLast(4).count { it.contains(" ✗") }
+
+    fun lastFailure(): String? = lastFail
+
+    /** Strong hint once a loop is detected: forces a strategy change. */
+    fun loopHint(): String? {
+        if (!looping) return null
+        val t = actions.toList().takeLast(6).map { it.substringBefore(" ✗") }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        return "⚠ 循环：「$t」已做了多次但目标没有进展。必须换策略：关闭弹窗(找×/关闭/返回)、点其他入口、用截图/坐标，或滑动查找；不要再做「$t」。"
+    }
+
+    fun recordAction(desc: String, ok: Boolean = true) {
         val d = desc.take(80)
         lastAction = d
+        lastFail = if (ok) null else d
         actions.addLast(d); while (actions.size > 8) actions.removeFirst()
     }
 
@@ -46,8 +72,9 @@ class StepHistory(private val maxLabels: Int = 6) {
         val act = lastAction ?: return null
         lastAction = null
         if (p == null) return "上一步：$act"
-        val added = (cur - p).take(maxLabels)
-        val removed = (p - cur).take(maxLabels)
+        // OCR is noisy (same button read slightly differently each frame): compare fuzzily, ignore timers.
+        val added = cur.filter { c -> !volatile(c) && p.none { similar(it, c) } }.take(maxLabels)
+        val removed = p.filter { c -> !volatile(c) && cur.none { similar(it, c) } }.take(maxLabels)
         if (isLoading(cur)) return "上一步：$act → 页面加载中（不计入无效次数）"
         return if (added.isEmpty() && removed.isEmpty()) {
             val n = actions.size

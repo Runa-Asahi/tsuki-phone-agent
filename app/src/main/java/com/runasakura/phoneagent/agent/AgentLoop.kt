@@ -137,7 +137,7 @@ class AgentLoop(
             }
             "alarm" -> {
                 val h = intent.hour!!; val m = intent.minute ?: 0
-                if (!onConfirm("设置闹钟确认\n时间：%02d:%02d\n由系统时钟创建。".format(h, m))) return Result(false, 0, "用户取消设置闹钟")
+                // Alarms are harmless and reversible: no confirmation prompt (ConfirmPolicy covers send/call/pay/order/uninstall).
                 if (a11y.setAlarm(h, m, "Phone Agent")) return Result(true, 1, "已设置 %02d:%02d 的闹钟（由系统时钟创建）".format(h, m))
                 onLog("时钟 Intent 失败，交给模型"); goal = "打开时钟，新建%02d:%02d的闹钟".format(h, m)
             }
@@ -232,6 +232,7 @@ class AgentLoop(
             val sc = dev.screen()
             lastScreen = sc
             a11y.lastItems = sc.items
+            obsItems = sc.items
             val snap = UiSnapshot(
                 packageName = sc.pkg, screenWidth = sc.w, screenHeight = sc.h, tree = null,
                 compressedText = buildDump(sc), nodeCount = sc.items.size,
@@ -240,6 +241,9 @@ class AgentLoop(
             onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
             val diffNote = steps.observe(sc.items.map { it.label })
             diffNote?.let { onLog(it) }
+            loopStreak = if (steps.looping) loopStreak + 1 else 0
+            if (loopStreak > 0) onLog("检测到循环（$loopStreak），要求模型换策略")
+            if (loopStreak >= 5) return Result(false, step, "多次换策略后仍在原地打转，已停止（可描述得更具体，或在设置里换用视觉模型）")
             if (steps.isLoadingNow) { onLog("页面加载中，额外等待"); delay(1500) }
             if (steps.stuck) return Result(false, step, "连续多次动作后界面无变化，已停止以免乱点")
             if (sc.isEmpty() && !AppResolver.isAgentOrBrain(sc.pkg)) {
@@ -436,9 +440,11 @@ class AgentLoop(
                 }
                 else -> {
                     val before = a11y.foregroundPackage()
+                    lastExecError = null; tapped = null
                     val ok = execute(a11y, action, snap)
-                    steps.recordAction(action.toString())
-                    onLog(if (ok) "执行成功" else "执行失败/部分失败")
+                    val desc = ActionDesc.of(action, tapped) + if (ok) "" else " ✗执行失败：${lastExecError ?: "未知原因"}"
+                    steps.recordAction(desc, ok)
+                    onLog(if (ok) "执行成功：${ActionDesc.of(action, tapped)}" else "执行失败：${lastExecError ?: "未知原因"}")
                     if (action is AgentAction.Launch && ok) {
                         val fg = waitForeground(a11y, 3000) { it != before }
                         onLog("启动后前台=$fg")
@@ -646,18 +652,26 @@ class AgentLoop(
         return Result(out.ok, 1, out.summary)
     }
 
+    /** Items of the observation the model actually saw (a11y.lastItems may be overwritten by tree dumps). */
+    private var obsItems: List<com.runasakura.phoneagent.screen.ScreenItem> = emptyList()
+    private var lastExecError: String? = null
+
+    @Suppress("UNUSED_PARAMETER")
     private fun itemByText(a11y: AgentAccessibilityService, text: String) =
-        a11y.lastItems.firstOrNull { com.runasakura.phoneagent.flow.Text.eq(it.label, text) }
-            ?: a11y.lastItems.filter { it.label.contains(text) }.minByOrNull { it.label.length }
+        obsItems.firstOrNull { com.runasakura.phoneagent.flow.Text.eq(it.label, text) }
+            ?: obsItems.filter { it.label.contains(text) }.minByOrNull { it.label.length }
+            ?: KeyMatchLite.best(obsItems, text)
 
     private fun tapTargetMissing(a11y: AgentAccessibilityService, tap: AgentAction.Tap): Boolean {
         val id = tap.nodeId
-        if (!id.isNullOrBlank()) return a11y.lastItems.none { it.id == id } && tap.x == null
+        if (!id.isNullOrBlank()) return obsItems.none { it.id == id } && tap.x == null
         val txt = tap.text
         if (!txt.isNullOrBlank()) return itemByText(a11y, txt) == null
         return false
     }
 
+    private var tapped: String? = null
+    private var loopStreak = 0
     private var escalateNext = false
     private var lastActionKey: String? = null
     private var cloudPlanText: String? = null
@@ -684,21 +698,20 @@ class AgentLoop(
     }
 
     private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int, diffNote: String? = null): String {
-        // Prefer interactive-only dump for 2B VL latency
-        val compact = try {
-            AgentAccessibilityService.require()?.dumpInteractiveCompact() ?: snap
-        } catch (_: Exception) { snap }
+        val compact = snap
         return buildString {
             appendLine("/no_think")
             appendLine("步骤:$step 目标:$goal")
             appendLine("屏:${compact.screenWidth}x${compact.screenHeight} 包:${compact.packageName}")
             diffNote?.let { appendLine(it) }
             stepsRef?.progress()?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
-            if (stepsRef?.looping == true) appendLine("⚠ 你已连续 3 次输出同一动作，换一种方式（别的元素/坐标/滚动/返回）。")
+
             lastScreen?.let { appendLine(LayoutHints.describe(it)) }
-            appendLine("要点(可点/可输入):")
-            // OCR-only apps (WeChat on PPG-AN00) have an empty tree: never send the empty tree dump.
-            val best = if (compact.nodeCount >= snap.nodeCount) compact.compressedText else snap.compressedText
+            stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。不要重复，换一种方式（用坐标 x,y、别的元素、滑动或返回）。") }
+            stepsRef?.loopHint()?.let { appendLine(it) }
+            appendLine("要点(可点/可输入；e编号仅本步有效，坐标为元素中心):")
+            // Always the exact list the executor resolves ids against (never a fresh tree dump).
+            val best = snap.compressedText
             val raw = best.take(1600).ifBlank { "(空)" }
             Injection.detect(raw)?.let {
                 onLog("⚠ 疑似注入：屏幕文字含「${it.take(30)}」，已作为不可信数据处理")
@@ -750,21 +763,28 @@ class AgentLoop(
                 is AgentAction.Tap -> {
                     when {
                         !action.nodeId.isNullOrBlank() -> {
-                            val it = a11y.lastItems.firstOrNull { i -> i.id == action.nodeId } ?: return false
-                            a11y.tap(it.cx, it.cy)
+                            val it = obsItems.firstOrNull { i -> i.id == action.nodeId }
+                                ?: action.text?.let { t -> itemByText(a11y, t) }
+                            if (it == null) {
+                                if (action.x != null && action.y != null) return a11y.tap(action.x!!, action.y!!)
+                                lastExecError = "${action.nodeId} 不在当前列表中（列表已刷新，请用最新编号或坐标）"; return false
+                            }
+                            tapped = it.label
+                            a11y.tap(it.cx, it.cy).also { ok -> if (!ok) lastExecError = "系统拒绝了点击手势（${it.cx},${it.cy}）" }
                         }
                         !action.text.isNullOrBlank() -> {
-                            val it = itemByText(a11y, action.text!!) ?: return false
+                            val it = itemByText(a11y, action.text!!) ?: run { lastExecError = "屏幕上找不到文字「${action.text}」"; return false }
+                            tapped = it.label
                             a11y.tap(it.cx, it.cy)
                         }
-                        action.x != null && action.y != null -> a11y.tap(action.x!!, action.y!!)
-                        else -> false
+                        action.x != null && action.y != null -> a11y.tap(action.x!!, action.y!!).also { ok -> if (!ok) lastExecError = "系统拒绝了点击手势" }
+                        else -> { lastExecError = "tap 缺少 node_id/坐标"; false }
                     }
                 }
                 is AgentAction.LongPress -> {
                     when {
                         !action.nodeId.isNullOrBlank() -> {
-                            val it = a11y.lastItems.firstOrNull { i -> i.id == action.nodeId } ?: return false
+                            val it = obsItems.firstOrNull { i -> i.id == action.nodeId } ?: run { lastExecError = "${action.nodeId} 不在当前列表中"; return false }
                             a11y.longPress(it.cx, it.cy)
                         }
                         action.x != null && action.y != null -> a11y.longPress(action.x!!, action.y!!)
