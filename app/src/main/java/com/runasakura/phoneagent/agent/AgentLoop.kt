@@ -181,7 +181,7 @@ class AgentLoop(
                     return Result(false, 0, "未找到应用「$appName」")
                 }
                 onLog("匹配应用：${match.label} (${match.packageName}) score=${match.score}")
-                targetPkg = match.packageName
+                targetPkg = match.packageName; appLabel = "${match.label}（${match.packageName}）"
                 if (!com.runasakura.phoneagent.util.TaskTiming.time("启动应用") { dev.bringToFront(match.packageName, match.label) }) {
                     return Result(false, 1, "无法把「${match.label}」带到前台（前台=${dev.foregroundPackage()}）")
                 }
@@ -315,7 +315,7 @@ class AgentLoop(
             if (brainShot != null) obsNote = listOfNotNull(obsNote, "已附当前截图：以截图为准（OCR 可能有错字/漏掉无文字按钮）；tap 坐标按屏幕 ${sc.w}x${sc.h}。").joinToString("\n")
             // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
             if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
-                cloudPlanText = router.cloudPlan(goal, snap.compressedText)?.let { st ->
+                cloudPlanText = router.cloudPlan(goal, snap.compressedText, appLabel, memory.text())?.let { st ->
                     onLog("云端规划（本机按此执行）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")
                 } ?: ""
             }
@@ -325,7 +325,8 @@ class AgentLoop(
                 if (v != null && v.first) return Result(true, step, "目标已达成（验收：${v.second}）")
                 if (v != null) {
                     onLog("反思：未达成（${v.second}），重新规划路线")
-                    router.cloudPlan("$goal\n（已尝试：${steps.progress()}；未达成原因：${v.second}。请给出一条不同的路线）", snap.compressedText)?.let { st ->
+                    router.cloudPlan("$goal\n（已尝试：${steps.progress()}；未达成原因：${v.second}。请给出一条不同的路线）", snap.compressedText, appLabel,
+                        listOfNotNull(memory.text(), guard.summary()).joinToString("；"))?.let { st ->
                         onLog("新规划：" + st.joinToString(" → ")); cloudPlanText = "参考步骤（重新规划）：" + st.joinToString("；")
                     }
                 }
@@ -364,7 +365,11 @@ class AgentLoop(
                     ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote) + "\n已附截图（屏幕 ${sc.w}x${sc.h}，坐标按此）。", it))) }
             } else null
             if (!needEyes && step == 3 && !router.visionReady && (sc.w > sc.h || sc.items.size < 6)) onLog("💡 " + com.runasakura.phoneagent.llm.CloudProviders.VISION_TIP)
-            var resp = eyes ?: planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
+            // Stuck (loop / no-op / invalid output) → one step with the stronger model, then back to the default.
+            val useStrong = eyes == null && router.strong != null && (strongNext || loopStreak > 0 || (lastNoEffect && guard.size >= 2))
+            strongNext = false
+            if (useStrong) onLog("卡住了：本步升级强模型")
+            var resp = eyes ?: (if (useStrong) router.strongPlan(msgs) else null) ?: planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
             logLlm(resp)
             // Local→cloud fallback (incl. slow-local stall) is handled inside LlmRouter.
             if (resp.error != null && resp.content.isBlank()) {
@@ -373,6 +378,9 @@ class AgentLoop(
             }
 
             var plan = ActionParser.parse(resp.content)
+            plan.memory?.takeIf { it.isNotBlank() }?.let { if (memory.add(it)) onLog("记住：$it") }
+            plan.subgoal?.let { onLog("子目标：$it") }
+            lastExpect = plan.expect
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
             var err = validationError(plan, resp.content, sc)
@@ -684,6 +692,9 @@ class AgentLoop(
     private var strongNext = false
     private var shotThisStep = false
     private var lastNoEffect = false
+    private var appLabel: String? = null
+    private var lastExpect: String? = null
+    private val memory = TaskMemory()
     private var modelSteps = 0
 
     private fun targetLabel(a: AgentAction, sc: com.runasakura.phoneagent.flow.Screen): String? = when (a) {
@@ -699,12 +710,13 @@ class AgentLoop(
         val le = lastExec ?: return null
         lastExec = null
         if (prev == null) return "上一步：${le.third}"
+        val exp = lastExpect?.let { "（你预期：$it —— 对照下面判断是否达到）" } ?: ""
         val d = SemanticDiff.compare(prev, sc.items)
         return if (!d.meaningful) {
             guard.record(le.first, le.second, le.third); lastNoEffect = true
-            "上一步：${le.third} → 界面没有实质变化（只是 OCR 抖动）= 这个动作无效，不要再做"
+            "上一步：${le.third}$exp → 界面没有实质变化（只是 OCR 抖动）= 这个动作无效，不要再做"
         } else buildString {
-            append("上一步：").append(le.third).append(" → 界面有变化")
+            append("上一步：").append(le.third).append(exp).append(" → 界面有变化")
             if (d.added.isNotEmpty()) append(" 新出现:").append(d.added.take(6).joinToString("、"))
             if (d.removed.isNotEmpty()) append(" 消失:").append(d.removed.take(6).joinToString("、"))
         }
@@ -831,6 +843,7 @@ class AgentLoop(
             stepsRef?.progress()?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
 
             lastScreen?.let { appendLine(LayoutHints.describe(it)) }
+            memory.text()?.let { appendLine("本任务已知：$it") }
             guard.summary()?.let { appendLine(it) }
             stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。不要重复，换一种方式（用坐标 x,y、别的元素、滑动或返回）。") }
             stepsRef?.loopHint()?.let { appendLine(it) }

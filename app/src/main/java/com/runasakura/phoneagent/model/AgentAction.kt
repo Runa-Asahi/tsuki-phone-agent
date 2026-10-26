@@ -26,5 +26,10 @@ data class PlanStep(
     val thought: String = "",
     val action: AgentAction,
     val needScreenshot: Boolean = false,
-    val backendHint: String? = null
+    val backendHint: String? = null,
+    /** Scratchpad: what the model expects to see after the action (checked next step). */
+    val expect: String? = null,
+    /** A UI fact the model learned (kept in task memory, e.g. "今日不再弹出是复选框"). */
+    val memory: String? = null,
+    val subgoal: String? = null
 )

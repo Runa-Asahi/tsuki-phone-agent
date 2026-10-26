@@ -145,7 +145,10 @@ object ActionParser {
             thought = thought,
             action = action,
             needScreenshot = needShot,
-            backendHint = backend
+            backendHint = backend,
+            expect = obj.nullableString("expect")?.take(80),
+            memory = obj.nullableString("memory")?.take(80),
+            subgoal = obj.nullableString("subgoal")?.take(60)
         )
     }
 

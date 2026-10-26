@@ -22,7 +22,7 @@ class CloudClient(
     private val model: String,
     private val jsonMode: Boolean = (baseUrl.contains("deepseek", true) || baseUrl.contains("openai.com", true) ||
         baseUrl.contains("dashscope", true)) && !CloudProviders.isReasoner(model),
-    private val maxTokens: Int = if (CloudProviders.isReasoner(model)) 2000 else 200,
+    private val maxTokens: Int = if (CloudProviders.isReasoner(model)) 2000 else 320,
     private val http: OkHttpClient = SHARED
 ) : LlmClient {
     override val name: String = (if (baseUrl.contains("deepseek", true)) "deepseek" else "cloud") + ":" + model

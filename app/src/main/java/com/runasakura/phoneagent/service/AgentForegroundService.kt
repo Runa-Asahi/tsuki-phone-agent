@@ -107,6 +107,8 @@ class AgentForegroundService : Service() {
         log("大脑：$brain" + if (cloud == null && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY) "（云端未就绪）" else "")
         val router = LlmRouter({ prefs.routeMode }, local, cloud).also { r -> r.log = { log(it) } }
         router.vision = com.runasakura.phoneagent.llm.CloudProviders.visionClientFor(prefs)
+        router.strong = com.runasakura.phoneagent.llm.CloudProviders.strongClientFor(prefs)
+        router.strong?.let { log("卡住时升级：${it.name}（平时仍用 ${prefs.cloudModel}）") }
         if (prefs.visionLocal) {
             router.visionSkill = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.visionLocalModel.ifBlank { prefs.mnnModel }, maxTokens = 400)
             log("看图技能：本机 MNN 视觉模型 ${prefs.visionLocalModel.ifBlank { prefs.mnnModel }}（需在 MNN Chat 里加载 VL 模型并开启 API）")

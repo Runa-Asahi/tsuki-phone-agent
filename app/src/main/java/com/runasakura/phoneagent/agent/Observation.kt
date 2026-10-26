@@ -100,5 +100,19 @@ class NoEffectGuard {
         return "「${hit.value}」之前做过且界面没有实质变化，禁止重复；换一个元素/位置/方式"
     }
 
+    val size get() = dead.size
+
     fun summary(): String? = if (dead.isEmpty()) null else "已证实无效（不要再做）：" + dead.values.toList().takeLast(6).joinToString("；")
+}
+
+/** Facts learned during one task (from the model's "memory" field), deduplicated, newest kept. */
+class TaskMemory(private val max: Int = 8) {
+    private val facts = ArrayList<String>()
+    fun add(f: String): Boolean {
+        val t = f.trim(); if (t.length < 3) return false
+        if (facts.any { KeyMatchLite.sim(it, t) >= 0.7 }) return false
+        facts += t; while (facts.size > max) facts.removeAt(0); return true
+    }
+    fun all(): List<String> = facts.toList()
+    fun text(): String? = if (facts.isEmpty()) null else facts.joinToString("；")
 }
