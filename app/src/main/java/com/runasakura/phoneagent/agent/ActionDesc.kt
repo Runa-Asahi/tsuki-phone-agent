@@ -27,6 +27,7 @@ object ActionDesc {
         is AgentAction.Key -> KEY_ZH[a.name] ?: "按键 ${a.name}"
         is AgentAction.ScrollFind -> "滚动查找「${a.text.take(16)}」"
         is AgentAction.Shell -> "系统命令 ${a.cmd.take(48)}"
+        is AgentAction.ListApps -> "查找已安装应用「${a.query.take(16)}」"
         else -> a.toString().take(40)
     }
 }

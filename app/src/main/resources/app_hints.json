@@ -1,0 +1,15 @@
+{
+  "_note": "Soft, possibly outdated UI hints per package. Shown to the model as reference context only; never used as code branches.",
+  "com.tencent.mm": {"name": "微信", "hints": ["底部 tab：微信/通讯录/发现/我", "搜索：会话列表右上角放大镜（常无文字，需坐标或 look）", "荣耀上界面树经常为空：依赖 OCR 或 Shizuku 界面读取", "聊天输入框在底部，发送按钮在输入后才出现在右下"]},
+  "com.eg.android.AlipayGphone": {"name": "支付宝", "hints": ["首页顶部是搜索框", "支付/转账页面一律交给用户"]},
+  "tv.danmaku.bili": {"name": "哔哩哔哩", "hints": ["启动常有开屏广告（右上角跳过/倒计时）", "底部 tab：首页/动态/会员购/我的；首页顶部有搜索框", "视频页文字很少，看不清就 look", "青少年模式弹窗选「我知道了」"]},
+  "com.xingin.xhs": {"name": "小红书", "hints": ["首页右上角放大镜进入搜索", "笔记流是双列瀑布流，可无限下滑", "底部 tab：首页/购物/+/消息/我"]},
+  "com.ss.android.ugc.aweme": {"name": "抖音", "hints": ["全屏视频流，文字很少；上滑切下一个视频", "右上角放大镜进入搜索", "评论/点赞在右侧竖排图标"]},
+  "com.zhihu.android": {"name": "知乎", "hints": ["首页顶部是搜索框", "常弹出登录/推送权限弹窗，可关闭"]},
+  "com.baidu.tieba": {"name": "百度贴吧", "hints": ["顶部搜索框搜吧名或帖子", "开屏广告可跳过"]},
+  "com.jingdong.app.mall": {"name": "京东", "hints": ["首页顶部搜索框；商品页底部「加入购物车/立即购买」", "下单/支付一律需要用户确认"]},
+  "com.xunmeng.pinduoduo": {"name": "拼多多", "hints": ["首页弹窗很多（红包/活动），先关闭", "搜索框在首页顶部", "下单/支付一律需要用户确认"]},
+  "com.android.chrome": {"name": "Chrome", "hints": ["地址栏在顶部，可直接输入网址或搜索词后按回车（key enter）", "网页内容常是 WebView，树可能不完整，看不清就 look"]},
+  "com.twitter.android": {"name": "X", "hints": ["底部 tab：主页/搜索/社区/通知/私信", "发帖按钮是右下角的 +；发帖需确认"]},
+  "org.telegram.messenger": {"name": "Telegram", "hints": ["会话列表右上角放大镜搜索", "左上角菜单打开侧栏", "发送按钮在输入后出现在右下"]}
+}

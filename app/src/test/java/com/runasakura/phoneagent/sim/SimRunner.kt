@@ -59,8 +59,8 @@ object SimRunner {
         val world = SimWorld(sc.apps, sc.w, sc.h).also(sc.setup)
         val phone = SimPhone(world)
         if (sc.shell) phone.shellImpl = SimShell(world)
-        val logs = ArrayList<String>(); val prompts = ArrayList<JSONArray>(); val confirms = ArrayList<String>()
-        val calls = HashMap<String, Int>()
+        val logs = java.util.concurrent.CopyOnWriteArrayList<String>(); val prompts = java.util.concurrent.CopyOnWriteArrayList<JSONArray>(); val confirms = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val calls = java.util.concurrent.ConcurrentHashMap<String, Int>()
         var stepN = 0
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             val buf = okio.Buffer(); chain.request().body!!.writeTo(buf)

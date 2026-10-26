@@ -985,6 +985,8 @@ class AgentLoop(
             appendLine("# 用户目标\n$goal")
             appMem?.hint(goal)?.let { appendLine("# 以往经验\n$it") }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
+            // Soft per-app hints (data file) once per package per task: they stay in the cached transcript afterwards.
+            if (snap.packageName.isNotBlank() && hintedPkgs.add(snap.packageName)) AppHints.forPackage(snap.packageName)?.let { appendLine("# 应用提示\n$it") }
             appendLine("# 本步 第${step}步 屏幕${snap.screenWidth}x${snap.screenHeight} 包${snap.packageName}")
             // The append-only transcript already carries the model's own previous answers (actions, screen kind,
             // goal_match); repeating them here every step only cost tokens. Only after a reset (empty transcript).
@@ -1126,6 +1128,12 @@ class AgentLoop(
                     }
                 }
                 is AgentAction.Shell -> runShell(a11y, action)
+                is AgentAction.ListApps -> {
+                    val apps = a11y.listApps(action.query)
+                    toolNote = if (apps.isEmpty()) "没有找到匹配「${action.query}」的已安装应用"
+                        else "已安装应用（名称=包名）：" + apps.take(15).joinToString("；") { "${it.first}=${it.second}" }
+                    true
+                }
                 is AgentAction.ScrollFind -> scrollFind(a11y, action)
                 is AgentAction.Wait -> {
                     // Sliced so 急停 is honoured within 50 ms even during a 10 s wait.
@@ -1150,10 +1158,12 @@ class AgentLoop(
 
     private fun isOffScreen(a: AgentAction): Boolean = when (a) {
         is AgentAction.Shell -> com.runasakura.phoneagent.shell.ShellCommand.parse(a.cmd).let { p -> p is com.runasakura.phoneagent.shell.ShellCommand.Parsed.Ok && p.argv.first() != "am" && p.argv.first() != "monkey" }
-        is AgentAction.SetClipboard, AgentAction.ReadClipboard, is AgentAction.Copy, is AgentAction.Wait -> true
+        is AgentAction.SetClipboard, AgentAction.ReadClipboard, is AgentAction.Copy, is AgentAction.Wait, is AgentAction.ListApps -> true
         is AgentAction.Key -> a.name != "enter"
         else -> false
     }
+
+    private val hintedPkgs = HashSet<String>()
 
     /** Shizuku backend active for this task (decided at task start; each use re-checks the live binder). */
     private var shellOn = false

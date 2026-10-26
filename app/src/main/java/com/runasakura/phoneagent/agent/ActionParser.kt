@@ -150,6 +150,7 @@ object ActionParser {
             "shell", "adb", "adb_shell", "run_command", "exec" -> AgentAction.Shell(
                 actionObj.optString("cmd").ifBlank { actionObj.optString("command") }.ifBlank { actionObj.optString("text") }.trim())
             "force_stop", "kill_app", "close_app" -> AgentAction.Shell("am force-stop " + (actionObj.nullableString("package") ?: actionObj.optString("app")).trim())
+            "list_apps", "apps", "find_app", "installed_apps" -> AgentAction.ListApps(actionObj.optString("query").ifBlank { actionObj.optString("app") }.ifBlank { actionObj.optString("text") }.trim())
             "human_takeover" -> AgentAction.HumanTakeover(
                 actionObj.optString("reason").ifBlank { "需要人工接管" }
             )

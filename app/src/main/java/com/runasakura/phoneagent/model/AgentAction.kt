@@ -40,6 +40,8 @@ sealed class AgentAction {
     data class AskUser(val question: String) : AgentAction()
     /** Privileged system command through the optional Shizuku backend (validated argv; see ShellCommand). */
     data class Shell(val cmd: String) : AgentAction()
+    /** Discover installed apps (label + package) matching [query] — for launch / deep links into unknown apps. */
+    data class ListApps(val query: String = "") : AgentAction()
 }
 
 data class PlanStep(

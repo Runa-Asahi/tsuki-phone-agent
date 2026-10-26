@@ -51,6 +51,8 @@ interface Phone {
     fun isHome(pkg: String): Boolean = false
     /** Optional privileged shell (Shizuku) — null means accessibility + OCR only. Re-checked on every use. */
     fun shell(): com.runasakura.phoneagent.shell.PrivilegedShell? = null
+    /** Launchable apps (label to package) whose label or package contains [query] (all when blank). */
+    fun listApps(query: String): List<Pair<String, String>> = emptyList()
 }
 
 /** The phone through the live AccessibilityService. */
@@ -76,6 +78,12 @@ class ServicePhone(private val s: AgentAccessibilityService) : Phone {
     override fun isSettingsForeground(pkg: String) = s.isSettingsForeground(pkg)
     override fun setAlarm(hour: Int, minute: Int, label: String) = s.setAlarm(hour, minute, label)
     override fun shell() = com.runasakura.phoneagent.shell.ShizukuBackend.shellOrNull(s)
+    override fun listApps(query: String): List<Pair<String, String>> = try {
+        val pm = s.packageManager
+        pm.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
+            .map { it.loadLabel(pm).toString() to it.activityInfo.packageName }.distinctBy { it.second }
+            .let { all -> AppListFilter.filter(all, query) }
+    } catch (_: Exception) { emptyList() }
     // Gestures: the accessibility gesture first (it steps the stop pill aside); when the system rejects it
     // (MagicOS sometimes cancels dispatchGesture), inject the same gesture through Shizuku `input`.
     override fun tap(x: Int, y: Int) = s.tap(x, y) || (shell()?.let { com.runasakura.phoneagent.shell.ShellOps.tap(it, x, y) } ?: false)
@@ -104,5 +112,18 @@ class ServicePhone(private val s: AgentAccessibilityService) : Phone {
 
     companion object {
         fun current(): Phone? = AgentAccessibilityService.require()?.let { ServicePhone(it) }
+    }
+}
+
+/** Pure ranking for list_apps: exact label, label prefix, label contains, package contains. */
+object AppListFilter {
+    fun filter(all: List<Pair<String, String>>, query: String, max: Int = 15): List<Pair<String, String>> {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) return all.sortedBy { it.first }.take(max)
+        return all.mapNotNull { (l, p) ->
+            val ll = l.lowercase()
+            val rank = when { ll == q -> 0; ll.startsWith(q) -> 1; ll.contains(q) -> 2; p.lowercase().contains(q) -> 3; else -> null }
+            rank?.let { Triple(it, l, p) }
+        }.sortedWith(compareBy({ it.first }, { it.second.length })).take(max).map { it.second to it.third }
     }
 }

@@ -31,8 +31,8 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
     val fields = HashMap<String, String>()          // field label → text
     var focused: String? = null
     var clipboard: String? = null
-    val log = ArrayList<String>()                    // world events (assertions read this)
-    val flags = HashMap<String, Any>()
+    val log: MutableList<String> = java.util.concurrent.CopyOnWriteArrayList<String>()                    // world events (assertions read this)
+    val flags: MutableMap<String, Any> = java.util.concurrent.ConcurrentHashMap<String, Any>()
     var reads = 0                                    // observations so far (timers tick on reads)
     var systemPanel: SimScreen? = null               // notification shade / quick settings over the app
     var source = "tree"                              // "ocr" = webview/game with no accessibility tree
@@ -80,6 +80,7 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
 class SimPhone(val world: SimWorld) : Phone {
     var shellImpl: com.runasakura.phoneagent.shell.PrivilegedShell? = null
     override fun shell() = shellImpl?.takeIf { world.flags["shizukuDead"] != true }
+    override fun listApps(query: String) = com.runasakura.phoneagent.a11y.AppListFilter.filter(world.apps.map { it.label to it.pkg }, query)
     var installedOverride: List<AppResolver.AppMatch>? = null
     val settingsActionWorks = false
     override fun isCurrent() = true
