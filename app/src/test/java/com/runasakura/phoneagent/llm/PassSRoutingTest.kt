@@ -61,7 +61,7 @@ class PassSRoutingTest {
     @Test fun cloudBodyIsTuned() {
         val b = CloudClient("https://api.deepseek.com/v1", "k", "deepseek-chat").buildBody(msg, 0.0)
         assertEquals(0.0, b.getDouble("temperature"), 0.0)
-        assertEquals(320, b.getInt("max_tokens"))
+        assertEquals(600, b.getInt("max_tokens"))
         assertEquals("json_object", b.getJSONObject("response_format").getString("type"))
         assertFalse(CloudClient("https://my.host/v1", "k", "m").buildBody(msg, 0.0).has("response_format"))
     }

@@ -324,7 +324,7 @@ class AgentLoop(
                 com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)
             val wantSkill = !vision && hardScreen && router.visionSkill != null && !router.skillSidelined
             val shot = if ((vision && hardScreen) || wantSkill) {
-                try { if (wantSkill) a11y.screenshotJpegBase64(640) else a11y.screenshotJpegBase64(1280, sc.items, sc.w, sc.h) } catch (_: Exception) { null }
+                try { if (wantSkill) a11y.screenshotJpegBase64(640) else (if (cleanShotNext) a11y.screenshotJpegBase64(1280) else a11y.screenshotJpegBase64(1280, sc.items, sc.w, sc.h)).also { cleanShotNext = false } } catch (_: Exception) { null }
             } else null
             if (shot != null && vision) onLog("附带截图给云端模型（${prefs.cloudModel} 支持看图）")
             var obsNote = diffNote
@@ -348,7 +348,9 @@ class AgentLoop(
                 } ?: ""
             }
             // ---- Reflect like a desktop agent: progress check every 6 steps / on loops, then re-plan ----
-            if (router.cloudReady && step > 1 && loopStreak == 2) {
+            // Verify on loops, and right after the model itself judged goal_match=是 (cheap, catches premature success).
+            if (router.cloudReady && step > 1 && (loopStreak == 2 || verifyNext)) {
+                verifyNext = false
                 transcript.clear()
                 val v = verify(dev, goal)
                 if (v != null && v.first) { saveAppMemory(goal, true, steps.progress()); return Result(true, step, "目标已达成（验收：${v.second}）") }
@@ -411,6 +413,7 @@ class AgentLoop(
             plan.screen?.let { onLog("界面类型（模型判断）：$it") }
             plan.goalMatch?.let { onLog("与目标是否一致（模型判断）：$it") }
             lastScreenKind = plan.screen; lastGoalMatch = plan.goalMatch
+            if (GoalMatch.saysYes(plan.goalMatch) && plan.action !is AgentAction.Done) verifyNext = true
             lastExpect = plan.expect
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
@@ -496,6 +499,8 @@ class AgentLoop(
             }
 
             if (plan.needScreenshot) {
+                // A second look in a row gets an unmarked screenshot (set-of-mark boxes can hide small icons).
+                if (shotThisStep) cleanShotNext = true
                 lookNext = true
                 if (plan.action is AgentAction.Wait) { onLog("模型请求看截图（下一步附图）"); lastExec = null; continue }
             }
@@ -730,6 +735,8 @@ class AgentLoop(
     private var prevItems: List<com.runasakura.phoneagent.screen.ScreenItem>? = null
     private var prevIme: Int? = null
     private var prevFocus = false
+    private var verifyNext = false
+    private var cleanShotNext = false
     private val transcript = Transcript()
     private var pendingObs: String? = null
     private var lastExec: Triple<AgentAction, String?, String>? = null

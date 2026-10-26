@@ -15,7 +15,7 @@ class PassVModelTest {
         assertFalse(body.has("response_format")); assertFalse(body.has("temperature"))
         assertEquals(2000, body.getInt("max_tokens"))
         val chat = CloudClient(AgentPreferences.DEEPSEEK_BASE, "k", "deepseek-chat").buildBody(listOf(ChatMessage("user", "hi")), 0.0)
-        assertTrue(chat.has("response_format")); assertEquals(320, chat.getInt("max_tokens"))
+        assertTrue(chat.has("response_format")); assertEquals(600, chat.getInt("max_tokens"))
     }
 
     @Test fun blankModelFallsBackToProviderDefault() {

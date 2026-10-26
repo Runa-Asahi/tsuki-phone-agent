@@ -27,5 +27,5 @@ object SetOfMark {
         }
     }
 
-    const val NOTE = "截图上的彩色编号框与元素列表的 e 编号一一对应：能用编号就用 node_id；框外的无文字图标再用坐标。"
+    const val NOTE = "截图上的细框与框外小标签对应元素列表的 e 编号：能用编号就用 node_id；无文字图标用坐标；框挡住看不清时再输出 look 会得到无标注的原图。"
 }

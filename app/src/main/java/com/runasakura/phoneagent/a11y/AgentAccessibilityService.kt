@@ -132,14 +132,17 @@ class AgentAccessibilityService : AccessibilityService() {
             // Set-of-Mark: draw numbered boxes matching the e-ids of the text list.
             val m = scaled.copy(Bitmap.Config.ARGB_8888, true)
             val c = android.graphics.Canvas(m)
-            val stroke = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = 2f; color = 0xFFFF2D55.toInt() }
-            val tag = android.graphics.Paint().apply { color = 0xFFFF2D55.toInt() }
+            // Thin outline + translucent tag placed OUTSIDE (above) the box so the element itself stays visible.
+            val stroke = android.graphics.Paint().apply { style = android.graphics.Paint.Style.STROKE; strokeWidth = 1.5f; color = 0xCCFF2D55.toInt() }
+            val tag = android.graphics.Paint().apply { color = 0xB3FF2D55.toInt() }
             val txt = android.graphics.Paint().apply { color = 0xFFFFFFFF.toInt(); textSize = maxOf(12f, m.width / 70f); isFakeBoldText = true; isAntiAlias = true }
             com.runasakura.phoneagent.agent.SetOfMark.boxes(marks, screenW, screenH, m.width, m.height).forEach { b ->
                 c.drawRect(b.l.toFloat(), b.t.toFloat(), b.r.toFloat(), b.b.toFloat(), stroke)
                 val w = txt.measureText(b.id) + 6
-                c.drawRect(b.l.toFloat(), b.t.toFloat(), b.l + w, b.t + txt.textSize + 4, tag)
-                c.drawText(b.id, b.l + 3f, b.t + txt.textSize, txt)
+                val th = txt.textSize + 4
+                val top = if (b.t - th >= 0) b.t - th else b.b.toFloat() // above the box, else below it
+                c.drawRect(b.l.toFloat(), top, b.l + w, top + th, tag)
+                c.drawText(b.id, b.l + 3f, top + txt.textSize, txt)
             }
             scaled = m
         }

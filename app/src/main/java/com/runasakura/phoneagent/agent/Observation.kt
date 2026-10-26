@@ -190,5 +190,6 @@ class Transcript {
 
 /** Reads the model's own goal_match judgement; only a clear leading "否/no" counts. */
 object GoalMatch {
+    fun saysYes(v: String?): Boolean { val t = v?.trim()?.lowercase() ?: return false; return t.startsWith("是") || t.startsWith("yes") || t.startsWith("一致") }
     fun saysNo(v: String?): Boolean { val t = v?.trim()?.lowercase() ?: return false; return t.startsWith("否") || t.startsWith("no") || t.startsWith("不一致") }
 }

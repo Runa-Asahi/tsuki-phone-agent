@@ -24,17 +24,17 @@ class CloudClient(
         baseUrl.contains("dashscope", true)) && !CloudProviders.isReasoner(model),
     /** User setting: DeepSeek thinking mode (off = fast direct JSON; on = reasoning_effort low). */
     private val thinking: Boolean = false,
-    private val maxTokens: Int = if (CloudProviders.isReasoner(model) || thinking) 2000 else 320,
+    private val maxTokens: Int = if (CloudProviders.isReasoner(model) || thinking) 2000 else 600,
     private val http: OkHttpClient = SHARED
 ) : LlmClient {
     override val name: String = (if (baseUrl.contains("deepseek", true)) "deepseek" else "cloud") + ":" + model
 
-    fun buildBody(messages: List<ChatMessage>, temperature: Double): JSONObject = JSONObject().apply {
+    fun buildBody(messages: List<ChatMessage>, temperature: Double, tokens: Int = maxTokens): JSONObject = JSONObject().apply {
         put("model", model)
         // Thinking mode ignores temperature (api-docs.deepseek.com/guides/thinking_mode); 0 for direct steps.
         if (!CloudProviders.isReasoner(model) && !thinking) put("temperature", temperature)
         put("stream", false)
-        put("max_tokens", maxTokens)
+        put("max_tokens", tokens)
         if (jsonMode) put("response_format", JSONObject().put("type", "json_object"))
         // DeepSeek V4 models think by default; agent steps want fast direct JSON.
         if (baseUrl.contains("deepseek", true) && !CloudProviders.isReasoner(model) && !thinkingRejected) {
@@ -68,13 +68,24 @@ class CloudClient(
                 .post(body.toRequestBody(JSON))
                 .build()
             var attempt = 0
+            var truncRetried = false
             while (true) {
                 try {
                     http.newCall(req).execute().use { resp ->
                         val raw = resp.body?.string().orEmpty()
                         val latency = System.currentTimeMillis() - started
                         if (resp.isSuccessful) {
-                            val content = contentOrReasoningJson(raw)
+                            var content = contentOrReasoningJson(raw)
+                            // Output cut by max_tokens → the JSON is truncated: retry once with a doubled budget.
+                            if (finishReason(raw) == "length" && !truncRetried) {
+                                truncRetried = true
+                                val retry = Request.Builder().url(req.url).headers(req.headers)
+                                    .post(buildBody(messages, temperature, maxTokens * 2).toString().toRequestBody(JSON)).build()
+                                http.newCall(retry).execute().use { r2 ->
+                                    val raw2 = r2.body?.string().orEmpty()
+                                    if (r2.isSuccessful) return@withContext LlmResponse(contentOrReasoningJson(raw2), name, System.currentTimeMillis() - started, rawBody = raw2)
+                                }
+                            }
                             // JSON mode may occasionally return empty content (api-docs.deepseek.com/guides/json_mode): retry once.
                             if (content.isBlank() && attempt == 0) { attempt++; return@use }
                             return@withContext LlmResponse(content, name, latency, rawBody = raw)
@@ -120,6 +131,10 @@ class CloudClient(
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
+        fun finishReason(raw: String): String? = try {
+            JSONObject(raw).getJSONArray("choices").getJSONObject(0).optString("finish_reason").ifBlank { null }
+        } catch (_: Exception) { null }
+
         /** content, or — when content is empty — the last JSON object found in reasoning_content. */
         fun contentOrReasoningJson(raw: String): String {
             val c = LocalMnnClient.parseContent(raw)
