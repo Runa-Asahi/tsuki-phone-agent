@@ -132,6 +132,9 @@ class A11yDevice(
     private fun overlayExclude(): IntArray? = com.runasakura.phoneagent.overlay.EmergencyStopOverlay.bounds?.let {
         intArrayOf(it.left - 8, it.top - 8, it.right + 8, it.bottom + 8) }
 
+    private var ocrFingerprint: IntArray? = null
+    private var lastShotLines: List<com.runasakura.phoneagent.ocr.OcrLine>? = null
+
     private suspend fun ocrScreen(pkg: String): Screen? {
         // Reuse OCR until a new accessibility event (UI change) arrives
         if (ocrCache != null && ocrCachePkg == pkg &&
@@ -152,6 +155,22 @@ class A11yDevice(
         // Landscape apps (games): the screenshot is rotated; make screen coords follow the frame's orientation.
         if ((bmp.width > bmp.height) != (w > h)) { val t = w; w = h; h = t }
         coroutineContext.ensureActive()
+        // Pixel-level cache: an unchanged frame (common in games, where events never stop) reuses the last OCR.
+        val fp = try {
+            val t = android.graphics.Bitmap.createScaledBitmap(bmp, 64, 36, false)
+            val px = IntArray(64 * 36); t.getPixels(px, 0, 64, 0, 0, 64, 36); if (t !== bmp) t.recycle()
+            com.runasakura.phoneagent.ocr.FrameFingerprint.of(px, 64, 36, 64, 36)
+        } catch (_: Throwable) { null }
+        val prevOcr = ocrCache
+        // Only between actions (re-reads for verify/refine/look substitutes): after an action a subtle change (a toggle,
+        // a checkmark) must never be hidden by a stale read, or a working tap would be judged ineffective.
+        if (prevOcr != null && ocrCachePkg == pkg && ocrCacheGen == actionGen && com.runasakura.phoneagent.ocr.FrameFingerprint.same(fp, ocrFingerprint)) {
+            log("OCR 画面未变（像素指纹一致），复用上次识别")
+            val st = shotTop; val sb = shotBottom; keepShot(bmp, lastShotLines ?: emptyList(), st, sb, pkg)
+            ocrCacheEventAt = s.lastEventAt; ocrCacheGen = actionGen
+            return prevOcr
+        }
+        ocrFingerprint = fp
         // Landscape (games/video) runs immersive: no status/navigation bars to cut, and big buttons often sit at the
         // very bottom edge — cropping bands there lost them.
         val landscape = bmp.width > bmp.height
@@ -202,7 +221,7 @@ class A11yDevice(
                 (it.r * inv).toInt(), (it.b * inv).toInt() + off)
         }
         // Detail bands are NOT run here (speed): flows call refineScreen() only when a key target is missing.
-        keepShot(bmp, globalBmp, top, bottom, pkg)
+        keepShot(bmp, globalBmp, top, bottom, pkg); lastShotLines = globalBmp
         val detail = emptyMap<Pair<Int, Int>, List<com.runasakura.phoneagent.ocr.OcrLine>>()
         val sx = w.toFloat() / bw
         val sy = h.toFloat() / bh

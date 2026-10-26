@@ -345,7 +345,13 @@ class AgentLoop(
                 lowConfidence = sc.source != "tree"
             )
             onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
-            if (!visionLogged) { visionLogged = true; onLog("看图能力：" + visionStatus()) }
+            if (!visionLogged) {
+                visionLogged = true; onLog("看图能力：" + visionStatus())
+                Capabilities.lines(Capabilities.Input(true, shellOn, if (router.cloudReady) prefs.cloudModel else null,
+                    com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel), prefs.allowCloudScreenshot,
+                    router.localUsable, (router.visionSkill != null && !router.skillSidelined && !router.localSidelined) || router.visionReady))
+                    .forEach { onLog("能力 · $it") }
+            }
             steps.observe(sc.items.map { it.label }, exact = prevSource == "tree" && sc.source == "tree")   // counters (loading/stuck); the note below is semantic
             val diffNote = semanticNote(sc)
             diffNote?.let { onLog(it) }

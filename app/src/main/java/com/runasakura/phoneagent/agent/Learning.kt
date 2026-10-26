@@ -130,6 +130,7 @@ object Alternatives {
             append("可选的未试动作：")
             if (visual.isNotEmpty()) append("无文字候选 ").append(visual.take(6).joinToString(" ") { "[${it.id}]${it.label}(${it.cx},${it.cy})" }).append("；")
             if (text.isNotEmpty()) append("未点过的元素 ").append(text.take(8).joinToString(" ") { "[${it.id}]${it.label.take(8)}" }).append("；")
+            items.firstOrNull { it.edit }?.let { append("页内搜索：在 [${it.id}] 输入目标关键词；") }
             append("滑动 swipe 换一屏；")
             if (shell) append("Shizuku 按键 {\"type\":\"key\",\"key\":\"escape\"}；")
             append("都不行就 fail 说明原因")
