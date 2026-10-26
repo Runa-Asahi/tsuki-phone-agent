@@ -54,6 +54,7 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
     fun crash() { stacks[fg]?.clear(); log += "crash:$fg"; fg = launcher }
     fun back() {
         if (focused != null && flags["imeOpen"] != false) { focused = null; log += "back:ime"; return }   // like Android: back hides the keyboard first
+        if (flags["noBack"] == true && fg != launcher) { log += "back:ignored"; return }   // games often swallow Back
         if (systemPanel != null) { systemPanel = null; return }
         val st = stacks[fg] ?: return
         if (st.size > 1) { st.removeLast(); log += "back:${st.last()}" } else { fg = launcher; log += "back:launcher" }

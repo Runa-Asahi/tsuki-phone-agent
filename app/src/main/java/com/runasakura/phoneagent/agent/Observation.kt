@@ -81,8 +81,19 @@ object SemanticDiff {
         val x = a.toSet(); val y = b.toSet(); if (x.isEmpty() || y.isEmpty()) return false
         return (x intersect y).size.toDouble() / (x union y).size >= 0.5
     }
-    private fun samePlace(a: ScreenItem, b: ScreenItem) =
-        kotlin.math.abs(a.cx - b.cx) <= 90 && kotlin.math.abs(a.cy - b.cy) <= 50
+    /**
+     * Same position AND still loosely the same text (OCR jitter). Position alone hid in-place content switches
+     * (a tab swapping its panel, a landscape game replacing a card): different text at the same spot is a change.
+     */
+    private fun samePlace(a: ScreenItem, b: ScreenItem): Boolean {
+        if (kotlin.math.abs(a.cx - b.cx) > 90 || kotlin.math.abs(a.cy - b.cy) > 50) return false
+        if (garbled(a.label) || garbled(b.label)) return true   // OCR noise at the same spot: jitter, not content
+        val x = a.label.toSet(); val y = b.label.toSet(); if (x.isEmpty() || y.isEmpty()) return false
+        return (x intersect y).size.toDouble() / (x union y).size >= 0.25
+    }
+    /** A read with no real word in it (fewer than 2 CJK chars and no 3-letter run), e.g. "(①y", "E_". */
+    private fun garbled(s: String): Boolean =
+        s.count { Character.UnicodeScript.of(it.code) == Character.UnicodeScript.HAN } < 2 && !Regex("[A-Za-z]{3,}").containsMatchIn(s)
 
     /**
      * [exact] = both reads came from the accessibility tree: text is exact, so there is no OCR jitter to forgive.

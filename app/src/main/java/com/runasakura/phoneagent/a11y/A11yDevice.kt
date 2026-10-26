@@ -152,7 +152,10 @@ class A11yDevice(
         // Landscape apps (games): the screenshot is rotated; make screen coords follow the frame's orientation.
         if ((bmp.width > bmp.height) != (w > h)) { val t = w; w = h; h = t }
         coroutineContext.ensureActive()
-        val (top, bottom) = cropBands(bmp.height)
+        // Landscape (games/video) runs immersive: no status/navigation bars to cut, and big buttons often sit at the
+        // very bottom edge — cropping bands there lost them.
+        val landscape = bmp.width > bmp.height
+        val (top, bottom) = if (landscape) 0 to bmp.height else cropBands(bmp.height)
         val crop = try { android.graphics.Bitmap.createBitmap(bmp, 0, top, bmp.width, bottom - top) } catch (_: Exception) { bmp }
         val off = if (crop === bmp) 0 else top
         // Half resolution for Chinese OCR speed (scale coords back). Cap long side at 720.
@@ -168,10 +171,29 @@ class A11yDevice(
         } else crop
         // Mild contrast stretch helps dark-mode WeChat (pure Kotlin, no ColorMatrix GPU needed)
         val ready = enhanceContrast(small)
-        val lines = try { TaskTiming.time("OCR识别") { OcrEngine.recognizeLines(ready, 0) } } finally {
+        var lines = try { TaskTiming.time("OCR识别") { OcrEngine.recognizeLines(ready, 0) } } finally {
             // Free intermediates promptly (each full-res ARGB frame is ~14 MB on PPG-AN00).
-            for (b in listOf(ready, small, crop)) if (b !== bmp && !b.isRecycled) b.recycle()
+            for (b in listOf(ready, small)) if (b !== bmp && b !== crop && !b.isRecycled) b.recycle()
         }
+        // Landscape: the downscaled pass misses text; add native-resolution tiles (aspect kept) and merge.
+        if (landscape && lines != null && scaleDown < 0.99f) {
+            val inv0 = 1f / scaleDown
+            val global = lines.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * inv0).toInt(), (it.t * inv0).toInt(), (it.r * inv0).toInt(), (it.b * inv0).toInt()) }
+            val tiles = ArrayList<com.runasakura.phoneagent.ocr.OcrLine>()
+            for ((x0, x1) in com.runasakura.phoneagent.ocr.OcrTiles.columns(crop.width, 1600, 120)) {
+                coroutineContext.ensureActive()
+                val tile = try { android.graphics.Bitmap.createBitmap(crop, x0, 0, x1 - x0, crop.height) } catch (_: Exception) { null } ?: continue
+                val tr = enhanceContrast(tile)
+                val res = try { OcrEngine.recognizeLines(tr, 0) } finally { if (tr !== tile && !tr.isRecycled) tr.recycle(); if (!tile.isRecycled) tile.recycle() }
+                res?.forEach { tiles += com.runasakura.phoneagent.ocr.OcrLine(it.text, it.l + x0, it.t, it.r + x0, it.b) }
+            }
+            val merged = com.runasakura.phoneagent.ocr.OcrTiles.merge(global, tiles)
+            log("OCR 横屏原分辨率分块：整体 ${global.size} + 分块 ${tiles.size} → ${merged.size} 行")
+            lines = merged.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * scaleDown).toInt(), (it.t * scaleDown).toInt(), (it.r * scaleDown).toInt(), (it.b * scaleDown).toInt()) }
+        }
+        // Visual candidates (colour blocks / corner icons) from a small thumbnail: text-free buttons become tappable items.
+        val blobsThumb = try { thumbBlobs(crop) } catch (_: Throwable) { null }
+        if (crop !== bmp && !crop.isRecycled) crop.recycle()
         val bw = bmp.width; val bh = bmp.height; val swd = small.width; val sht = small.height
         if (lines == null) { bmp.recycle(); return null }
         val inv = if (scaleDown < 0.99f) 1f / scaleDown else 1f
@@ -192,10 +214,27 @@ class A11yDevice(
             scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore, overlayExclude()
         )
         val ms = System.currentTimeMillis() - t0
-        log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}）文字=${items.size}")
-        val out = Screen(pkg, w, h, items, if (items.isEmpty()) "none" else "ocr", imeTop(), s.editableFocused())
+        log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}${if (landscape && scaleDown < 0.99f) "+原分辨率分块" else ""}）文字=${items.size}")
+        val visual = blobsThumb?.let { (bl, k) ->
+            // thumbnail coords → bitmap coords (+crop offset) → screen coords
+            val shifted = bl.map { it.copy(t = it.t + (off / k).toInt(), b = it.b + (off / k).toInt()) }
+            com.runasakura.phoneagent.ocr.VisualCandidates.toItems(shifted, k * sx, items)
+        }.orEmpty()
+        if (visual.isNotEmpty()) log("视觉候选（无文字按钮/角落图标）${visual.size} 个：" + visual.joinToString("、") { "${it.label}(${it.cx},${it.cy})" })
+        val all = items + visual
+        val out = Screen(pkg, w, h, all, if (items.isEmpty()) (if (visual.isEmpty()) "none" else "ocr") else "ocr", imeTop(), s.editableFocused())
         ocrCache = out; ocrCacheEventAt = s.lastEventAt; ocrCachePkg = pkg; ocrCacheGen = actionGen
         return out
+    }
+
+    /** Colour-block + corner-icon candidates on a ≤360px-wide thumbnail; returns (blobs, bitmap px per thumb px). */
+    private fun thumbBlobs(src: android.graphics.Bitmap): Pair<List<com.runasakura.phoneagent.ocr.VisualCandidates.Blob>, Float> {
+        val k = maxOf(1f, src.width / 360f)
+        val tw = (src.width / k).toInt().coerceAtLeast(1); val th = (src.height / k).toInt().coerceAtLeast(1)
+        val t = android.graphics.Bitmap.createScaledBitmap(src, tw, th, true)
+        val px = IntArray(tw * th); t.getPixels(px, 0, tw, 0, 0, tw, th); if (t !== src) t.recycle()
+        val vc = com.runasakura.phoneagent.ocr.VisualCandidates
+        return (vc.detect(px, tw, th) + vc.corners(px, tw, th)) to k
     }
 
     // Last screenshot kept (one frame) so refineScreen() can re-OCR bands without a new capture.

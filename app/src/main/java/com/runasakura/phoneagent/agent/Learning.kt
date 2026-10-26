@@ -116,6 +116,26 @@ object FailureCause {
 
 /** Online adaptation: concrete alternatives for an action that just failed (generic, by action kind). */
 object Alternatives {
+    /**
+     * Concrete untried options on THIS screen after an action was banned: visible elements not yet tapped and not
+     * proven dead, text-free visual candidates, corner icons, plus generic moves. Generic, from the screen only.
+     */
+    fun untried(items: List<com.runasakura.phoneagent.screen.ScreenItem>, dead: List<String>, tapped: Set<String>, shell: Boolean): String {
+        fun n(s: String) = s.replace(Regex("[^\\p{IsHan}A-Za-z0-9]"), "").lowercase()
+        val deadN = dead.map { n(it) }; val tappedN = tapped.map { n(it) }.toSet()
+        val fresh = items.filter { n(it.label).let { l -> l.isNotEmpty() && l !in tappedN && deadN.none { d -> d == l } } || it.label.startsWith("〔") }
+        val visual = fresh.filter { it.label.startsWith("〔") }
+        val text = fresh.filterNot { it.label.startsWith("〔") }
+        return buildString {
+            append("可选的未试动作：")
+            if (visual.isNotEmpty()) append("无文字候选 ").append(visual.take(6).joinToString(" ") { "[${it.id}]${it.label}(${it.cx},${it.cy})" }).append("；")
+            if (text.isNotEmpty()) append("未点过的元素 ").append(text.take(8).joinToString(" ") { "[${it.id}]${it.label.take(8)}" }).append("；")
+            append("滑动 swipe 换一屏；")
+            if (shell) append("Shizuku 按键 {\"type\":\"key\",\"key\":\"escape\"}；")
+            append("都不行就 fail 说明原因")
+        }
+    }
+
     fun forFailure(a: com.runasakura.phoneagent.model.AgentAction, error: String?): String? = when (a) {
         is com.runasakura.phoneagent.model.AgentAction.Tap -> if (error?.contains("不在当前列表") == true || error?.contains("找不到") == true)
             "可选替代：按最新 e 编号重点 / scroll_find 找目标 / 用搜索入口 / look 后按坐标" else "可选替代：点元素中心坐标 / long_press / 先 back 关闭遮挡再点"
@@ -144,5 +164,24 @@ object Corrections {
         summary.contains("用户取消确认") -> lastStep?.let { "用户拒绝过：${it.take(24)}（再做前先问清楚）" }
         summary.contains("急停") -> lastStep?.let { "用户在「${it.take(20)}」时手动停止" }
         else -> null
+    }
+}
+
+
+/**
+ * Failure reflections are written by the model from a trajectory it may have misread. A claim that something is
+ * ineffective must be backed by the run's own evidence (the no-effect guard proved that target did nothing);
+ * unsupported "X 无效" claims are dropped, supported ones kept but tagged unverified (low confidence).
+ */
+object LessonEvidence {
+    private val NEG = Regex("无效|没反应|无反应|没有反应|不起作用|无法|点不了|不能点|没用")
+    fun filter(facts: List<String>, dead: List<String>): List<String> {
+        fun n(s: String) = s.replace(Regex("[^\\p{IsHan}A-Za-z0-9]"), "").lowercase()
+        val d = dead.map { n(it) }.filter { it.isNotEmpty() }
+        return facts.mapNotNull { f ->
+            if (!NEG.containsMatchIn(f)) f.let { if (it.contains("待验证")) it else "$it（待验证）" }
+            else if (d.any { n(f).contains(it) }) (if (f.contains("待验证")) f else "$f（待验证）")
+            else null
+        }
     }
 }

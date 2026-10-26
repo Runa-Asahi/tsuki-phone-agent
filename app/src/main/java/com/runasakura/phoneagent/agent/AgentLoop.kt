@@ -87,7 +87,11 @@ class AgentLoop(
         val outcome = if (r.success) "成功" else "失败：${r.summary.take(80)}"
         val lesson = router.lesson(goal, appLabel, traj, outcome, memory.all() + guard.deadLabels().map { "「$it」无效" })
         val base = runCatching { AppMemory.decode(prefs.appMemory(pkg)) }.getOrNull() ?: AppMemory.EMPTY   // includes the deterministic part above
-        val facts = lesson?.facts.orEmpty()
+        val facts = if (r.success) lesson?.facts.orEmpty()
+            else LessonEvidence.filter(lesson?.facts.orEmpty(), guard.deadLabels()).also { kept ->
+                val dropped = lesson?.facts.orEmpty().size - kept.size
+                if (dropped > 0) onLog("失败反思：丢弃 $dropped 条缺乏证据的结论（未被本次屏幕变化证实）")
+            }
         // Failure: routes reused this time lose confidence; facts shown this time are demoted (unverified ones dropped).
         val m = if (r.success) base.merge(facts, goal, lesson?.route ?: traj)
             else (if (reusedPath) base.penalize(goal) else base).decayShown(goal).merge(facts, null, null)
@@ -100,13 +104,13 @@ class AgentLoop(
             r.success -> "经验沉淀：记录本次路线（未经模型整理）"
             reusedPath -> "失败：已降低复用路线的可信度"
             else -> "失败：本次未生成经验" }); return }
-        onLog((if (r.success) "经验沉淀：" else "失败反思：") + (lesson.route?.let { "路线=$it；" } ?: "") + lesson.facts.joinToString("；"))
+        onLog((if (r.success) "经验沉淀：" else "失败反思：") + (lesson.route?.let { "路线=$it；" } ?: "") + facts.joinToString("；"))
     }
 
     private suspend fun runTask(goalIn: String): Result {
         var goal = GoalRewrite.normalize(goalIn)
         if (goal != goalIn) onLog("目标规范化：$goal")
-        val a11y = phoneProvider()
+        var a11y = phoneProvider()
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider() } }
             ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
         a11y.resetTaskState()
@@ -184,7 +188,9 @@ class AgentLoop(
         }
 
         // ---- Deterministic paths (never call the model here) ----
-        val dev = com.runasakura.phoneagent.flow.StopGuardDevice(com.runasakura.phoneagent.shell.ShellAugmentedDevice(a11y.device(onLog), { if (shellOn) a11y.shell() else null }, onLog), isStopped)
+        fun buildDev(p: com.runasakura.phoneagent.a11y.Phone) =
+            com.runasakura.phoneagent.flow.StopGuardDevice(com.runasakura.phoneagent.shell.ShellAugmentedDevice(p.device(onLog), { if (shellOn) p.shell() else null }, onLog), isStopped)
+        var dev = buildDev(a11y)
         // ---- Model-first goal understanding (rules are only the fallback) ----
         val intent = if (toggleNote != null) null else {
             onLog("正在理解任务…")
@@ -314,13 +320,21 @@ class AgentLoop(
             if (isStopped()) return Result(false, step, "已急停")
 
             if (!a11y.isCurrent()) {
-                onLog("无障碍服务已断开/重启，等待重连…")
-                val again = com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider()?.takeIf { it.isCurrent() } }
-                return Result(false, step, if (again == null) "无障碍服务已断开（10 秒未重连），任务停止" else "无障碍服务已重启，为安全起见停止本次任务，请重试")
+                // Recover instead of stopping: wait for the system to rebind; repair settings only if the service is truly
+                // gone from them (self-heal never touches a still-listed service); then resume on the new connection.
+                onLog("无障碍服务断开：等待系统重新绑定（最多 20 秒）…")
+                var again = com.runasakura.phoneagent.util.Await.nonNull(8_000) { phoneProvider()?.takeIf { it.isCurrent() } }
+                if (again == null) {
+                    runCatching { com.runasakura.phoneagent.a11y.A11ySelfHeal.heal(com.runasakura.phoneagent.PhoneAgentApp.instance, "任务中断开") }
+                    again = com.runasakura.phoneagent.util.Await.nonNull(12_000) { phoneProvider()?.takeIf { it.isCurrent() } }
+                }
+                if (again == null) return Result(false, step, "无障碍服务断开 20 秒仍未重连，任务停止（原因见诊断日志「无障碍连接记录」）")
+                if (reconnects++ >= 2) return Result(false, step, "无障碍服务本任务内反复断开，已停止（原因见诊断日志「无障碍连接记录」）")
+                onLog("无障碍服务已重新连接，继续任务"); a11y = again; dev = buildDev(again); lastExec = null; transcript.note("无障碍服务刚重连，请重新观察当前界面。")
             }
             step++; stepNow = step
             onLog("—— 步骤 $step/$max ——")
-            val sc = dev.screen()
+            val sc = if (refineNext) { refineNext = false; dev.refineScreen() } else dev.screen()
             lastScreen = sc
             a11y.lastItems = sc.items
             obsItems = sc.items
@@ -331,6 +345,7 @@ class AgentLoop(
                 lowConfidence = sc.source != "tree"
             )
             onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
+            if (!visionLogged) { visionLogged = true; onLog("看图能力：" + visionStatus()) }
             steps.observe(sc.items.map { it.label }, exact = prevSource == "tree" && sc.source == "tree")   // counters (loading/stuck); the note below is semantic
             val diffNote = semanticNote(sc)
             diffNote?.let { onLog(it) }
@@ -351,10 +366,12 @@ class AgentLoop(
             if (sc.isEmpty() && !AppResolver.isAgentOrBrain(sc.pkg)) {
                 // Custom-drawn views can have no tree AND defeat OCR. If the user's model can see screenshots (or a vision
                 // helper is configured), let it look instead of giving up; only a fully blind screen stops the task.
-                val canSee = (router.cloudReady && prefs.allowCloudScreenshot && com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)) ||
-                    router.visionSkill != null || router.visionReady
-                val probe = if (canSee) try { a11y.screenshotJpegBase64(320) } catch (_: Exception) { null } else null
-                if (probe == null) return Result(false, step, "读不到界面（无障碍树与 OCR 均为空），为避免盲猜不调用模型")
+                val probe = if (canSee()) try { a11y.screenshotJpegBase64(320) } catch (_: Exception) { null } else null
+                if (probe == null) {
+                    // No eyes: an empty frame is usually still loading (splash/3D scene) — wait and re-read a few times.
+                    if (blindWaits++ < 3) { onLog("界面暂时读不到文字/按钮（无看图能力）：等待加载后重读（$blindWaits/3）"); pause(1500); step--; continue }
+                    return Result(false, step, "读不到界面（无障碍树、OCR、色块检测均为空，且当前模型不能看图），为避免盲猜不调用模型")
+                }
                 if (emptyLooks++ >= 6) return Result(false, step, "界面一直读不到文字，看图多次仍未完成，已停止")
                 onLog("界面没有可读文字：改为看截图（坐标按屏幕 ${sc.w}x${sc.h}）"); lookNext = true
             }
@@ -484,7 +501,13 @@ class AgentLoop(
             plan.screen?.let { onLog("界面类型（模型判断）：$it") }
             plan.goalMatch?.let { onLog("与目标是否一致（模型判断）：$it") }
             lastScreenKind = plan.screen; lastGoalMatch = plan.goalMatch
-            if (GoalMatch.saysYes(plan.goalMatch) && plan.action !is AgentAction.Done) verifyNext = true
+            // A "yes" while the model is still navigating (tap/type/swipe) is a statement about a sub-step, not the
+            // whole goal. Verify only when it says yes and stops acting (wait/back/home) or says yes twice in a row.
+            val yesNow = GoalMatch.saysYes(plan.goalMatch)
+            val sig = obsItems.joinToString("|") { it.label }.hashCode()
+            if (yesNow && plan.action !is AgentAction.Done && sig != verifiedSig &&
+                ((plan.action is AgentAction.Wait && !plan.needScreenshot) || (prevYes && sig == prevSig))) { verifyNext = true; verifiedSig = sig }
+            prevYes = yesNow; prevSig = sig
             lastExpect = plan.expect
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
@@ -506,7 +529,10 @@ class AgentLoop(
                         ChatMessage(
                             "user",
                             "${Injection.wrap(snap.compressedText)}\n目标：$goal\n上次输出错误：$err\n" +
-                                "请只用上面列表中的 e 编号，只输出一行 JSON。"
+                                (guard.summary()?.let { "$it\n" } ?: "") +
+                                Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn) + "\n" +
+                                (if (!canSee()) "本次无法看截图，不要输出 look。\n" else "") +
+                                "必须从上面的可选项里选一个没试过的动作；请只用上面列表中的 e 编号，只输出一行 JSON。"
                         )
                     ),
                     forceCloud = router.canEscalate, // parse/validation failure → retry on the user-configured cloud model
@@ -520,7 +546,15 @@ class AgentLoop(
             }
             if (err != null) {
                 // Don't abort the task: record it, force a fresh look next step.
-                if (++invalidStreak >= 3) return Result(false, step, "模型连续给出无效动作（$err），已停止以免误操作")
+                invalidStreak++
+                // Before giving up: one recovery (restart the target app at its known entry), then a few more chances.
+                if (invalidStreak == 3 && !relaunchedForInvalid && (targetPkg ?: targetPkgForMemory) != null) {
+                    relaunchedForInvalid = true; val p = (targetPkg ?: targetPkgForMemory)!!
+                    onLog("恢复：模型反复提出已证实无效的动作，重启目标应用回到已知入口（$p）")
+                    dev.bringToFront(p, p, force = true); transcript.clear()
+                    transcript.note("系统已重启目标应用回到入口。之前无效的动作：${guard.summary() ?: "无"}；换一条路线。"); continue
+                }
+                if (invalidStreak >= 6) return Result(false, step, "模型连续给出无效动作（$err），已尝试替代方案与重启入口，仍无进展，已停止")
                 onLog("本步放弃该动作：$err")
                 steps.recordAction("无效输出（$err）", ok = false)
                 lookNext = true; lastExec = null
@@ -583,7 +617,16 @@ class AgentLoop(
                 // A second look in a row gets an unmarked screenshot (set-of-mark boxes can hide small icons).
                 if (shotThisStep) cleanShotNext = true
                 lookNext = true
-                if (plan.action is AgentAction.Wait) { onLog("模型请求看截图（下一步附图）"); lastExec = null; continue }
+                if (plan.action is AgentAction.Wait) {
+                    if (!canSee()) {
+                        // No vision path: never pretend. Substitute a high-resolution re-OCR + colour candidates of this frame.
+                        lookNext = false; lookSubstitutes++; refineNext = true
+                        onLog("模型请求看截图，但本次没有看图能力：改为高精度区域 OCR + 色块候选（第 $lookSubstitutes 次）")
+                        transcript.note("本次无法看截图（模型不支持图片或未允许）。已改为高精度 OCR 重识别并列出无文字按钮候选〔…色块〕；不要再输出 look。")
+                        lastExec = null; continue
+                    }
+                    onLog("模型请求看截图（下一步附图）"); lastExec = null; continue
+                }
             }
             when (val action = plan.action) {
                 is AgentAction.Done -> {
@@ -825,9 +868,16 @@ class AgentLoop(
         guard.check(a, label)?.let { return it }
         if (a is AgentAction.Done && GoalMatch.saysNo(plan.goalMatch))
             return "你自己判断 goal_match=${plan.goalMatch}，与目标不一致，不能 done；继续操作或退回主入口"
+        if (plan.needScreenshot && !canSee() && lookSubstitutes >= 2)
+            return "本次无法看截图（已两次改用高精度 OCR），不要再输出 look；" + Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn)
         if (a is AgentAction.Tap && a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x != null && a.y != null &&
-            !shotThisStep && !ObsFormat.nearAny(sc.items, a.x!!, a.y!!) && !LayoutHints.isGallery(sc))
-            return "坐标(${a.x},${a.y})附近没有任何识别到的元素，没有截图时禁止盲点；请点列表里的元素，或输出 {\"type\":\"look\"} 请求截图"
+            !shotThisStep && !ObsFormat.nearAny(sc.items, a.x!!, a.y!!) && !LayoutHints.isGallery(sc)) {
+            // Without any vision path the coordinate tap is the model's only way to reach a text-free control: allow a
+            // bounded number of exploratory taps with stated reasoning; their outcome is verified by the screen diff.
+            if (!canSee() && exploreTaps < MAX_EXPLORE_TAPS && !plan.thought.isNullOrBlank()) { exploreTaps++; onLog("探索性坐标点击（无看图能力，$exploreTaps/$MAX_EXPLORE_TAPS）：(${a.x},${a.y})"); return null }
+            return if (canSee()) "坐标(${a.x},${a.y})附近没有任何识别到的元素；请点列表里的元素，或输出 {\"type\":\"look\"} 请求截图"
+            else "坐标(${a.x},${a.y})附近没有识别到的元素，探索性点击次数已用完；" + Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn)
+        }
         return null
     }
 
@@ -863,7 +913,35 @@ class AgentLoop(
         return t.copy(nodeId = again.id, x = null, y = null)
     }
 
+    private val tappedLabels = LinkedHashSet<String>()
     private var lookNext = false
+    private var blindWaits = 0
+    private var refineNext = false
+    private var reconnects = 0
+    private var prevYes = false
+    private var prevSig = 0
+    private var verifiedSig = 1
+    /** Coordinate taps without any detected element, allowed only when no vision path exists (bounded). */
+    private var exploreTaps = 0
+    private var lookSubstitutes = 0
+    private var relaunchedForInvalid = false
+    private var visionLogged = false
+
+    /**
+     * Can anything look at a screenshot this run? The user's cloud model (vision-capable AND screenshots allowed), a
+     * usable vision helper (not sidelined), or the local VL skill while the local server is reachable.
+     */
+    private fun canSee(): Boolean =
+        (router.cloudReady && prefs.allowCloudScreenshot && com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)) ||
+            (router.visionSkill != null && !router.skillSidelined && !router.localSidelined) ||
+            (router.visionReady && prefs.allowCloudScreenshot)
+
+    private fun visionStatus(): String = when {
+        router.cloudReady && prefs.allowCloudScreenshot && com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel) -> "云端模型 ${prefs.cloudModel} 直接看截图"
+        router.visionSkill != null && !router.skillSidelined && !router.localSidelined -> "本机视觉模型描述截图"
+        router.visionReady && prefs.allowCloudScreenshot -> "看图辅助模型"
+        else -> "无（模型不支持图片/未允许发送截图/视觉模型不可用）→ 用文字 OCR + 色块候选代替截图"
+    }
     private var emptyLooks = 0
     private var shotThisStep = false
     private var lastNoEffect = false
@@ -1048,6 +1126,8 @@ class AgentLoop(
             }
             skill?.suggestion(effective, obsItems.map { it.label })?.let { appendLine(it) }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
+            if (!canSee() && (snap.lowConfidence || obsItems.size < 8))
+                appendLine("⚠ 本次无法看截图：不要输出 look。无文字的按钮见列表里的〔…按钮·无文字〕/〔角落图标〕候选，直接用其 e 编号；都不对时可用坐标做探索性点击（thought 写明依据）。")
             // Soft per-app hints (data file) once per package per task: they stay in the cached transcript afterwards.
             if (snap.packageName.isNotBlank() && hintedPkgs.add(snap.packageName)) {
                 AppHints.forPackage(snap.packageName)?.let { appendLine("# 应用提示\n$it") }
@@ -1253,6 +1333,7 @@ class AgentLoop(
      * right after, "X 不行，Y 可以" becomes a task fact (and an app fact at the end).
      */
     private fun onlineAdapt(action: AgentAction, target: String?, ok: Boolean) {
+        if (action is AgentAction.Tap) target?.let { tappedLabels.add(it) }
         val desc = ActionDesc.of(action, tapped)
         lastAttempt = desc
         if (!ok) { lastFailedAction = action; lastFailedTarget = target; lastFailError = lastExecError; return }
@@ -1312,6 +1393,7 @@ class AgentLoop(
     }
 
     companion object {
+        const val MAX_EXPLORE_TAPS = 4
         private const val TAG = "AgentLoop"
         const val STEP_TIMEOUT_MS = 120_000L
         /** Cloud steps: CloudClient's own budget (60 s incl. retries) + margin; local MNN can be much slower. */
