@@ -68,6 +68,7 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
     fun tapAt(x: Int, y: Int): Boolean {
         val e = current().els(this).firstOrNull { kotlin.math.abs(it.x - x) <= it.w / 2 && kotlin.math.abs(it.y - y) <= it.h / 2 } ?: return true
         log += "tap:${e.label}"
+        if (flags["fail:${e.label}"] == true) return false
         if (e.edit) { focused = e.label; return true }
         e.onTap?.invoke(this); return true
     }

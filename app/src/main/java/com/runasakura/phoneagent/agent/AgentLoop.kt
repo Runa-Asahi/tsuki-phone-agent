@@ -55,18 +55,38 @@ class AgentLoop(
     suspend fun run(goalIn: String): Result {
         val r = try { runTask(goalIn) } catch (_: com.runasakura.phoneagent.flow.StopRequested) { onLog("■ 已急停"); Result(false, 0, "已急停") }
         // Off the critical path: the result is shown immediately, learning finishes in the background.
-        if (!isStopped()) kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { learnFrom(goalIn, r) } }
+        // A user stop still teaches something (a correction), but makes no model call.
+        val stopped = isStopped()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch { runCatching { learnFrom(goalIn, r, modelCall = !stopped) } }
         return r
     }
 
     /** Experience replay: success → distilled route; failure → reflection lessons. Both stored per app, model-written. */
-    private suspend fun learnFrom(goal: String, r: Result) {
+    private suspend fun learnFrom(goal: String, r: Result, modelCall: Boolean = true) {
         val pkg = targetPkgForMemory ?: return
+        // ---- deterministic learning (no model call): skills, failure cause, user corrections ----
+        runCatching {
+            var m = AppMemory.decode(prefs.appMemory(pkg))
+            val facts = ArrayList<String>()
+            Corrections.fromGoal(goal)?.let { facts += it }
+            Corrections.fromOutcome(r.summary, effective.lastOrNull() ?: lastAttempt)?.let { facts += it }
+            if (r.success) {
+                if (effective.size >= 2) { m = m.learnSkill(goal, effective); onLog("技能沉淀：" + Skill.normalize(effective).joinToString(" → ")) }
+            } else {
+                val cause = FailureCause.attribute(r.summary, lastFailError, stepsRef?.looping == true, r.needsUser)
+                onLog("失败归因：${cause.zh}")
+                FailureCause.lesson(cause, goal, lastAttempt)?.let { facts += it }
+                if (skill != null && cause !in setOf(FailureCause.Kind.USER_STOP, FailureCause.Kind.NEEDS_USER, FailureCause.Kind.USER_DECLINED)) m = m.penalizeSkill(goal)
+            }
+            if (facts.isNotEmpty()) m = m.merge(facts, null, null)
+            prefs.setAppMemory(pkg, m.encode())
+        }
+        if (!modelCall) return
         val traj = stepsRef?.progress().orEmpty()
         if (traj.isBlank() || modelSteps == 0) return
         val outcome = if (r.success) "成功" else "失败：${r.summary.take(80)}"
         val lesson = router.lesson(goal, appLabel, traj, outcome, memory.all() + guard.deadLabels().map { "「$it」无效" })
-        val base = runCatching { AppMemory.decode(prefs.appMemory(pkg)) }.getOrNull() ?: AppMemory.EMPTY
+        val base = runCatching { AppMemory.decode(prefs.appMemory(pkg)) }.getOrNull() ?: AppMemory.EMPTY   // includes the deterministic part above
         val facts = lesson?.facts.orEmpty()
         // Failure: routes reused this time lose confidence; facts shown this time are demoted (unverified ones dropped).
         val m = if (r.success) base.merge(facts, goal, lesson?.route ?: traj)
@@ -232,6 +252,7 @@ class AgentLoop(
                 targetPkgForMemory = match.packageName
                 appMem = runCatching { AppMemory.decode(prefs.appMemory(match.packageName)) }.getOrNull()
                 appMem?.hint(goal)?.let { onLog("载入应用经验：" + it.replace("\n", " | ")) }
+                skill = appMem?.skillFor(goal)?.also { onLog("载入技能（${it.steps.size} 步，已验证${it.conf}次）：" + it.steps.joinToString(" → ")) }
                 if (!com.runasakura.phoneagent.util.TaskTiming.time("启动应用") { dev.bringToFront(match.packageName, match.label) }) {
                     return Result(false, 1, "无法把「${match.label}」带到前台（前台=${dev.foregroundPackage()}）")
                 }
@@ -615,6 +636,8 @@ class AgentLoop(
                     val before = a11y.foregroundPackage()
                     lastExecError = null; tapped = null
                     val ok = execute(a11y, action, snap)
+                    onlineAdapt(action, tapped ?: targetLabel(action, sc) ?: (action as? AgentAction.LongPress)?.let { lp ->
+                        lp.nodeId?.let { id -> sc.items.firstOrNull { it.id == id }?.label } ?: if (lp.x != null && lp.y != null) LayoutHints.labelNear(sc, lp.x, lp.y, 60) else null }, ok)
                     val desc = ActionDesc.of(action, tapped) + if (ok) "" else " ✗执行失败：${lastExecError ?: "未知原因"}"
                     steps.recordAction(desc, ok)
                     lastExec = Triple(action, tapped ?: targetLabel(action, sc), ActionDesc.of(action, tapped))
@@ -866,7 +889,7 @@ class AgentLoop(
         val exp = lastExpect?.let { "（你预期：$it —— 对照下面判断是否达到）" } ?: ""
         val d = SemanticDiff.compare(prev, sc.items, exact)
         val stateNote = SemanticDiff.stateChange(imeBefore, sc.imeTop, focusBefore, sc.inputFocused)
-        if (!d.meaningful && stateNote != null) return "上一步：${le.third}$exp → 文字没变，但$stateNote"
+        if (!d.meaningful && stateNote != null) { effective += le.third; return "上一步：${le.third}$exp → 文字没变，但$stateNote" }
         // Actions whose effect is not on screen (system command, clipboard, media/volume keys, wait) are judged by
         // their tool result, not by a screen diff — never mark them "ineffective" or ban them as a loop.
         if (!d.meaningful && isOffScreen(le.first)) return "上一步：${le.third}$exp → 界面未变（此操作不改变界面，以工具结果为准）"
@@ -874,6 +897,7 @@ class AgentLoop(
             guard.record(le.first, le.second, le.third); lastNoEffect = true
             "上一步：${le.third}$exp → 界面没有实质变化${if (exact) "" else "（只是 OCR 抖动）"}= 这个动作无效，不要再做"
         } else buildString {
+            effective += le.third
             append("上一步：").append(le.third).append(exp).append(" → 界面有变化")
             if (d.added.isNotEmpty()) append(" 新出现:").append(d.added.distinct().take(6).joinToString("、"))
             if (d.removed.isNotEmpty()) append(" 消失:").append(d.removed.distinct().take(6).joinToString("、"))
@@ -988,8 +1012,13 @@ class AgentLoop(
         return buildString {
             appendLine("/no_think")
             appendLine("# 用户目标\n$goal")
-            appMem?.hint(goal)?.let { appendLine("# 以往经验\n$it") }
-            globalHint?.let { appendLine("# 通用界面经验\n$it") }
+            // Learned memory is task-stable: injected once (first observation / after a reset) and then carried by the
+            // cached transcript prefix instead of being re-sent with every step.
+            if (transcript.size() == 0) {
+                appMem?.hint(goal)?.let { appendLine("# 以往经验\n$it") }
+                globalHint?.let { appendLine("# 通用界面经验\n$it") }
+            }
+            skill?.suggestion(effective, obsItems.map { it.label })?.let { appendLine(it) }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
             // Soft per-app hints (data file) once per package per task: they stay in the cached transcript afterwards.
             if (snap.packageName.isNotBlank() && hintedPkgs.add(snap.packageName)) {
@@ -998,8 +1027,10 @@ class AgentLoop(
                 // experience too, and becomes the learning target when the task had none.
                 if (!AppResolver.isAgentOrBrain(snap.packageName) && snap.packageName != "com.android.systemui" && !snap.packageName.contains("launcher")) {
                     if (targetPkgForMemory == null) targetPkgForMemory = snap.packageName
-                    if (snap.packageName != targetPkgForMemory || appMem == null)
-                        runCatching { AppMemory.decode(prefs.appMemory(snap.packageName)) }.getOrNull()?.hint(goal)?.let { appendLine("# 此应用以往经验\n$it") }
+                    if (snap.packageName != targetPkgForMemory || appMem == null) runCatching { AppMemory.decode(prefs.appMemory(snap.packageName)) }.getOrNull()?.let { m ->
+                        m.hint(goal)?.let { appendLine("# 此应用以往经验\n$it") }
+                        if (skill == null) skill = m.skillFor(goal)?.also { onLog("载入技能（${it.steps.size} 步）：" + it.steps.joinToString(" → ")) }
+                    }
                 }
             }
             appendLine("# 本步 第${step}步 屏幕${snap.screenWidth}x${snap.screenHeight} 包${snap.packageName}")
@@ -1011,7 +1042,7 @@ class AgentLoop(
             }
             diffNote?.let { appendLine(it) }
             guard.summary()?.let { appendLine(it) }
-            stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。换一种方式。") }
+            stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。换一种方式。" + (lastFailedAction?.let { a -> Alternatives.forFailure(a, lastFailError)?.let { " $it" } } ?: "")) }
             stepsRef?.loopHint()?.let { appendLine(it) }
             lastScreen?.let { appendLine(LayoutHints.describe(it)) }
             val raw = snap.compressedText.take(1600).ifBlank { "(空)" }
@@ -1179,6 +1210,29 @@ class AgentLoop(
     }
 
     private val hintedPkgs = HashSet<String>()
+    /** Effective steps of this run (the screen changed after them) — distilled into a skill on success. */
+    private val effective = ArrayList<String>()
+    private var skill: Skill? = null
+    private var lastAttempt: String? = null
+    private var lastFailedAction: AgentAction? = null
+    private var lastFailedTarget: String? = null
+    private var lastFailError: String? = null
+
+    /**
+     * Online adaptation: a failure is remembered with its target; if a DIFFERENT action on the same target works
+     * right after, "X 不行，Y 可以" becomes a task fact (and an app fact at the end).
+     */
+    private fun onlineAdapt(action: AgentAction, target: String?, ok: Boolean) {
+        val desc = ActionDesc.of(action, tapped)
+        lastAttempt = desc
+        if (!ok) { lastFailedAction = action; lastFailedTarget = target; lastFailError = lastExecError; return }
+        val fa = lastFailedAction; val ft = lastFailedTarget
+        if (fa != null && ft != null && target != null && Similarity.score(ft, target) >= 0.8 && fa::class != action::class) {
+            val note = Alternatives.recovered(ft, ActionDesc.of(fa).substringBefore("「").ifBlank { fa::class.simpleName.orEmpty() }, desc)
+            memory.add(note); onLog("在线适应：$note")
+        }
+        lastFailedAction = null; lastFailedTarget = null
+    }
     /** Cross-app UI strategies learned from earlier tasks (loaded once per task; constant → prefix-cache friendly). */
     private val globalHint: String? by lazy { runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)).hint("", maxFacts = 4) }.getOrNull()?.replace("此应用以往经验：", "") }
 

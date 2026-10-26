@@ -88,7 +88,7 @@ class Pt55Test {
         assertEquals(com.runasakura.phoneagent.ui.ChatSession.State.OK, (items.first { it is com.runasakura.phoneagent.ui.ChatSession.Item.Step } as com.runasakura.phoneagent.ui.ChatSession.Item.Step).state)
         val r = items.last() as com.runasakura.phoneagent.ui.ChatSession.Item.Result
         assertTrue(r.ask); assertEquals("发给谁？", r.summary)
-        assertEquals("给他发个消息（补充：张三）", cs.composeGoal("张三"))
+        cs.composeGoal("张三").let { g -> assertTrue(g, g.startsWith("给他发个消息（你问：") && g.endsWith("我答：张三）")) }
         cs.startTask("给他发个消息（补充：张三）", 4)
         assertEquals("打开蓝牙", cs.composeGoal("打开蓝牙"))
         cs.clear()

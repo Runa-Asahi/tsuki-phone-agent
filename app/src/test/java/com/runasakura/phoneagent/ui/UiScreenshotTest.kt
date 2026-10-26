@@ -127,7 +127,7 @@ class UiScreenshotTest : ShotBase() {
             listOf("—— 步骤 1/25 ——", "action: AskUser(question=要发给张三还是李四？发什么内容？)").forEachIndexed { i, l -> ChatSession.onLog(l, 3500L + 600 * i) }
             ChatSession.onStatus("stopped", "结束(1步): ${ChatSession.ASK_MARK}要发给张三还是李四？发什么内容？", 4500)
         }, running = false)
-        assertEquals("给他发个消息（补充：张三，晚上见）", ChatSession.composeGoal("张三，晚上见"))
+        ChatSession.composeGoal("张三，晚上见").let { g -> assertTrue(g, g.startsWith("给他发个消息（你问：") && g.endsWith("我答：张三，晚上见）")) }
     }
     @Test fun settings() {
         val inner = settingsContent()

@@ -44,7 +44,7 @@ object ChatSession {
     @Synchronized fun composeGoal(input: String): String {
         val last = items.lastOrNull { it is Item.Result } as? Item.Result
         val g = lastGoal
-        return if (last != null && last.ask && g != null && items.last() === last) "$g（补充：$input）" else input
+        return if (last != null && last.ask && g != null && items.last() === last) "$g（你问：${last.summary.take(60).replace("；", "，")}；我答：$input）" else input
     }
 
     /** Context for a follow-up message in the same session. */
