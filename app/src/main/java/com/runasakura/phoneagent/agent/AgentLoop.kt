@@ -32,7 +32,7 @@ class AgentLoop(
     )
 
     suspend fun run(goalIn: String): Result {
-        val goal = GoalRewrite.normalize(goalIn)
+        var goal = GoalRewrite.normalize(goalIn)
         if (goal != goalIn) onLog("目标规范化：$goal")
         val a11y = AgentAccessibilityService.require()
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { AgentAccessibilityService.require() } }
@@ -48,11 +48,6 @@ class AgentLoop(
             onLog("目标含敏感语义，开始前请知悉：发送/支付等会二次确认")
         }
 
-        QuickIntents.alarm(goal)?.let { al ->
-            onLog("闹钟意图：%02d:%02d（系统时钟 Intent）".format(al.hour, al.minute))
-            if (a11y.setAlarm(al.hour, al.minute, al.label)) return Result(true, 1, "已设置 %02d:%02d 的闹钟（由系统时钟创建）".format(al.hour, al.minute))
-            onLog("时钟 Intent 失败，交给模型")
-        }
         var toggleNote: String? = null
         QuickIntents.toggle(goal)?.let { (what, on) ->
             val page = SettingsPages.match("打开$what")
@@ -99,19 +94,50 @@ class AgentLoop(
 
         // ---- Deterministic paths (never call the model here) ----
         val dev = com.runasakura.phoneagent.a11y.A11yDevice(a11y, onLog)
-        QuickIntents.readLast(goal)?.takeIf { toggleNote == null }?.let { who ->
-            val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev,
-                com.runasakura.phoneagent.flow.AppProfile.forPackage(MessagingGoals.WECHAT), onLog) { onConfirm(it) }
-            val out = flow.readLast(who)
-            return Result(out.ok, 1, out.summary)
+        // ---- Model-first goal understanding (rules are only the fallback) ----
+        val intent = if (toggleNote != null) null else {
+            val raw = try { router.parseIntent(goal) } catch (e: Exception) { null }
+            (raw?.let { IntentParser.parseJson(it, goal) }.also { if (raw != null && it == null) onLog("模型意图不可信/无法解析，改用规则") })
+                ?: IntentParser.ruleBased(goal)
         }
-        if (toggleNote == null) CallGoals.parse(goal)?.let { cg ->
+        intent?.let { onLog("意图：" + it.describe()) }
+        when (intent?.kind) {
+            "message" -> {
+                val pkg = if (intent.app?.contains("QQ", true) == true) MessagingGoals.QQ else MessagingGoals.WECHAT
+                when (intent.contentType) {
+                    "sticker" -> return runMessaging(dev, pkg, intent.recipient!!, "表情包")
+                    "image", "file" -> return Result(false, 0, "「${intent.content ?: intent.contentType}」是图片/文件，暂不自动发送（避免当成文字发出）")
+                    else -> {
+                        MessagingGoals.validate(intent.recipient, intent.content)?.let { return Result(false, 0, it) }
+                        return runMessaging(dev, pkg, intent.recipient!!, intent.content!!, forceText = true)
+                    }
+                }
+            }
+            "call" -> {
+                val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev,
+                    com.runasakura.phoneagent.flow.AppProfile.forPackage(MessagingGoals.WECHAT), onLog) { onConfirm(it) }
+                val out = flow.call(intent.recipient!!, intent.video); return Result(out.ok, 1, out.summary)
+            }
+            "read" -> {
+                val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev,
+                    com.runasakura.phoneagent.flow.AppProfile.forPackage(MessagingGoals.WECHAT), onLog) { onConfirm(it) }
+                val out = flow.readLast(intent.recipient!!); return Result(out.ok, 1, out.summary)
+            }
+            "alarm" -> {
+                val h = intent.hour!!; val m = intent.minute ?: 0
+                if (!onConfirm("设置闹钟确认\n时间：%02d:%02d\n由系统时钟创建。".format(h, m))) return Result(false, 0, "用户取消设置闹钟")
+                if (a11y.setAlarm(h, m, "Phone Agent")) return Result(true, 1, "已设置 %02d:%02d 的闹钟（由系统时钟创建）".format(h, m))
+                onLog("时钟 Intent 失败，交给模型"); goal = "打开时钟，新建%02d:%02d的闹钟".format(h, m)
+            }
+            "app", "other" -> IntentParser.canonicalGoal(intent)?.let { if (it != goal) { onLog("按意图改写：$it"); goal = it } }
+        }
+        if (false) CallGoals.parse(goal)?.let { cg ->
             val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev,
                 com.runasakura.phoneagent.flow.AppProfile.forPackage(MessagingGoals.WECHAT), onLog) { onConfirm(it) }
             val out = flow.call(cg.contact, cg.video)
             return Result(out.ok, 1, out.summary)
         }
-        val msgGoal = if (toggleNote == null) MessagingGoals.parse(goal) else null
+        val msgGoal = if (toggleNote == null && intent?.kind !in setOf("app", "other", "alarm")) MessagingGoals.parse(goal) else null
         var targetPkg: String? = null
         if (msgGoal != null && msgGoal.contact != null && msgGoal.message != null) {
             MessagingGoals.validate(msgGoal.contact, msgGoal.message)?.let { return Result(false, 0, it) }
@@ -581,7 +607,7 @@ class AgentLoop(
 
     private suspend fun runMessaging(
         dev: com.runasakura.phoneagent.a11y.A11yDevice,
-        pkg: String, contact: String, message: String, reallySend: Boolean = true
+        pkg: String, contact: String, message: String, reallySend: Boolean = true, forceText: Boolean = false
     ): Result {
         val profile = com.runasakura.phoneagent.flow.AppProfile.forPackage(pkg)
         if (!reallySend) {
@@ -590,11 +616,16 @@ class AgentLoop(
         val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev, profile, onLog) { text ->
             if (!reallySend) false else onConfirm(text)
         }
-        if (MessageContent.isSticker(message)) {
+        flow.locate = { sc, what ->
+            val shot = if (prefs.allowCloudScreenshot && com.runasakura.phoneagent.llm.CloudProviders.isVision(prefs.cloudModel))
+                try { AgentAccessibilityService.require()?.screenshotJpegBase64() } catch (_: Exception) { null } else null
+            router.locate(what, buildDump(sc), sc.w, sc.h, shot)
+        }
+        if (!forceText && MessageContent.isSticker(message)) {
             onLog("内容意图：表情（不是文字「$message」）")
             val o = flow.sendSticker(contact); return Result(o.ok, 1, o.summary)
         }
-        if (MessageContent.isOtherMedia(message))
+        if (!forceText && MessageContent.isOtherMedia(message))
             return Result(false, 0, "「$message」是图片/文件/红包等非文字内容，暂不自动发送（避免把它当文字发出）")
         val out = flow.run(contact, message)
         if (!reallySend && out.cancelled) return Result(true, 1, "已在「$contact」聊天中输入：$message（未发送）")

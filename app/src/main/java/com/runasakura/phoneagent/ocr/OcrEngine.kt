@@ -29,7 +29,14 @@ object OcrEngine {
     suspend fun warmUp() {
         if (warmed) return
         val t0 = System.currentTimeMillis()
-        val b = Bitmap.createBitmap(160, 48, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.WHITE) }
+        // Realistic size + real CJK glyphs: a blank tiny bitmap let ML Kit skip recognizer init, so the
+        // first real read still paid ~1.3 s on PPG-AN00.
+        val b = Bitmap.createBitmap(432, 960, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(android.graphics.Color.WHITE)
+            val c = android.graphics.Canvas(this)
+            val p = android.graphics.Paint().apply { color = android.graphics.Color.BLACK; textSize = 36f; isAntiAlias = true }
+            listOf("微信 通讯录 发现 我", "搜索 发送 取消", "相册 拍摄 视频通话").forEachIndexed { i, t -> c.drawText(t, 20f, 120f + i * 300f, p) }
+        }
         try { recognizeLines(b) } catch (_: Exception) {} finally { b.recycle() }
         warmed = true
         android.util.Log.i(TAG, "warm-up ${System.currentTimeMillis() - t0}ms")

@@ -34,7 +34,8 @@ class CloudClient(
         put("max_tokens", maxTokens)
         if (jsonMode) put("response_format", JSONObject().put("type", "json_object"))
         // DeepSeek V4 models think by default; agent steps want fast direct JSON.
-        if (baseUrl.contains("deepseek", true) && !CloudProviders.isReasoner(model)) put("thinking", JSONObject().put("type", "disabled"))
+        if (baseUrl.contains("deepseek", true) && !CloudProviders.isReasoner(model) && !thinkingRejected)
+            put("thinking", JSONObject().put("type", "disabled"))
         put("messages", JSONArray().apply {
             messages.forEach { m ->
                 val img = m.imageBase64
@@ -70,6 +71,18 @@ class CloudClient(
                         if (resp.isSuccessful) {
                             return@withContext LlmResponse(LocalMnnClient.parseContent(raw), name, latency, rawBody = raw)
                         }
+                        if (resp.code == 400 && raw.contains("thinking", true) && !thinkingRejected) {
+                            // API rejected the optional `thinking` param: drop it for the rest of the process and retry once.
+                            thinkingRejected = true
+                            val retry = Request.Builder().url(req.url).headers(req.headers)
+                                .post(buildBody(messages, temperature).toString().toRequestBody(JSON)).build()
+                            http.newCall(retry).execute().use { r2 ->
+                                val raw2 = r2.body?.string().orEmpty()
+                                val lat = System.currentTimeMillis() - started
+                                return@withContext if (r2.isSuccessful) LlmResponse(LocalMnnClient.parseContent(raw2), name, lat, rawBody = raw2)
+                                else LlmResponse("", name, lat, "HTTP ${r2.code}: ${raw2.take(300)}", raw2)
+                            }
+                        }
                         if ((resp.code == 429 || resp.code >= 500) && attempt == 0) {
                             attempt++; delay(800L); return@use
                         }
@@ -87,6 +100,8 @@ class CloudClient(
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
+        /** Set once a provider rejects the DeepSeek `thinking` field; it is then never sent again. */
+        @Volatile var thinkingRejected = false
         /** One pooled client for the whole process: TLS + HTTP/2 connection reuse between steps. */
         val SHARED: OkHttpClient by lazy {
             OkHttpClient.Builder()

@@ -44,6 +44,9 @@ class MessagingFlow(
     private val log: (String) -> Unit,
     private val confirm: suspend (String) -> Boolean
 ) {
+    /** Optional visual grounding (vision model): where is [what] on this screen? */
+    var locate: (suspend (Screen, String) -> Pair<Int, Int>?)? = null
+
     data class Outcome(val ok: Boolean, val summary: String, val cancelled: Boolean = false, val verified: Boolean = false)
 
     companion object {
@@ -594,6 +597,30 @@ class MessagingFlow(
         var anchor = KeyMatch.find(s, listOf("最近使用", "所有表情")) { it.cy > s.h * 0.4 }
         if (anchor == null) { s = d.refineScreen(); anchor = KeyMatch.find(s, listOf("最近使用", "所有表情")) { it.cy > s.h * 0.4 } }
         dump("表情面板", s)
+        // Real sticker: the model locates the 收藏 tab and the first favourite sticker on a screenshot.
+        locate?.let { loc ->
+            val tab = loc(s, "微信表情面板底部一排页签里的「收藏/喜欢」页签（心形图标）")
+            if (tab != null) {
+                log("模型定位收藏页签 (${tab.first},${tab.second})"); d.tapXY(tab.first, tab.second); d.afterAction(800)
+                val s2 = d.screen()
+                val st = loc(s2, "收藏表情网格里的第一个表情包（跳过“添加”加号格子）")
+                if (st != null) {
+                    // Tapping a favourite sticker sends it immediately → confirm FIRST.
+                    if (!confirm("发送确认（${app.label}）\n收件人：$contact（" + (fuzzyTitle?.let { "⚠ $it" } ?: "已核对聊天标题") +
+                            "）\n内容：表情包（收藏里的第一个，点击后立即发出）\n\n确认后将点击该表情包。")) {
+                        d.back(); return Outcome(false, "用户取消发送", cancelled = true)
+                    }
+                    d.invalidateObservation()
+                    if (!stillSameChat(d.screen(), contact)) return fail("确认期间界面已变化，未发送")
+                    d.tapXY(st.first, st.second); d.afterAction(1200)
+                    val after = d.screen()
+                    val changed = after.items.map { it.label } != s2.items.map { it.label }
+                    return Outcome(true, "已向「$contact」发送收藏表情包" + if (changed) "（界面已变化）" else "（未能核验，请看一眼手机）", verified = false)
+                }
+                log("模型未找到收藏表情，改用普通表情"); d.back(); d.afterAction(500)
+                s = d.screen(); anchor = KeyMatch.find(s, listOf("最近使用", "所有表情")) { it.cy > s.h * 0.4 }
+            }
+        }
         if (anchor == null) { d.back(); return fail("未识别到表情面板（最近使用/所有表情），未发送") }
         val cellX = s.w / 16; val cellY = anchor.cy + (s.h * 0.045).toInt()
         log("点击面板第一个表情 ($cellX,$cellY)")
