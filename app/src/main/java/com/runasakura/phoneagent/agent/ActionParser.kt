@@ -148,7 +148,9 @@ object ActionParser {
             backendHint = backend,
             expect = obj.nullableString("expect")?.take(80),
             memory = obj.nullableString("memory")?.take(80),
-            subgoal = obj.nullableString("subgoal")?.take(60)
+            subgoal = obj.nullableString("subgoal")?.take(60),
+            screen = obj.nullableString("screen")?.take(30),
+            goalMatch = obj.nullableString("goal_match")?.take(60)
         )
     }
 

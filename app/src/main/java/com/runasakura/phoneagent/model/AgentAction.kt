@@ -31,5 +31,9 @@ data class PlanStep(
     val expect: String? = null,
     /** A UI fact the model learned (kept in task memory, e.g. "今日不再弹出是复选框"). */
     val memory: String? = null,
-    val subgoal: String? = null
+    val subgoal: String? = null,
+    /** Model's own classification of the screen (generic, no fixed vocabulary). */
+    val screen: String? = null,
+    /** Model's own judgement whether the current state exactly matches the user's goal. */
+    val goalMatch: String? = null
 )

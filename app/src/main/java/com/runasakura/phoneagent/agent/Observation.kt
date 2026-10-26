@@ -10,22 +10,12 @@ import com.runasakura.phoneagent.screen.ScreenItem
  * so a text-only model can tell a big button from a tiny checkbox label.
  */
 object ObsFormat {
-    private val CHECKBOX = Regex("不再(弹出|提示|显示|出现)|下次|记住|勾选|自动登录|同意")
-    private val CLOSE = Regex("^(好的|确定|确认|关闭|知道了|我知道了|跳过|取消|稍后|以后再说|暂不|返回|×|X|x|✕|OK|ok)[!！.,，。]*$")
     private val rn = listOf("上", "中", "下"); private val cn = listOf("左", "中", "右")
 
     fun region(x: Int, y: Int, w: Int, h: Int) =
         rn[(y * 3 / maxOf(1, h)).coerceIn(0, 2)] + cn[(x * 3 / maxOf(1, w)).coerceIn(0, 2)]
 
     /** Role hint: checkboxes never close popups; close-like words usually do. */
-    fun role(label: String): String? {
-        val n = Text.norm(label).trim('|', '「', '」', '(', ')', ' ', '（', '）')
-        return when {
-            CHECKBOX.containsMatchIn(n) -> "复选框:只勾选,不会关闭弹窗"
-            CLOSE.matches(n) || CLOSE.matches(n.replace(Regex("^[A-Za-z(（]{1,2}"), "")) -> "可能关闭弹窗"
-            else -> null
-        }
-    }
 
     fun line(it: ScreenItem, w: Int, h: Int): String = buildString {
         append('[').append(it.id).append("] ").append(it.label.ifBlank { "(输入框)" })
@@ -33,7 +23,6 @@ object ObsFormat {
         if (it.bw > 0) append(" ").append(it.bw).append('x').append(it.bh)
         append(' ').append(region(it.cx, it.cy, w, h))
         if (it.edit) append(" edit")
-        role(it.label)?.let { r -> append(" 【").append(r).append('】') }
     }
 
     fun dump(s: Screen, maxChars: Int = 1600): String {
@@ -116,4 +105,9 @@ class TaskMemory(private val max: Int = 8) {
     }
     fun all(): List<String> = facts.toList()
     fun text(): String? = if (facts.isEmpty()) null else facts.joinToString("；")
+}
+
+/** Reads the model's own goal_match judgement; only a clear leading "否/no" counts. */
+object GoalMatch {
+    fun saysNo(v: String?): Boolean { val t = v?.trim()?.lowercase() ?: return false; return t.startsWith("否") || t.startsWith("no") || t.startsWith("不一致") }
 }

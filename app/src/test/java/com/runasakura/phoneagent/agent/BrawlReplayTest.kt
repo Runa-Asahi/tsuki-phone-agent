@@ -29,7 +29,6 @@ class BrawlReplayTest {
             g.record(a, label, label ?: "tap")
         }
         assertEquals("只执行第一次勾选，其余重复/盲点被拒", 1, executed); assertEquals(2, refused)
-        assertTrue(ObsFormat.role("好的!")!!.contains("关闭"))
         assertNull(g.check(AgentAction.Tap(nodeId = "e3"), "好的!"))
     }
 

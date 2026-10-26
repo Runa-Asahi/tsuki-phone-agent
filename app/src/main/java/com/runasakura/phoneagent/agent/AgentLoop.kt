@@ -371,11 +371,8 @@ class AgentLoop(
                     ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote) + "\n已附截图（屏幕 ${sc.w}x${sc.h}，坐标按此）。", it))) }
             } else null
             if (!needEyes && step == 3 && !router.visionReady && (sc.w > sc.h || sc.items.size < 6)) onLog("💡 " + com.runasakura.phoneagent.llm.CloudProviders.VISION_TIP)
-            // Stuck (loop / no-op / invalid output) → one step with the stronger model, then back to the default.
-            val useStrong = eyes == null && router.strong != null && (strongNext || loopStreak > 0 || (lastNoEffect && guard.size >= 2))
-            strongNext = false
-            if (useStrong) onLog("卡住了：本步升级强模型")
-            var resp = eyes ?: (if (useStrong) router.strongPlan(msgs) else null) ?: planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
+            // Model is always the user's choice in settings (no automatic switch to another model).
+            var resp = eyes ?: planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
             logLlm(resp)
             // Local→cloud fallback (incl. slow-local stall) is handled inside LlmRouter.
             if (resp.error != null && resp.content.isBlank()) {
@@ -386,6 +383,9 @@ class AgentLoop(
             var plan = ActionParser.parse(resp.content)
             plan.memory?.takeIf { it.isNotBlank() }?.let { if (memory.add(it)) onLog("记住：$it") }
             plan.subgoal?.let { onLog("子目标：$it") }
+            plan.screen?.let { onLog("界面类型（模型判断）：$it") }
+            plan.goalMatch?.let { onLog("与目标是否一致（模型判断）：$it") }
+            lastScreenKind = plan.screen; lastGoalMatch = plan.goalMatch
             lastExpect = plan.expect
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
@@ -410,7 +410,7 @@ class AgentLoop(
                                 "请只用上面列表中的 e 编号，只输出一行 JSON。"
                         )
                     ),
-                    forceCloud = router.canEscalate, // parse/validation failure → let the stronger model re-plan
+                    forceCloud = router.canEscalate, // parse/validation failure → retry on the user-configured cloud model
                     temperature = 0.1
                 )
                 logLlm(resp)
@@ -420,11 +420,11 @@ class AgentLoop(
                 err = validationError(plan, resp.content, sc)
             }
             if (err != null) {
-                // Don't abort the task: record it, force a fresh look / stronger model next step.
+                // Don't abort the task: record it, force a fresh look next step.
                 if (++invalidStreak >= 3) return Result(false, step, "模型连续给出无效动作（$err），已停止以免误操作")
                 onLog("本步放弃该动作：$err")
                 steps.recordAction("无效输出（$err）", ok = false)
-                lookNext = true; strongNext = true; lastExec = null
+                lookNext = true; lastExec = null
                 continue
             }
             invalidStreak = 0
@@ -528,6 +528,11 @@ class AgentLoop(
                     val desc = ActionDesc.of(action, tapped) + if (ok) "" else " ✗执行失败：${lastExecError ?: "未知原因"}"
                     steps.recordAction(desc, ok)
                     lastExec = Triple(action, tapped ?: targetLabel(action, sc), ActionDesc.of(action, tapped))
+                    // Generic: the same target twice in a row without reaching the goal = treat as ineffective
+                    // (catches "confirm without selecting" even when OCR churn makes the screen look changed).
+                    val k = guard.key(action, lastExec!!.second)
+                    if (k != null && k == prevExecKey) { guard.record(action, lastExec!!.second, lastExec!!.third + "（连续两次同一目标未推进）"); onLog("同一目标连点两次未推进，标记为无效") }
+                    prevExecKey = k
                     onLog(if (ok) "执行成功：${ActionDesc.of(action, tapped)}" else "执行失败：${lastExecError ?: "未知原因"}")
                     if (action is AgentAction.Launch && ok) {
                         val fg = waitForeground(a11y, 3000) { it != before }
@@ -684,6 +689,8 @@ class AgentLoop(
         val a = plan.action
         val label = targetLabel(a, sc)
         guard.check(a, label)?.let { return it }
+        if (a is AgentAction.Done && GoalMatch.saysNo(plan.goalMatch))
+            return "你自己判断 goal_match=${plan.goalMatch}，与目标不一致，不能 done；继续操作或退回主入口"
         if (a is AgentAction.Tap && a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x != null && a.y != null &&
             !shotThisStep && !ObsFormat.nearAny(sc.items, a.x!!, a.y!!) && !LayoutHints.isGallery(sc))
             return "坐标(${a.x},${a.y})附近没有任何识别到的元素，没有截图时禁止盲点；请点列表里的元素，或输出 {\"type\":\"look\"} 请求截图"
@@ -696,12 +703,14 @@ class AgentLoop(
     private var lastExec: Triple<AgentAction, String?, String>? = null
     private var invalidStreak = 0
     private var lookNext = false
-    private var strongNext = false
     private var shotThisStep = false
     private var lastNoEffect = false
     private var appLabel: String? = null
     private var lastExpect: String? = null
     private val memory = TaskMemory()
+    private var lastScreenKind: String? = null
+    private var lastGoalMatch: String? = null
+    private var prevExecKey: String? = null
     private var appMem: AppMemory? = null
 
     /** Persist what this task learned about the app (facts, useless actions, and the path on success). */
@@ -864,6 +873,7 @@ class AgentLoop(
 
             lastScreen?.let { appendLine(LayoutHints.describe(it)) }
             appMem?.hint(goal)?.let { appendLine(it) }
+            lastScreenKind?.let { k -> appendLine("上一步你判断的界面类型：$k；与目标一致性：${lastGoalMatch ?: "未判断"}") }
             memory.text()?.let { appendLine("本任务已知：$it") }
             guard.summary()?.let { appendLine(it) }
             stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。不要重复，换一种方式（用坐标 x,y、别的元素、滑动或返回）。") }

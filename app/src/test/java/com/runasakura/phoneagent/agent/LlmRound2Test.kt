@@ -1,6 +1,5 @@
 package com.runasakura.phoneagent.agent
 
-import com.runasakura.phoneagent.llm.CloudProviders
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -15,9 +14,9 @@ class LlmRound2Test {
         m.add("返回键会弹出退出确认"); m.add("开始按钮在右下"); m.add("宝石争霸在模式列表")
         assertEquals(3, m.all().size); assertFalse(m.all().contains("今日不再弹出是复选框"))
     }
-    @Test fun escalationModel() {
-        assertEquals("deepseek-v4-pro", CloudProviders.strongModelFor("https://api.deepseek.com", "deepseek-v4-flash"))
-        assertNull(CloudProviders.strongModelFor("https://api.deepseek.com", "deepseek-v4-pro"))
-        assertNull(CloudProviders.strongModelFor("https://example.com/v1", "foo"))
+    @Test fun goalMatchFieldsParsedAndDoneBlockedOnNo() {
+        val p = ActionParser.parse("""{"screen":"候选选择","goal_match":"否：是活动版","action":{"type":"done"}}""")
+        assertEquals("候选选择", p.screen); assertTrue(GoalMatch.saysNo(p.goalMatch))
+        assertFalse(GoalMatch.saysNo("是")); assertFalse(GoalMatch.saysNo(null))
     }
 }

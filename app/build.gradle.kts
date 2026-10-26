@@ -11,8 +11,8 @@ android {
         applicationId = "com.runasakura.phoneagent"
         minSdk = 26
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.5.1-mvp"
+        versionCode = 10
+        versionName = "0.5.2-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Honor PPG-AN00 / Android 16: document 16KB page alignment for future .so embeds

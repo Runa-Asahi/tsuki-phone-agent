@@ -16,13 +16,9 @@ class LlmRound1Test {
         assertTrue(SemanticDiff.compare(b, c).meaningful)
     }
 
-    @Test fun rolesExplainCheckboxVsClose() {
-        assertTrue(ObsFormat.role("今日不再弹出")!!.contains("复选框"))
-        assertTrue(ObsFormat.role("令日不再弹出1")!!.contains("复选框"))
-        assertTrue(ObsFormat.role("好的!")!!.contains("关闭"))
-        assertNull(ObsFormat.role("商店"))
+    @Test fun lineHasSizeAndRegionButNoKeywordRoles() {
         val line = ObsFormat.line(it("e2", "好的!", 1400, 1000, 300, 90), 2800, 1264)
-        assertTrue(line, line.contains("300x90") && line.contains("下中") && line.contains("关闭"))
+        assertTrue(line, line.contains("300x90") && line.contains("下中") && !line.contains("【"))
     }
 
     @Test fun guardRefusesRepeatedNoOpAcrossOcrVariants() {

@@ -90,19 +90,6 @@ object CloudProviders {
 
     fun cloudSeesImages(model: String) = isVision(model) && !CloudClient.imageRejected
 
-    /** Escalation model on the same provider (DeepSeek: flash → v4-pro); null when there is none. */
-    fun strongClientFor(prefs: AgentPreferences): CloudClient? {
-        if (!ready(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)) return null
-        val m = effectiveModel(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey, prefs.cloudModel)
-        val strong = strongModelFor(prefs.cloudBaseUrl, m) ?: return null
-        return CloudClient(prefs.cloudBaseUrl, prefs.cloudApiKey, strong)
-    }
-    fun strongModelFor(baseUrl: String, model: String): String? = when {
-        baseUrl.contains("deepseek", true) && !model.contains("pro", true) && !isReasoner(model) -> "deepseek-v4-pro"
-        baseUrl.contains("dashscope", true) && model != "qwen-max" -> "qwen-max"
-        else -> null
-    }
-
     fun clientFor(prefs: AgentPreferences): CloudClient? {
         if (!ready(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)) return null
         val m = effectiveModel(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey, prefs.cloudModel)
