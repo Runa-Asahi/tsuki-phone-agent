@@ -65,8 +65,8 @@ flowchart LR
 6. **Shizuku（可选，推荐）**：
    - 安装 Shizuku → 开发者选项 → **无线调试** → 在 Shizuku 里配对并启动。
    - MagicOS **每次重启后 Shizuku 都会停止**，需要回到 Shizuku 用无线调试重新启动。
-   - 本应用 设置 → Shizuku → 授权 → 打开开关。之后会得到：空界面树补全、更稳的截图与输入，以及 `shell` 工具（危险命令始终需要确认）。
-7. **无障碍自愈**：Shizuku 就绪时，在 设置 → 常驻与自愈 → 「用 Shizuku 授予自愈权限」点一次，授予 `WRITE_SECURE_SETTINGS`。之后服务被系统关掉时会自动重新开启，即使 Shizuku 没有运行、手机重启后也一样。
+   - 本应用 设置 → 特权模式（Shizuku，可选）→ 请求授权 → 打开开关。之后会得到：空界面树补全、更稳的截图与输入，以及 `shell` 工具（危险命令始终需要确认）。
+7. **无障碍自愈**：Shizuku 就绪时，在 设置 → 后台保活（荣耀/MagicOS）→ 「用 Shizuku 授予自愈权限」点一次，授予 `WRITE_SECURE_SETTINGS`。之后服务被系统关掉时会自动重新开启，即使 Shizuku 没有运行、手机重启后也一样。
    - 也可以用 adb：`adb shell pm grant com.runasakura.phoneagent android.permission.WRITE_SECURE_SETTINGS`
 8. 打开应用 → 右上角菜单 → **自检**，全部通过后再下任务。
 
