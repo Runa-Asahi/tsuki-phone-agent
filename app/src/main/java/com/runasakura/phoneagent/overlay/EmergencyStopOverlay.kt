@@ -14,15 +14,17 @@ import com.runasakura.phoneagent.R
 class EmergencyStopOverlay(
     private val context: Context,
     private val onStop: () -> Unit,
-    private val onPause: (() -> Boolean)? = null
+    private val onPause: (() -> Boolean)? = null,
+    private val onOpen: (() -> Unit)? = null,
 ) {
+    private var orb: TsukiOrb.Orb? = null
     private var label: android.widget.TextView? = null
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     /** Codex-style live progress next to the stop button while operating other apps. */
     fun setProgress(text: String) {
         val t = text.replace('\n', ' ').take(28)
-        main.post { label?.let { it.text = t.ifBlank { "运行中" } } }
+        main.post { val s = t.ifBlank { "运行中" }; orb?.setText(s) ?: label?.let { it.text = s } }
     }
 
     private val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -45,7 +47,7 @@ class EmergencyStopOverlay(
         val apply = {
             try {
                 p.flags = if (on) p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                v.alpha = if (on) 0f else 1f
+                v.alpha = if (on) 0f else if (orb != null) TsukiOrb.opacity(context) / 100f else 1f
                 wm.updateViewLayout(v, p)
             } catch (_: Exception) { }
         }
@@ -62,7 +64,7 @@ class EmergencyStopOverlay(
     fun moveAwayFrom(targetY: Int) {
         val v = button ?: return; val p = lp ?: return
         main.post {
-            try { p.y = OverlayAvoid.dockY(targetY, context.resources.displayMetrics.heightPixels); wm.updateViewLayout(v, p) } catch (_: Exception) { }
+            try { orb?.expand(false); p.y = OverlayAvoid.dockY(targetY, context.resources.displayMetrics.heightPixels); wm.updateViewLayout(v, p) } catch (_: Exception) { }
         }
     }
 
@@ -73,7 +75,9 @@ class EmergencyStopOverlay(
         ) {
             return // optional; notification stop still works
         }
-        val (box, lbl) = OverlayPill.build(context, onStop, onPause)
+        // The Tsuki orb (default) or the classic compact pill (orb turned off in Settings).
+        val o = if (TsukiOrb.enabled(context)) TsukiOrb.build(context, onStop, onPause, onOpen) else null
+        val (box, lbl) = if (o != null) o.root to o.label else OverlayPill.build(context, onStop, onPause)
         val type = if (a11y) {
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -96,9 +100,10 @@ class EmergencyStopOverlay(
             y = (context.resources.displayMetrics.heightPixels * 0.40).toInt()
         }
         try {
-            OverlayPill.enableDrag(box, params) { try { wm.updateViewLayout(box, params) } catch (_: Exception) {} }
+            val upd = { try { wm.updateViewLayout(box, params) } catch (_: Exception) {} }
+            if (o != null) TsukiOrb.attach(o, params, onStop) { upd() } else OverlayPill.enableDrag(box, params) { upd() }
             wm.addView(box, params)
-            button = box; label = lbl; lp = params; active = this
+            button = box; label = lbl; lp = params; orb = o; active = this
             box.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
                 val loc = IntArray(2); v.getLocationOnScreen(loc)
                 bounds = android.graphics.Rect(loc[0], loc[1], loc[0] + v.width, loc[1] + v.height)
@@ -115,7 +120,7 @@ class EmergencyStopOverlay(
             } catch (_: Exception) {
             }
         }
-        button = null; label = null; lp = null
+        button = null; label = null; lp = null; orb = null
         bounds = null; if (active === this) active = null
     }
 

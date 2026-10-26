@@ -141,6 +141,14 @@ class UiScreenshotTest : ShotBase() {
         bg.addView(pill, FrameLayout.LayoutParams(-2, -2).apply { topMargin = 300; leftMargin = 0 })
         save("06_overlay_pill", bg, h = 900)
     }
+    @Test fun overlayOrb() {
+        val bg = FrameLayout(act).apply { setBackgroundColor(0xFFE9EEF5.toInt()) }
+        val o = com.runasakura.phoneagent.overlay.TsukiOrb.build(act, {}, { true }, {})
+        o.setText("第 4 步 · 点击「晴天 - 周杰伦」"); o.expand(true)
+        bg.addView(o.root, FrameLayout.LayoutParams(-2, -2).apply { topMargin = 300 })
+        save("06b_overlay_orb", bg, h = 900)
+        assertTrue(o.orb.contentDescription.contains("长按急停"))
+    }
 }
 
 @Config(qualifiers = "w411dp-h891dp-night-xxhdpi")

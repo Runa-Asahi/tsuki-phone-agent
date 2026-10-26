@@ -5,6 +5,7 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -21,7 +22,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        TsukiTheme.applyBars(this); setupAppearance()
+        TsukiTheme.applyBars(this); setupAppearance(); TsukiTheme.retint(binding.root)
         binding.toolbar.setNavigationOnClickListener { finish() }
 
         val prefs = PhoneAgentApp.instance.prefs
@@ -248,14 +249,38 @@ class SettingsActivity : AppCompatActivity() {
             .setPositiveButton("关闭", null).show()
     }
 
-    /** Palette + light/dark chips. Mode applies immediately (AppCompat recreates); palette applies on return to chat. */
+    /** Palette + light/dark chips. Both apply immediately: palette retints live, a night-mode change recreates. */
     private fun setupAppearance() {
         val pg = binding.paletteGroup; val mg = binding.modeGroup
         for (p in TsukiTheme.Palette.entries) pg.addView(com.google.android.material.chip.Chip(this).apply {
             text = p.label; isCheckable = true; isChecked = TsukiTheme.palette(this@SettingsActivity) == p; minHeight = (48 * resources.displayMetrics.density).toInt()
-            setOnClickListener { TsukiTheme.setPalette(this@SettingsActivity, p); TsukiTheme.applyBars(this@SettingsActivity) } })
+            setOnClickListener { TsukiTheme.setPalette(this@SettingsActivity, p); TsukiTheme.applyBars(this@SettingsActivity); TsukiTheme.retint(binding.root); syncModeChips() } })
         for (m in TsukiTheme.Mode.entries) mg.addView(com.google.android.material.chip.Chip(this).apply {
             text = m.label; isCheckable = true; isChecked = TsukiTheme.mode(this@SettingsActivity) == m; minHeight = (48 * resources.displayMetrics.density).toInt()
             setOnClickListener { if (TsukiTheme.mode(this@SettingsActivity) != m) TsukiTheme.setMode(this@SettingsActivity, m) } })
+        syncModeChips()
+        // Floating Tsuki orb: on/off + idle opacity, in the same card (it follows the palette too).
+        val host = pg.parent as android.view.ViewGroup
+        val orbSwitch = com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+            text = getString(R.string.orb_toggle); isChecked = com.runasakura.phoneagent.overlay.TsukiOrb.enabled(this@SettingsActivity)
+            minHeight = (48 * resources.displayMetrics.density).toInt(); setTextColor(TsukiTheme.color(this@SettingsActivity, R.color.text_primary))
+        }
+        val opLabel = TextView(this).apply { setTextColor(TsukiTheme.color(this@SettingsActivity, R.color.text_secondary)); textSize = 13f }
+        val slider = com.google.android.material.slider.Slider(this).apply {
+            valueFrom = 40f; valueTo = 100f; stepSize = 10f; value = com.runasakura.phoneagent.overlay.TsukiOrb.opacity(this@SettingsActivity).toFloat()
+            contentDescription = getString(R.string.orb_opacity)
+        }
+        fun sync() { val on = orbSwitch.isChecked; slider.isEnabled = on; opLabel.alpha = if (on) 1f else 0.5f
+            opLabel.text = getString(R.string.orb_opacity) + " · ${slider.value.toInt()}%" }
+        orbSwitch.setOnCheckedChangeListener { _, on -> com.runasakura.phoneagent.overlay.TsukiOrb.setEnabled(this, on); sync() }
+        slider.addOnChangeListener { _, v, _ -> com.runasakura.phoneagent.overlay.TsukiOrb.setOpacity(this, v.toInt()); sync() }
+        host.addView(orbSwitch); host.addView(opLabel); host.addView(slider); sync()
+    }
+
+    /** 纯月 is light-only: the light/dark chips are disabled with a hint instead of silently doing nothing. */
+    private fun syncModeChips() {
+        val pure = TsukiTheme.palette(this) == TsukiTheme.Palette.PURE_MOON
+        for (i in 0 until binding.modeGroup.childCount) binding.modeGroup.getChildAt(i).apply { isEnabled = !pure; alpha = if (pure) 0.45f else 1f }
+        binding.modeGroup.contentDescription = if (pure) "纯月为明亮主题，固定浅色" else null
     }
 }

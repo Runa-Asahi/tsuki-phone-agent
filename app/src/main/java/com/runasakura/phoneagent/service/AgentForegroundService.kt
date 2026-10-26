@@ -67,7 +67,7 @@ class AgentForegroundService : Service() {
         if (com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() == null &&
             !com.runasakura.phoneagent.a11y.AgentAccessibilityService.isEnabledInSettings(this)) {
             log("无障碍服务未开启：系统设置里本应用的无障碍开关是关闭的（可能被系统省电清理或手动关闭；安装新版本后也需要重新打开）")
-            broadcastStatus("stopped", "无障碍服务未开启：请到系统设置→辅助功能→已安装的服务中重新打开 Phone Agent")
+            broadcastStatus("stopped", "无障碍服务未开启：请到系统设置→辅助功能→已安装的服务中重新打开 Tsuki")
             // Toast from service context
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 android.widget.Toast.makeText(
@@ -96,7 +96,8 @@ class AgentForegroundService : Service() {
         // Prefer the accessibility overlay (no SYSTEM_ALERT_WINDOW needed)
         val overlayCtx: android.content.Context = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() ?: this
         pauseFlag.set(false)
-        overlay = EmergencyStopOverlay(overlayCtx, { requestStop("悬浮窗「急停」被点击") }, { togglePause() }).also { it.show() }
+        overlay = EmergencyStopOverlay(overlayCtx, { requestStop("悬浮窗「急停」被点击") }, { togglePause() }, {
+            startActivity(android.content.Intent(this, com.runasakura.phoneagent.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }).also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
         val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)

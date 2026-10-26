@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">荣耀手机 Agent</string>
-    <string name="a11y_service_label">荣耀手机 Agent</string>
-    <string name="a11y_service_description">允许 Agent 读取界面节点并执行点击、滑动、输入等操作。仅在你启动任务时行动，可用通知或悬浮钮急停。</string>
+    <string name="app_name">Tsuki</string>
+    <string name="a11y_service_label">Tsuki</string>
+    <string name="a11y_service_description">允许 Tsuki 读取界面节点并执行点击、滑动、输入等操作。仅在你启动任务时行动，可用通知或悬浮钮急停。</string>
     <string name="settings_title">设置</string>
-    <string name="channel_agent">Agent 运行中</string>
+    <string name="channel_agent">Tsuki 运行中</string>
     <string name="channel_agent_desc">前台保活与急停入口（MagicOS 建议保留通知）</string>
-    <string name="channel_alert">Agent 提醒</string>
-    <string name="notif_title">手机 Agent 运行中</string>
+    <string name="channel_alert">Tsuki 提醒</string>
+    <string name="notif_title">Tsuki 正在帮你操作</string>
     <string name="action_emergency_stop">急停</string>
     <string name="fab_stop">急停</string>
     <string name="goal_hint">告诉我要做什么…</string>
@@ -21,7 +21,7 @@
     <string name="a11y_off">无障碍：未开启（必做）</string>
     <string name="goal_empty">请先输入目标</string>
     <string name="a11y_required_title">需要无障碍权限</string>
-    <string name="a11y_required_msg">请在「设置 → 辅助功能 → 无障碍」中开启「荣耀手机 Agent」。MagicOS 10 侧载若列表没有，请用 adb install 后再试。</string>
+    <string name="a11y_required_msg">请在「设置 → 辅助功能 → 无障碍」中开启「Tsuki」。MagicOS 10 侧载若列表没有，请用 adb install 后再试。</string>
     <string name="open_a11y">去开启</string>
     <string name="confirm_title">敏感操作确认</string>
     <string name="confirm_yes">允许继续</string>
@@ -51,7 +51,7 @@
     <string name="resume">继续</string>
     <string name="send">发送</string>
     <string name="stop">停止</string>
-    <string name="reply_hint">回复 Agent 的问题…</string>
+    <string name="reply_hint">回复 Tsuki…</string>
     <string name="followup_hint">继续追问或下一个任务…</string>
     <string name="ui_1">云端模型</string>
     <string name="ui_2">主力大脑。只会使用你在这里选的模型，不会自动换成别的模型。API Key 只加密保存在本机，不进日志。</string>
@@ -88,7 +88,7 @@
     <string name="shizuku_grant">请求授权</string>
     <string name="shizuku_refresh">刷新状态</string>
     <string name="shizuku_guide">荣耀 / MagicOS：每次重启后 Shizuku 会停止，需要在 Shizuku 应用里通过「无线调试」重新启动（开发者选项 → 无线调试 → 配对后启动）。卸载、清数据、改权限/安全设置、重启、拨号发信等命令始终需要你确认。</string>
-    <string name="keepalive_title">Agent 待命中</string>
+    <string name="keepalive_title">Tsuki 待命中</string>
     <string name="keepalive_text">保持无障碍服务常驻；异常关闭时自动恢复</string>
     <string name="alive_title">后台保活（荣耀/MagicOS）</string>
     <string name="alive_desc">荣耀系统会在清理后台或应用崩溃后自动关闭无障碍。以下设置可大幅减少被关闭的次数。</string>
@@ -103,9 +103,11 @@
     <string name="pill_a11y_desc">无障碍服务状态，点按打开设置</string>
     <string name="pill_brain_desc">模型状态，点按重新检测</string>
     <string name="appearance_title">外观 · Tsuki</string>
-    <string name="appearance_desc">配色与明暗。「夜月」是默认主题；动效会在系统关闭动画时自动静止。</string>
+    <string name="appearance_desc">夜月：深海军蓝与银雾；樱：樱粉与梅夜，花瓣飘落；纯月：珍珠白与银蓝（固定浅色）。切换即时生效；系统关闭动画时动效静止。</string>
     <string name="about_title">关于 Tsuki</string>
     <string name="about_desc">Tsuki（月）是这个助手的形象：银色长发、红瞳、月牙。她只在你确认后发送、通话、支付、下单、卸载或设置闹钟。</string>
     <string name="tsuki_portrait_desc">Tsuki 的半身像</string>
     <string name="setup_title">开始之前</string>
+    <string name="orb_toggle">任务时显示悬浮月亮球（关闭则用简洁胶囊）</string>
+    <string name="orb_opacity">悬浮球不透明度</string>
 </resources>
