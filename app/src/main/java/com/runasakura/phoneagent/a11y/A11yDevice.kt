@@ -18,6 +18,7 @@ import com.runasakura.phoneagent.screen.ScreenItem
 import com.runasakura.phoneagent.screen.ScreenItems
 import com.runasakura.phoneagent.util.Diagnostics
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ensureActive
@@ -177,6 +178,8 @@ class A11yDevice(
         val (top, bottom) = if (landscape) 0 to bmp.height else cropBands(bmp.height)
         val crop = try { android.graphics.Bitmap.createBitmap(bmp, 0, top, bmp.width, bottom - top) } catch (_: Exception) { bmp }
         val off = if (crop === bmp) 0 else top
+        // Colour/corner candidates are computed concurrently with OCR (pure pixel work on another core).
+        val blobsJob = kotlinx.coroutines.CoroutineScope(Dispatchers.Default).async { try { thumbBlobs(crop) } catch (_: Throwable) { null } }
         // Half resolution for Chinese OCR speed (scale coords back). Cap long side at 720.
         val longSide = maxOf(crop.width, crop.height)
         // Landscape (games/video): text is tiny relative to the long side → keep far more pixels.
@@ -211,7 +214,7 @@ class A11yDevice(
             lines = merged.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * scaleDown).toInt(), (it.t * scaleDown).toInt(), (it.r * scaleDown).toInt(), (it.b * scaleDown).toInt()) }
         }
         // Visual candidates (colour blocks / corner icons) from a small thumbnail: text-free buttons become tappable items.
-        val blobsThumb = try { thumbBlobs(crop) } catch (_: Throwable) { null }
+        val blobsThumb = blobsJob.await()
         if (crop !== bmp && !crop.isRecycled) crop.recycle()
         val bw = bmp.width; val bh = bmp.height; val swd = small.width; val sht = small.height
         if (lines == null) { bmp.recycle(); return null }
@@ -374,6 +377,22 @@ class A11yDevice(
     private suspend fun screenFresh(): Screen {
         // Adaptive: apps that never go quiet (players, banners, animations) only get a short wait next time.
         val pkgNow = s.lastPackage
+        // Parallel perception for known-blind apps (games/canvas): the tree read and the screenshot+OCR+colour
+        // detection run concurrently, and the event-based settle wait is skipped (GL surfaces never go quiet; the
+        // pixel fingerprint handles "same frame"). Saves the settle (≤450 ms) + the tree polling per step.
+        if (pkgNow in blindPkgs) {
+            val start = System.currentTimeMillis()
+            val (t, o) = kotlinx.coroutines.coroutineScope {
+                val tj = async(Dispatchers.Default) { treeScreen() }
+                val oj = async { ocrScreen(pkgNow) }
+                tj.await() to oj.await()
+            }
+            if (t.textCount >= 3 && t.pkg == pkgNow) blindPkgs -= pkgNow   // the app has a tree after all (next read uses it)
+            val best = if (o != null && o.textCount >= t.textCount && (t.textCount < 3 || o.textCount > t.textCount)) o else t
+            Diagnostics.observe(best.pkg, best.source + "(tree=${t.textCount},并行)", best.textCount)
+            log("读屏 ${System.currentTimeMillis() - start}ms 来源=${best.source} 文字=${best.textCount}（树/OCR/色块并行）")
+            if (best.pkg == pkgNow || t.pkg != pkgNow) return best
+        }
         val maxWait = SettleBudget.maxMs(pkgNow)
         val quiet = TaskTiming.time("等待界面稳定") { s.awaitSettle(250, maxWait) }
         SettleBudget.record(pkgNow, quiet)
