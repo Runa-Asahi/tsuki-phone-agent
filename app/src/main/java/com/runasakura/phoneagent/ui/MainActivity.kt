@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        applyTsuki()
 
         binding.toolbar.inflateMenu(R.menu.main_menu)
         binding.toolbar.setOnMenuItemClickListener {
@@ -172,8 +173,35 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Palette → sky, bars and the primary round button (palette may have changed in Settings). */
+    private fun applyTsuki() {
+        val k = TsukiTheme.current(this)
+        TsukiTheme.applyBars(this)
+        binding.sky.colors = k
+        binding.sky.animateMotes = !TsukiTheme.reduceMotion(this)
+        binding.btnStart.backgroundTintList = android.content.res.ColorStateList.valueOf(k.accent)
+        binding.btnStart.imageTintList = android.content.res.ColorStateList.valueOf(k.onAccent)
+        binding.btnStop.backgroundTintList = android.content.res.ColorStateList.valueOf(k.crimson)
+    }
+
+    /** First-run checklist shown in the empty state until everything is ready. */
+    private fun setupItems(): List<ChatRenderer.SetupItem> {
+        val p = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
+        val cloudOk = com.runasakura.phoneagent.llm.CloudProviders.ready(p.cloudProvider, p.cloudBaseUrl, p.cloudApiKey)
+        val modelOk = cloudOk || com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(p.routeMode)
+        return listOf(
+            ChatRenderer.SetupItem("无障碍服务（读屏与点按）", AgentAccessibilityService.require() != null) { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+            ChatRenderer.SetupItem("模型（在设置里填写 API Key）", modelOk) { startActivity(Intent(this, SettingsActivity::class.java)) },
+            ChatRenderer.SetupItem("悬浮窗（运行时显示进度与急停）", Settings.canDrawOverlays(this)) { openOverlayPermission() },
+            ChatRenderer.SetupItem("通知（后台任务状态）", Build.VERSION.SDK_INT < 33 ||
+                ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                if (Build.VERSION.SDK_INT >= 33) ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001) },
+        )
+    }
+
     override fun onResume() {
         super.onResume()
+        applyTsuki()
         renderChat(); setRunning(AgentForegroundService.isRunning())
         refreshMnnStatus()
         ContextCompat.registerReceiver(
@@ -349,7 +377,8 @@ class MainActivity : AppCompatActivity() {
     private fun renderChat() {
         val atBottom = !binding.scrollChat.canScrollVertically(1)
         val recent = TaskHistory.load(this).take(3).map { it.goal to it.ok }
-        renderer.render(binding.chatList, ChatSession.snapshot(), ChatSession.phase, recent, SUGGESTIONS)
+        renderer.render(binding.chatList, ChatSession.snapshot(), ChatSession.phase, recent, SUGGESTIONS,
+            if (ChatSession.snapshot().isEmpty()) setupItems() else emptyList(), java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
         renderPhase()
         if (atBottom || ChatSession.phase != ChatSession.Phase.IDLE) binding.scrollChat.post { binding.scrollChat.smoothScrollTo(0, binding.chatList.height) }
     }

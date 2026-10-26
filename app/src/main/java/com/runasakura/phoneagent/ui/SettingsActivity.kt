@@ -21,6 +21,7 @@ class SettingsActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        TsukiTheme.applyBars(this); setupAppearance()
         binding.toolbar.setNavigationOnClickListener { finish() }
 
         val prefs = PhoneAgentApp.instance.prefs
@@ -245,5 +246,16 @@ class SettingsActivity : AppCompatActivity() {
             }
             .setNegativeButton("全部清除") { _, _ -> prefs.clearAppMemory() }
             .setPositiveButton("关闭", null).show()
+    }
+
+    /** Palette + light/dark chips. Mode applies immediately (AppCompat recreates); palette applies on return to chat. */
+    private fun setupAppearance() {
+        val pg = binding.paletteGroup; val mg = binding.modeGroup
+        for (p in TsukiTheme.Palette.entries) pg.addView(com.google.android.material.chip.Chip(this).apply {
+            text = p.label; isCheckable = true; isChecked = TsukiTheme.palette(this@SettingsActivity) == p; minHeight = (48 * resources.displayMetrics.density).toInt()
+            setOnClickListener { TsukiTheme.setPalette(this@SettingsActivity, p); TsukiTheme.applyBars(this@SettingsActivity) } })
+        for (m in TsukiTheme.Mode.entries) mg.addView(com.google.android.material.chip.Chip(this).apply {
+            text = m.label; isCheckable = true; isChecked = TsukiTheme.mode(this@SettingsActivity) == m; minHeight = (48 * resources.displayMetrics.density).toInt()
+            setOnClickListener { if (TsukiTheme.mode(this@SettingsActivity) != m) TsukiTheme.setMode(this@SettingsActivity, m) } })
     }
 }

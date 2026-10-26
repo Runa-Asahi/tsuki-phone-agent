@@ -99,4 +99,13 @@
     <string name="alive_a11y">无障碍设置</string>
     <string name="alive_grant">用 Shizuku 授予自愈权限</string>
     <string name="alive_guide">建议：① 忽略电池优化；② 手机管家 → 应用启动管理 → 本应用改为「手动管理」并打开自启动、关联启动、后台活动；③ 多任务界面下拉本应用卡片「锁定」。自动重开需要一次性授予系统设置写权限（Shizuku 就绪时点上面的按钮），之后即使 Shizuku 未运行、重启后也能自愈。</string>
+    <string name="persona_subtitle">Tsuki · 月下的手机助手</string>
+    <string name="pill_a11y_desc">无障碍服务状态，点按打开设置</string>
+    <string name="pill_brain_desc">模型状态，点按重新检测</string>
+    <string name="appearance_title">外观 · Tsuki</string>
+    <string name="appearance_desc">配色与明暗。「夜月」是默认主题；动效会在系统关闭动画时自动静止。</string>
+    <string name="about_title">关于 Tsuki</string>
+    <string name="about_desc">Tsuki（月）是这个助手的形象：银色长发、红瞳、月牙。她只在你确认后发送、通话、支付、下单、卸载或设置闹钟。</string>
+    <string name="tsuki_portrait_desc">Tsuki 的半身像</string>
+    <string name="setup_title">开始之前</string>
 </resources>

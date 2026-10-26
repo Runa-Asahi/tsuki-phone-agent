@@ -64,7 +64,13 @@ class ChatRenderer(
     /** false in screenshot tests (no infinite animators). */
     private val animate: Boolean = true,
 ) {
+    /** A first-run checklist row (accessibility, overlay, notifications, model). */
+    data class SetupItem(val label: String, val ok: Boolean, val fix: (() -> Unit)? = null)
+
     private val views = HashMap<Long, Pair<String, View>>()
+    private val k: TsukiTheme.Colors get() = TsukiTheme.current(ctx)
+    private val motion = animate && !TsukiTheme.reduceMotion(ctx)
+    private val serif: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
 
     fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
     fun color(id: Int) = ContextCompat.getColor(ctx, id)
@@ -87,8 +93,8 @@ class ChatRenderer(
     }
 
     fun render(list: LinearLayout, items: List<ChatSession.Item>, phase: ChatSession.Phase,
-               recent: List<Pair<String, Boolean>>, suggestions: List<String>) {
-        if (items.isEmpty()) { views.clear(); list.removeAllViews(); list.addView(emptyState(recent, suggestions)); return }
+               recent: List<Pair<String, Boolean>>, suggestions: List<String>, setup: List<SetupItem> = emptyList(), hour: Int = 20) {
+        if (items.isEmpty()) { views.clear(); list.removeAllViews(); list.addView(emptyState(recent, suggestions, setup, hour)); return }
         if (list.childCount > 0 && list.getChildAt(0).tag == "empty") list.removeAllViews()
         val wanted = ArrayList<View>()
         for ((i, it) in items.withIndex()) {
@@ -97,7 +103,7 @@ class ChatRenderer(
             val sig = it.toString() + (if (it is ChatSession.Item.Step) "|${it.expanded}|$connects" else "")
             val old = views[it.id]
             val v = if (old != null && old.first == sig) old.second else build(it, !connects).also { nv ->
-                if (old == null && animate) { nv.alpha = 0f; nv.translationY = dp(8).toFloat(); nv.animate().alpha(1f).translationY(0f).setDuration(220).start() }
+                if (old == null && motion) { nv.alpha = 0f; nv.translationY = dp(8).toFloat(); nv.animate().alpha(1f).translationY(0f).setDuration(220).start() }
             }
             views[it.id] = sig to v; wanted += v
         }
@@ -118,8 +124,9 @@ class ChatRenderer(
     }
 
     private fun userBubble(u: ChatSession.Item.User) = text(u.text, 15f, R.color.user_text).apply {
+        setTextColor(k.onBubble)
         background = GradientDrawable().apply {
-            setColor(color(R.color.user_bubble)); val r = dp(22).toFloat(); val s = dp(8).toFloat()
+            setColor(k.bubble); val r = dp(22).toFloat(); val s = dp(8).toFloat()
             cornerRadii = floatArrayOf(r, r, r, r, s, s, r, r)
         }
         setPadding(dp(16), dp(10), dp(16), dp(10)); maxWidth = (ctx.resources.displayMetrics.widthPixels * 0.78).toInt()
@@ -131,7 +138,7 @@ class ChatRenderer(
         background = round(color(R.color.surface_variant), 16); setPadding(dp(14), dp(12), dp(14), dp(12))
         val head = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
         head.addView(badge(R.drawable.ic_tool_think, R.color.insight, R.color.card_bg, 22))
-        head.addView(text("计划", 13f, R.color.text_secondary, bold = true), LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
+        head.addView(text("计划", 13f, R.color.text_secondary).apply { typeface = serif }, LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
         addView(head)
         p.lines.takeLast(4).forEach { l -> addView(text(l.replace("：", "：\u200B"), 13f, R.color.text_primary).apply { maxLines = 3 }, lp(6)) }
         layoutParams = lp(12)
@@ -148,10 +155,11 @@ class ChatRenderer(
         // Rail: icon + connector line (the timeline).
         val rail = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
         val b = badge(ToolIcon.drawable(if (s.state == ChatSession.State.FAIL) ToolIcon.Kind.FAIL else kind), fg, bg)
+        if (s.state == ChatSession.State.RUNNING) (b.background as GradientDrawable).apply { setColor(k.accentContainer); setStroke(dp(1), k.gold) }
         rail.addView(b)
         if (!lastStep) rail.addView(View(ctx).apply { setBackgroundColor(color(R.color.outline)) }, LinearLayout.LayoutParams(dp(2), 0, 1f).apply { topMargin = dp(2) })
         row.addView(rail, LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.MATCH_PARENT).apply { topMargin = dp(8) })
-        if (s.state == ChatSession.State.RUNNING && animate) ObjectAnimator.ofFloat(b, View.ALPHA, 1f, 0.45f).apply {
+        if (s.state == ChatSession.State.RUNNING && motion) ObjectAnimator.ofFloat(b, View.ALPHA, 1f, 0.45f).apply {
             duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE; start() }
 
         val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(10), 0, dp(10)) }
@@ -181,17 +189,20 @@ class ChatRenderer(
         }, lp(6))
         row.addView(body, LinearLayout.LayoutParams(0, -2, 1f))
         row.setOnClickListener { onToggle(s.id) }
+        row.minimumHeight = dp(48)
+        row.contentDescription = "${s.title}，" + when (s.state) { ChatSession.State.RUNNING -> "进行中"; ChatSession.State.OK -> "已完成"; ChatSession.State.FAIL -> "失败" } +
+            (if (s.details.isNotEmpty()) "，点按" + (if (s.expanded) "收起" else "展开") + "详情" else "")
         return row
     }
 
     private fun confirmCard(c: ChatSession.Item.Confirm) = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
-        background = round(color(R.color.confirm_bg), 20, color(R.color.confirm_stroke)); setPadding(dp(16), dp(14), dp(16), dp(14))
+        background = round(color(R.color.confirm_bg), 20, k.gold); setPadding(dp(16), dp(14), dp(16), dp(14))
         val head = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
         head.addView(badge(R.drawable.ic_tool_confirm, R.color.warn_amber, R.color.card_bg, 30))
         head.addView(LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            addView(text("需要你确认", 15f, R.color.text_primary, bold = true))
+            addView(text("需要你确认", 15f, R.color.text_primary).apply { typeface = serif })
             addView(text("确认前不会发出、支付或删除任何东西", 12f, R.color.text_secondary))
         }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(10) })
         addView(head)
@@ -212,14 +223,14 @@ class ChatRenderer(
         orientation = LinearLayout.VERTICAL
         val ask = r.ask
         val (bg, fg, icon, title) = when {
-            ask -> Quad(R.color.ask_bg, R.color.primary, R.drawable.ic_tool_ask, "需要你补充")
+            ask -> Quad(R.color.ask_bg, R.color.primary, R.drawable.ic_tool_ask, "${TsukiTheme.PERSONA} 想问你")
             r.ok -> Quad(R.color.ok_bg, R.color.ok_green, R.drawable.ic_tool_done, "已完成")
             else -> Quad(R.color.err_bg, R.color.err_red, R.drawable.ic_tool_fail, "未完成")
         }
         background = round(color(bg), 20); setPadding(dp(16), dp(14), dp(16), dp(14))
         val head = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
         head.addView(badge(icon, fg, R.color.card_bg, 30))
-        head.addView(text(title, 15f, fg, bold = true), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(10) })
+        head.addView(text(title, 15f, fg).apply { typeface = serif }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(10) })
         addView(head)
         addView(text(r.summary.removePrefix("❓").trim(), 15f), lp(10))
         if (ask) addView(text("直接在下方输入框回复，我会接着做。", 12.5f, R.color.text_secondary), lp(6))
@@ -234,20 +245,69 @@ class ChatRenderer(
     fun livePill(phase: ChatSession.Phase) = LinearLayout(ctx).apply {
         gravity = Gravity.CENTER_VERTICAL; tag = "pill"
         background = round(color(R.color.surface_variant), 20); setPadding(dp(12), dp(6), dp(14), dp(6))
-        val dot = View(ctx).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color(
-            if (phase == ChatSession.Phase.CONFIRM || phase == ChatSession.Phase.PAUSED) R.color.warn_amber else R.color.primary)) } }
-        addView(dot, LinearLayout.LayoutParams(dp(8), dp(8)))
-        if (animate) ObjectAnimator.ofFloat(dot, View.ALPHA, 1f, 0.2f).apply { duration = 600; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE; start() }
-        addView(text(phase.label + "…", 12.5f, R.color.text_secondary, bold = true), LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
+        val moon = MoonPhaseView(ctx).apply {
+            tint = if (phase == ChatSession.Phase.CONFIRM || phase == ChatSession.Phase.PAUSED) color(R.color.warn_amber) else k.gold
+            running = motion && phase != ChatSession.Phase.PAUSED }
+        addView(moon, LinearLayout.LayoutParams(dp(14), dp(14)))
+        addView(text("${TsukiTheme.PERSONA} · " + phase.label + "…", 12.5f, R.color.text_secondary, bold = true), LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES; contentDescription = "${TsukiTheme.PERSONA}：${phase.label}"
+        accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         layoutParams = lp(12, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(38) }
     }
 
-    private fun emptyState(recent: List<Pair<String, Boolean>>, suggestions: List<String>) = LinearLayout(ctx).apply {
-        orientation = LinearLayout.VERTICAL; tag = "empty"; setPadding(dp(4), dp(28), dp(4), dp(8))
-        addView(badge(R.drawable.ic_tool_think, R.color.on_primary, R.color.primary, 48))
-        addView(text("今天想让我做什么？", 24f, bold = true), lp(16))
-        addView(text("用一句话描述目标，我会一步步操作手机，并实时展示每一步。发送、通话、支付、闹钟等操作一定会先问你。", 14f, R.color.text_secondary), lp(8))
-        addView(text("试试这些", 13f, R.color.text_tertiary, bold = true), lp(22))
+    /** Half-portrait with a crescent glow — the persona's "hello" (also used as the loading/empty visual). */
+    fun portrait(heightDp: Int = 168) = FrameLayout(ctx).apply {
+        val kk = k
+        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(kk.accentContainer, kk.skyTop)).apply { cornerRadius = dp(28).toFloat() }
+        clipToOutline = true
+        outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(28).toFloat()) }
+        }
+        addView(ImageView(ctx).apply {
+            setImageResource(if (TsukiTheme.palette(ctx) == TsukiTheme.Palette.SAKURA) R.drawable.tsuki_chibi else R.drawable.tsuki_portrait); scaleType = ImageView.ScaleType.MATRIX
+            contentDescription = ctx.getString(R.string.tsuki_portrait_desc)
+            addOnLayoutChangeListener { v, l, t, rr, b, _, _, _, _ ->
+                val d = (v as ImageView).drawable ?: return@addOnLayoutChangeListener
+                val sc = (rr - l).toFloat() / d.intrinsicWidth; val dy = (d.intrinsicHeight * sc * 0.55f - (b - t) / 2f).coerceIn(0f, maxOf(0f, d.intrinsicHeight * sc - (b - t)))
+                v.imageMatrix = android.graphics.Matrix().apply { setScale(sc, sc); postTranslate(0f, -dy) }
+            }
+        }, FrameLayout.LayoutParams(-1, -1))
+        // crescent glow ornament (gold) in the corner
+        addView(object : View(ctx) {
+            private val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+            override fun onDraw(c: android.graphics.Canvas) {
+                val r = dp(14).toFloat(); val cx = width - dp(26).toFloat(); val cy = dp(26).toFloat()
+                p.shader = android.graphics.RadialGradient(cx, cy, r * 2.6f, kk.glow, 0, android.graphics.Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r * 2.6f, p); p.shader = null
+                p.color = kk.gold; MoonSkyView.crescent(c, cx, cy, r, p)
+            }
+        }.apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, FrameLayout.LayoutParams(-1, -1))
+        layoutParams = LinearLayout.LayoutParams(-1, dp(heightDp))
+    }
+
+    private fun emptyState(recent: List<Pair<String, Boolean>>, suggestions: List<String>, setup: List<SetupItem>, hour: Int) = LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL; tag = "empty"; setPadding(dp(4), dp(12), dp(4), dp(8))
+        addView(portrait())
+        addView(text("${TsukiTheme.greeting(hour)}，我是 ${TsukiTheme.PERSONA}", 24f).apply { typeface = serif; androidx.core.view.ViewCompat.setAccessibilityHeading(this, true) }, lp(16))
+        addView(text("用一句话告诉我想做什么，我会一步步操作手机，并实时展示每一步。发送、通话、支付、下单、卸载、闹钟一定会先问你。", 14f, R.color.text_secondary), lp(8))
+        val todo = setup.filter { !it.ok }
+        if (todo.isNotEmpty()) {
+            addView(text("☾ " + ctx.getString(R.string.setup_title), 13f, R.color.text_tertiary).apply { typeface = serif; androidx.core.view.ViewCompat.setAccessibilityHeading(this, true) }, lp(20))
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL; background = round(color(R.color.card_bg), 18, k.gold); setPadding(dp(14), dp(6), dp(14), dp(6))
+                setup.forEach { item -> addView(LinearLayout(ctx).apply {
+                    gravity = Gravity.CENTER_VERTICAL; minimumHeight = dp(48)
+                    addView(badge(if (item.ok) R.drawable.ic_tool_done else R.drawable.ic_tool_confirm, if (item.ok) R.color.ok_green else R.color.warn_amber, R.color.surface_variant, 24))
+                    addView(text(item.label, 14f), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(10) })
+                    if (!item.ok && item.fix != null) {
+                        addView(text("去开启", 13f, R.color.primary, bold = true))
+                        isClickable = true; isFocusable = true; setOnClickListener { item.fix.invoke() }
+                        foreground = ctx.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).let { a -> a.getDrawable(0).also { a.recycle() } }
+                    }
+                    contentDescription = item.label + if (item.ok) "，已就绪" else "，未就绪" + (if (item.fix != null) "，点按去开启" else "")
+                }) }
+            }, lp(8))
+        }
+        addView(text("☾ 试试这些", 13f, R.color.text_tertiary).apply { typeface = serif; androidx.core.view.ViewCompat.setAccessibilityHeading(this, true) }, lp(22))
         suggestions.take(4).chunked(2).forEach { pair ->
             val row = LinearLayout(ctx)
             pair.forEachIndexed { i, s -> row.addView(suggestionCard(s), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply { if (i == 1) marginStart = dp(10) }) }
@@ -255,10 +315,11 @@ class ChatRenderer(
             addView(row, lp(10))
         }
         if (recent.isNotEmpty()) {
-            addView(text("最近", 13f, R.color.text_tertiary, bold = true), lp(22))
+            addView(text("☾ 最近", 13f, R.color.text_tertiary).apply { typeface = serif; androidx.core.view.ViewCompat.setAccessibilityHeading(this, true) }, lp(22))
             recent.take(3).forEach { (g, ok) ->
                 addView(LinearLayout(ctx).apply {
-                    gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, dp(8))
+                    gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(8), 0, dp(8)); minimumHeight = dp(48)
+                    contentDescription = (if (ok) "成功：" else "失败：") + g + "，点按填入"
                     addView(badge(if (ok) R.drawable.ic_tool_done else R.drawable.ic_tool_fail, if (ok) R.color.ok_green else R.color.err_red, R.color.surface_variant, 24))
                     addView(text(g, 14f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(10) })
                     setOnClickListener { onPick(g) }
@@ -271,10 +332,11 @@ class ChatRenderer(
         orientation = LinearLayout.VERTICAL
         background = round(color(R.color.card_bg), 16, color(R.color.outline)); setPadding(dp(14), dp(12), dp(14), dp(14))
         addView(ImageView(ctx).apply { setImageResource(ToolIcon.drawable(ToolIcon.of(s).let { if (it == ToolIcon.Kind.THINK) ToolIcon.Kind.LAUNCH else it }))
-            imageTintList = ColorStateList.valueOf(color(R.color.primary)) }, LinearLayout.LayoutParams(dp(20), dp(20)))
+            imageTintList = ColorStateList.valueOf(k.accent.takeIf { TsukiTheme.isDark(ctx) } ?: color(R.color.primary)) }, LinearLayout.LayoutParams(dp(20), dp(20)))
         addView(text(s, 13.5f).apply { maxLines = 3 }, lp(10))
         isClickable = true; isFocusable = true
         foreground = ctx.obtainStyledAttributes(intArrayOf(android.R.attr.selectableItemBackground)).let { a -> a.getDrawable(0).also { a.recycle() } }
         setOnClickListener { onPick(s) }
+        minimumHeight = dp(48); contentDescription = "示例任务：$s，点按填入"
     }
 }

@@ -12,6 +12,7 @@ class PhoneAgentApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.runasakura.phoneagent.ui.TsukiTheme.init(this)
         instance = this
         prefs = AgentPreferences(this)
         createNotificationChannels()

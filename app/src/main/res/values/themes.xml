@@ -27,6 +27,8 @@
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/light_bars</item>
         <item name="android:windowAnimationStyle">@style/WindowFade</item>
     </style>
+    <!-- Pre-31 launch theme = main theme (splash attrs live in values-v31) -->
+    <style name="Theme.HonorPhoneAgent.Launch" parent="Theme.HonorPhoneAgent" />
     <style name="WindowFade" parent="@android:style/Animation.Activity">
         <item name="android:activityOpenEnterAnimation">@android:anim/fade_in</item>
         <item name="android:activityCloseExitAnimation">@android:anim/fade_out</item>
@@ -45,13 +47,14 @@
     <!-- Settings: one outlined card per section -->
     <style name="SectionCard" parent="Widget.Material3.CardView.Filled">
         <item name="cardBackgroundColor">@color/card_bg</item>
-        <item name="strokeWidth">0dp</item>
+        <item name="strokeWidth">1dp</item>
         <item name="cardCornerRadius">22dp</item>
+        <item name="strokeColor">@color/outline</item>
         <item name="contentPadding">16dp</item>
         <item name="android:layout_marginTop">12dp</item>
     </style>
     <style name="SectionTitle">
-        <item name="android:textSize">17sp</item><item name="android:fontFamily">sans-serif-medium</item><item name="android:letterSpacing">-0.01</item>
+        <item name="android:textSize">17sp</item><item name="android:fontFamily">serif</item><item name="android:textStyle">bold</item><item name="android:letterSpacing">0.01</item>
         <item name="android:textColor">@color/text_primary</item>
     </style>
     <style name="SectionDesc">
@@ -89,6 +92,13 @@
     <style name="HealthPillValue">
         <item name="android:layout_width">wrap_content</item><item name="android:layout_height">wrap_content</item>
         <item name="android:textSize">12sp</item><item name="android:textStyle">bold</item><item name="android:maxLines">1</item><item name="android:ellipsize">end</item>
+    </style>
+    <!-- Tsuki typography: serif titles, sans body -->
+    <style name="TsukiTitle" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:fontFamily">serif</item><item name="android:textStyle">bold</item><item name="android:letterSpacing">0.02</item><item name="android:textSize">18sp</item>
+    </style>
+    <style name="TsukiSubtitle" parent="TextAppearance.Material3.LabelSmall">
+        <item name="android:fontFamily">serif</item><item name="android:letterSpacing">0.08</item><item name="android:textSize">11sp</item>
     </style>
     <style name="StatusTitle"><item name="android:textSize">12sp</item><item name="android:textColor">@color/text_secondary</item></style>
     <style name="StatusValue"><item name="android:textSize">14sp</item><item name="android:textStyle">bold</item><item name="android:textColor">@color/text_primary</item><item name="android:layout_marginTop">4dp</item></style>
