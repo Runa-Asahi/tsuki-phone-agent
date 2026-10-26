@@ -35,6 +35,10 @@ class SettingsActivity : AppCompatActivity() {
         binding.cloudModel.setText(prefs.cloudModel)
         binding.maxSteps.setText(prefs.maxSteps.toString())
         binding.cloudShot.isChecked = prefs.allowCloudScreenshot
+        binding.visionTip.text = com.runasakura.phoneagent.llm.CloudProviders.VISION_TIP
+        binding.visionUrl.setText(prefs.visionBaseUrl)
+        binding.visionModel.setText(prefs.visionModel)
+        if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
             AgentPreferences.ROUTE_HYBRID,
@@ -108,6 +112,9 @@ class SettingsActivity : AppCompatActivity() {
             prefs.cloudProvider = CloudProviders.effectiveProvider(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)
             prefs.maxSteps = binding.maxSteps.text.toString().toIntOrNull() ?: 25
             prefs.allowCloudScreenshot = binding.cloudShot.isChecked
+            prefs.visionBaseUrl = binding.visionUrl.text.toString()
+            prefs.visionModel = binding.visionModel.text.toString()
+            binding.visionKey.text.toString().trim().takeIf { it.isNotEmpty() }?.let { prefs.visionApiKey = it }
             prefs.routeMode = modes[binding.routeMode.selectedItemPosition]
             Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
             finish()

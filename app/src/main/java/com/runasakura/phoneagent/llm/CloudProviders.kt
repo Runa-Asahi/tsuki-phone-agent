@@ -12,7 +12,7 @@ object CloudProviders {
             // api-docs.deepseek.com (2026-10): deepseek-flash, deepseek-v4-pro; deepseek-chat/-reasoner are legacy aliases.
             listOf("deepseek-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner")),
         Preset(PROVIDER_QWEN, "通义千问（阿里云百炼）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus",
-            listOf("qwen-plus", "qwen-turbo", "qwen-max", "qwen-flash")),
+            listOf("qwen-plus", "qwen-turbo", "qwen-max", "qwen-flash", "qwen3-vl-plus", "qwen-vl-max")),
         Preset(AgentPreferences.PROVIDER_OPENAI, "OpenAI 兼容（自定义）", "", "gpt-4o-mini",
             listOf("gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"))
     )
@@ -76,6 +76,16 @@ object CloudProviders {
 
     fun ready(provider: String, baseUrl: String, key: String) =
         effectiveProvider(provider, baseUrl, key) != AgentPreferences.PROVIDER_NONE && baseUrl.isNotBlank() && key.isNotBlank()
+
+    /** Separate vision helper; falls back to the main cloud model when that one is itself a vision model. */
+    fun visionClientFor(prefs: AgentPreferences): CloudClient? {
+        if (prefs.visionBaseUrl.isNotBlank() && prefs.visionApiKey.isNotBlank() && prefs.visionModel.isNotBlank())
+            return CloudClient(prefs.visionBaseUrl, prefs.visionApiKey, prefs.visionModel)
+        return null
+    }
+
+    /** Shown in settings / after failures on screens with little text. */
+    const val VISION_TIP = "游戏、图标多的界面文字很少，纯文本模型（如 deepseek-flash）只能靠 OCR 猜。建议在设置里配置「视觉辅助模型」：阿里云百炼 https://dashscope.aliyuncs.com/compatible-mode/v1 ，模型 qwen3-vl-plus 或 qwen-vl-max，并勾选允许发送截图。"
 
     fun clientFor(prefs: AgentPreferences): CloudClient? {
         if (!ready(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)) return null

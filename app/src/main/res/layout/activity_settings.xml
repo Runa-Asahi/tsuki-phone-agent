@@ -58,6 +58,12 @@
             <EditText android:id="@+id/maxSteps" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" />
 
             <CheckBox android:id="@+id/cloudShot" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_shot" />
+
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="16dp" android:textStyle="bold" android:text="视觉辅助模型（可选，推荐）" />
+            <TextView android:id="@+id/visionTip" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" />
+            <EditText android:id="@+id/visionUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:hint="https://dashscope.aliyuncs.com/compatible-mode/v1" />
+            <EditText android:id="@+id/visionKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:hint="视觉模型 API Key（只保存在本机）" />
+            <EditText android:id="@+id/visionModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:hint="qwen3-vl-plus" />
         </LinearLayout>
     </ScrollView>
 

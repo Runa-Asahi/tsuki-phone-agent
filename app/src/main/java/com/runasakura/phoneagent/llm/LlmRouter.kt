@@ -29,6 +29,26 @@ class LlmRouter(
 
     val cloudReady: Boolean get() = cloud != null
 
+    /** Optional vision helper (screenshot-grounded steps). */
+    var vision: LlmClient? = null
+    val visionReady: Boolean get() = vision != null
+
+    suspend fun visionPlan(messages: List<ChatMessage>): LlmResponse? {
+        val v = vision ?: return null
+        val r = withTimeoutOrNull(45_000) { v.chat(messages, 0.1) } ?: return null
+        record("视觉", r, messages)
+        log("视觉模型 ${r.latencyMs}ms" + (r.error?.let { " 错误：$it" } ?: ""))
+        return r.takeIf { it.error == null && it.content.isNotBlank() }
+    }
+
+    /** Free-form answer (summaries of the agent's own history etc.). */
+    suspend fun answer(system: String, user: String): String? {
+        val c = cloud ?: return null
+        val r = withTimeoutOrNull(30_000) { c.chat(listOf(ChatMessage("system", system), ChatMessage("user", user)), 0.3) } ?: return null
+        record("云端回答", r, emptyList())
+        return r.content.takeIf { r.error == null && it.isNotBlank() }?.let { com.runasakura.phoneagent.agent.SessionAnswer.unwrap(it) }
+    }
+
     /** Hybrid with cloud: one cloud call turns the goal into short steps that the local model then executes. */
     suspend fun cloudPlan(goal: String, screen: String): List<String>? {
         val c = cloud ?: return null

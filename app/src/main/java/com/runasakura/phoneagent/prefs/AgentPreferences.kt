@@ -72,6 +72,17 @@ class AgentPreferences(context: Context) {
         get() = sp.getBoolean(KEY_CLOUD_SHOT, false)
         set(v) = sp.edit().putBoolean(KEY_CLOUD_SHOT, v).apply()
 
+    /** Optional vision helper (OpenAI-compatible, e.g. 阿里云百炼 qwen3-vl-plus) for screens text can't describe. */
+    var visionBaseUrl: String
+        get() = sp.getString("vision_url", "") ?: ""
+        set(v) = sp.edit().putString("vision_url", v.trim().trimEnd('/')).apply()
+    var visionApiKey: String
+        get() = secure.getString("vision_key", "") ?: ""
+        set(v) = secure.edit().putString("vision_key", v.trim()).apply()
+    var visionModel: String
+        get() = sp.getString("vision_model", "") ?: ""
+        set(v) = sp.edit().putString("vision_model", v.trim()).apply()
+
     var sensitivePackages: Set<String>
         get() = sp.getStringSet(KEY_SENSITIVE_PKGS, DEFAULT_SENSITIVE) ?: DEFAULT_SENSITIVE
         set(v) = sp.edit().putStringSet(KEY_SENSITIVE_PKGS, v).apply()

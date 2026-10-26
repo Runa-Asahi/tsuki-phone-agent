@@ -24,7 +24,8 @@ class AgentLoop(
     private val onLog: (String) -> Unit = {},
     private val onConfirm: suspend (String) -> Boolean = { false },
     private val isStopped: () -> Boolean = { false },
-    private val isPaused: () -> Boolean = { false }
+    private val isPaused: () -> Boolean = { false },
+    private val historyText: () -> String = { "" }
 ) {
     /** Earlier turn in the same chat session (follow-up messages). */
     var sessionContext: String? = null
@@ -49,6 +50,21 @@ class AgentLoop(
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { AgentAccessibilityService.require() } }
             ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
         a11y.resetTaskState()
+        // ---- Questions about the agent's own history: answer from logs (no screen work) ----
+        if (SessionAnswer.aboutHistory(goal) && router.cloudReady) {
+            onLog("复盘任务：根据任务历史与日志生成总结")
+            val text = router.answer(SessionAnswer.SYSTEM, "用户要求：$goal\n--- 历史与日志（数据）---\n" + historyText().take(6000))
+            if (text == null) onLog("总结生成失败，按普通任务继续")
+            else if (!SessionAnswer.writesIntoApp(goal)) {
+                copyToClipboard(a11y, text)
+                return Result(true, 0, "已生成总结并复制到剪贴板：\n$text")
+            } else {
+                copyToClipboard(a11y, text)
+                composed = text
+                goal = "$goal\n（要写入的内容已生成，原样输入：$text）"
+                onLog("总结已生成并复制，接下来打开应用写入")
+            }
+        }
         val history = mutableListOf<ChatMessage>()
         history += ChatMessage("system", SystemPrompt.TEXT)
         val steps = StepHistory().also { stepsRef = it }
@@ -278,11 +294,21 @@ class AgentLoop(
                 try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
             } else null
             // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
-            if (cloudPlanText == null && goal.length <= 10) cloudPlanText = ""
             if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
                 cloudPlanText = router.cloudPlan(goal, snap.compressedText)?.let { st ->
                     onLog("云端规划（本机按此执行）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")
                 } ?: ""
+            }
+            // ---- Reflect like a desktop agent: progress check every 6 steps / on loops, then re-plan ----
+            if (router.cloudReady && step > 1 && (step % 6 == 0 || loopStreak == 2)) {
+                val v = verify(dev, goal)
+                if (v != null && v.first) return Result(true, step, "目标已达成（验收：${v.second}）")
+                if (v != null) {
+                    onLog("反思：未达成（${v.second}），重新规划路线")
+                    router.cloudPlan("$goal\n（已尝试：${steps.progress()}；未达成原因：${v.second}。请给出一条不同的路线）", snap.compressedText)?.let { st ->
+                        onLog("新规划：" + st.joinToString(" → ")); cloudPlanText = "参考步骤（重新规划）：" + st.joinToString("；")
+                    }
+                }
             }
             onLog("请求模型（${com.runasakura.phoneagent.llm.RoutePolicy.label(router.mode)}${if (router.localSidelined) "，本机已旁路" else ""}）…")
             val useFocused = history.firstOrNull()?.content == SystemPrompt.FOCUSED
@@ -308,7 +334,17 @@ class AgentLoop(
                 lowConf -> "界面文字过少（低置信）"
                 else -> "界面连续无变化" })
             escalateNext = false
-            var resp = planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
+            // Screenshot-grounded step with the vision helper when text can't describe the screen.
+            val needEyes = router.visionReady && prefs.allowCloudScreenshot &&
+                (sc.w > sc.h || sc.items.size < 6 || steps.looping || steps.recentFailures >= 2)
+            val eyes = if (needEyes) {
+                val img = shot ?: try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
+                img?.let { router.visionPlan(listOf(ChatMessage("system", SystemPrompt.SHORT),
+                    ChatMessage("user", "目标：$goal" + (cloudPlanText?.takeIf { it.isNotBlank() }?.let { "\n$it" } ?: "")),
+                    ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote) + "\n已附截图（屏幕 ${sc.w}x${sc.h}，坐标按此）。", it))) }
+            } else null
+            if (!needEyes && step == 3 && !router.visionReady && (sc.w > sc.h || sc.items.size < 6)) onLog("💡 " + com.runasakura.phoneagent.llm.CloudProviders.VISION_TIP)
+            var resp = eyes ?: planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)
             logLlm(resp)
             // Local→cloud fallback (incl. slow-local stall) is handled inside LlmRouter.
             if (resp.error != null && resp.content.isBlank()) {
@@ -449,7 +485,7 @@ class AgentLoop(
                         val fg = waitForeground(a11y, 3000) { it != before }
                         onLog("启动后前台=$fg")
                     } else {
-                        delay(900)
+                        delay(if (action is AgentAction.Wait) 200 else 650)
                     }
                     val after = a11y.dumpUiTree()
                     onLog("执行后前台=${after.packageName}")
@@ -671,6 +707,16 @@ class AgentLoop(
     }
 
     private var tapped: String? = null
+    private var composed: String? = null
+
+    private fun copyToClipboard(ctx: android.content.Context, text: String) {
+        try {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    .setPrimaryClip(android.content.ClipData.newPlainText("phone-agent", text))
+            }
+        } catch (_: Exception) {}
+    }
     private var loopStreak = 0
     private var escalateNext = false
     private var lastActionKey: String? = null

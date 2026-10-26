@@ -106,6 +106,8 @@ class AgentForegroundService : Service() {
         com.runasakura.phoneagent.util.Diagnostics.model = brain
         log("大脑：$brain" + if (cloud == null && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY) "（云端未就绪）" else "")
         val router = LlmRouter({ prefs.routeMode }, local, cloud).also { r -> r.log = { log(it) } }
+        router.vision = com.runasakura.phoneagent.llm.CloudProviders.visionClientFor(prefs)
+        if (router.vision != null) log("视觉辅助：${prefs.visionModel}（截图${if (prefs.allowCloudScreenshot) "已允许" else "未允许，视觉不会使用"}）")
         val loop = AgentLoop(
             prefs = prefs,
             router = router,
@@ -117,7 +119,13 @@ class AgentForegroundService : Service() {
             },
             onConfirm = { reason -> askConfirm(reason) },
             isStopped = { stopFlag.get() },
-            isPaused = { pauseFlag.get() }
+            isPaused = { pauseFlag.get() },
+            historyText = {
+                com.runasakura.phoneagent.ui.TaskHistory.load(this).take(10).joinToString("\n") {
+                    "${if (it.ok) "成功" else "失败"} | ${it.goal} | ${it.summary}" } +
+                    "\n--- 最近诊断日志 ---\n" + com.runasakura.phoneagent.util.Diagnostics.export("", "").lines()
+                        .filterNot { l -> l.contains("key=") || l.contains("LLM raw") }.joinToString("\n").takeLast(4000)
+            }
         ).also { it.sessionContext = sessionContext }
         val previous = job
         job = scope.launch(Dispatchers.Default) {
