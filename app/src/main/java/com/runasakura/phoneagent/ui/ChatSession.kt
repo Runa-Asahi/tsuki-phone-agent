@@ -134,6 +134,14 @@ object ActionText {
         a.startsWith("Done") -> "完成"
         a.startsWith("Fail") -> "无法继续"
         a.startsWith("AskConfirm") -> "请求确认"
+        a.startsWith("Global") -> field(a, "name")?.let { com.runasakura.phoneagent.agent.ActionDesc.GLOBAL_ZH[it] } ?: "系统面板"
+        a.startsWith("OpenUri") -> "打开链接" + (field(a, "uri")?.let { " ${it.take(30)}" } ?: "")
+        a.startsWith("Intent") -> "打开系统页" + (field(a, "action")?.let { " ${it.substringAfterLast('.')}" } ?: "")
+        a.startsWith("SetClipboard") -> "复制到剪贴板"
+        a.startsWith("ReadClipboard") -> "读取剪贴板"
+        a.startsWith("Key") -> field(a, "name")?.let { com.runasakura.phoneagent.agent.ActionDesc.KEY_ZH[it] } ?: "按键"
+        a.startsWith("ScrollFind") -> "滚动查找" + (field(a, "text")?.let { "「$it」" } ?: "")
+        a.startsWith("Recents") -> "最近任务"
         else -> a.take(24)
     }
 }

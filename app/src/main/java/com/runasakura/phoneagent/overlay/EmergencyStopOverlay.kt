@@ -32,22 +32,27 @@ class EmergencyStopOverlay(
      * Taps keep their exact coordinates instead of being shifted next to the button.
      */
     fun <T> withPassThrough(block: () -> T): T {
-        setPassThrough(true)
-        try { return block() } finally { setPassThrough(false) }
+        // Depth-counted: a nested gesture must not make the button reappear while the outer one is still running.
+        if (passDepth.getAndIncrement() == 0) setPassThrough(true)
+        try { return block() } finally { if (passDepth.decrementAndGet() == 0) setPassThrough(false) }
     }
+    private val passDepth = java.util.concurrent.atomic.AtomicInteger(0)
 
     private fun setPassThrough(on: Boolean) {
         val v = button ?: return; val p = lp ?: return
-        val latch = java.util.concurrent.CountDownLatch(1)
-        main.post {
+        val apply = {
             try {
                 p.flags = if (on) p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
                 v.alpha = if (on) 0f else 1f
                 wm.updateViewLayout(v, p)
             } catch (_: Exception) { }
-            latch.countDown()
         }
-        latch.await(400, java.util.concurrent.TimeUnit.MILLISECONDS)
+        // On the main thread a latch would deadlock (the posted block could never run before the wait ends).
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) { apply(); return }
+        val latch = java.util.concurrent.CountDownLatch(1)
+        main.post { apply(); latch.countDown() }
+        if (!latch.await(400, java.util.concurrent.TimeUnit.MILLISECONDS))
+            android.util.Log.w("EmergencyStop", "overlay pass-through=$on not applied within 400ms (main thread busy)")
         if (on) Thread.sleep(60) // let the window manager apply the flag before input arrives
     }
 

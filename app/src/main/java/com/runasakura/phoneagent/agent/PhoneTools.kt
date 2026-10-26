@@ -12,11 +12,14 @@ object PhoneTools {
         "lock_screen" to 8, "take_screenshot" to 9, "split_screen" to 7, "back" to 1, "home" to 2
     )
     val KEYS = setOf("enter", "volume_up", "volume_down", "mute", "unmute")
+    val DIRECTIONS = setOf("up", "down", "left", "right")
 
-    private val CONFIRM_SCHEMES = setOf("tel", "sms", "smsto", "mms", "mmsto", "mailto", "wtai", "alipays", "weixin", "upi", "payto")
+    private val CONFIRM_SCHEMES = setOf("tel", "sms", "smsto", "mms", "mmsto", "mailto", "wtai", "alipays", "weixin", "upi", "payto",
+        // intent:// URIs can start any component with any action; javascript:/data: are never plain navigation.
+        "intent", "javascript", "data", "file", "content")
     private val CONFIRM_INTENT = Regex("CALL|DIAL|SEND|SENDTO|DELETE|UNINSTALL|INSTALL_PACKAGE|PAY|PURCHASE", RegexOption.IGNORE_CASE)
 
-    fun scheme(uri: String): String = uri.substringBefore(':', "").lowercase().trim()
+    fun scheme(uri: String): String = uri.trim().substringBefore(':', "").lowercase().takeIf { Regex("[a-z][a-z0-9+.-]*").matches(it) }.orEmpty()
 
     /** Why this URI needs confirmation, or null when it is a plain view/navigation. */
     fun uriNeedsConfirm(uri: String): String? {
@@ -26,6 +29,11 @@ object PhoneTools {
         if ((s == "market" || uri.contains("uninstall", true))) return "将打开应用安装/卸载相关页面：$uri"
         return null
     }
+
+    /** Full policy for an intent: action class AND its data URI (VIEW + tel: is still a call). */
+    fun intentConfirm(action: String, data: String?): String? =
+        intentNeedsConfirm(action) ?: data?.takeIf { it.isNotBlank() }?.let { uriNeedsConfirm(it) }
+            ?: if (intentAllowedWithoutConfirm(action)) null else "将执行系统操作 $action"
 
     fun intentNeedsConfirm(action: String): String? =
         if (CONFIRM_INTENT.containsMatchIn(action.substringAfterLast('.'))) "将执行系统操作 $action（拨号/发送/删除/卸载/支付类）" else null

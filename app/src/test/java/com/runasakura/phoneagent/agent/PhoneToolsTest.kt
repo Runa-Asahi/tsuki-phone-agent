@@ -30,10 +30,10 @@ class PhoneToolsTest {
     }
 
     @Test fun repeatReminderIsAdvisoryAt3_5_8() {
-        val r = RepeatReminder(); val a = AgentAction.Back
+        val r = RepeatReminder(); val a = "返回"
         val out = (1..9).map { r.observe(a) }
         assertEquals(listOf(3, 5, 8), out.mapIndexedNotNull { i, s -> if (s != null) i + 1 else null })
-        assertNull(r.observe(AgentAction.Home))
+        assertNull(r.observe("桌面"))
     }
 
     @Test fun truncationDetectedAndGoalYes() {

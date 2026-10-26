@@ -100,6 +100,9 @@ class AgentForegroundService : Service() {
         val prefs = PhoneAgentApp.instance.prefs
         val local = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.mnnModel)
         val cloud = com.runasakura.phoneagent.llm.CloudProviders.clientFor(prefs)
+        cloud?.onRetry = { code, n, wait ->
+            log("云端${code.zh}，${"%.1f".format(wait / 1000.0)}s 后自动重试（$n/3）")
+        }
         val brain = com.runasakura.phoneagent.llm.CloudProviders.describe(prefs.routeMode, prefs.cloudProvider,
             prefs.cloudBaseUrl, prefs.cloudModel, prefs.cloudApiKey, prefs.mnnModel)
         com.runasakura.phoneagent.util.Diagnostics.model = brain
@@ -238,7 +241,7 @@ class AgentForegroundService : Service() {
         log("停止原因：$reason")
         stopFlag.set(true)
         starting.set(false)
-        job?.cancel() // cancels in-flight OkHttp call via coroutine cancellation
+        job?.cancel() // cancels the in-flight OkHttp call (CloudClient uses awaitResponse → Call.cancel())
         job = null
         pendingConfirm?.invoke(false)
         pendingConfirm = null

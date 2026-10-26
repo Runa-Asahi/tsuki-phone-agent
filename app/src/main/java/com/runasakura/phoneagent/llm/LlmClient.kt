@@ -13,7 +13,9 @@ data class LlmResponse(
     val latencyMs: Long,
     val error: String? = null,
     /** Full HTTP body for on-screen debug (may be large). */
-    val rawBody: String? = null
+    val rawBody: String? = null,
+    /** Stable failure class (LlmErrors.Code name) when [error] is set; route on this, never on the message. */
+    val errorCode: String? = null
 )
 
 interface LlmClient {

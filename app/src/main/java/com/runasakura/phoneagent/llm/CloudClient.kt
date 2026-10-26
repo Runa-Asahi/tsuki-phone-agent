@@ -1,6 +1,8 @@
 package com.runasakura.phoneagent.llm
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -14,7 +16,7 @@ import java.util.concurrent.TimeUnit
 /**
  * OpenAI-compatible cloud backend (DeepSeek / custom). Tuned for agent steps:
  * one shared keep-alive HTTP/2 client, temperature 0, ≤200 tokens, JSON mode where supported,
- * one retry on 429/5xx with backoff, short timeouts.
+ * bounded exponential backoff on transient failures (LlmErrors), cancellable calls, short timeouts.
  */
 class CloudClient(
     private val baseUrl: String,
@@ -25,7 +27,8 @@ class CloudClient(
     /** User setting: DeepSeek thinking mode (off = fast direct JSON; on = reasoning_effort low). */
     private val thinking: Boolean = false,
     private val maxTokens: Int = if (CloudProviders.isReasoner(model) || thinking) 2000 else 600,
-    private val http: OkHttpClient = SHARED
+    private val http: OkHttpClient = SHARED,
+    private val retryPolicy: LlmErrors.Policy = LlmErrors.Policy()
 ) : LlmClient {
     override val name: String = (if (baseUrl.contains("deepseek", true)) "deepseek" else "cloud") + ":" + model
 
@@ -55,75 +58,65 @@ class CloudClient(
         })
     }
 
+    /** Called before each backoff wait (UI/log: "限流，2.1s 后重试 1/3"). */
+    var onRetry: ((LlmErrors.Code, Int, Long) -> Unit)? = null
+
     override suspend fun chat(messages: List<ChatMessage>, temperature: Double): LlmResponse =
         withContext(Dispatchers.IO) {
             if (baseUrl.isBlank() || apiKey.isBlank()) {
-                return@withContext LlmResponse("", name, 0, "云端 URL / API Key 未配置")
+                return@withContext LlmResponse("", name, 0, "云端 URL / API Key 未配置", errorCode = LlmErrors.Code.AUTH.name)
             }
             val started = System.currentTimeMillis()
-            val body = buildBody(messages, temperature).toString()
-            val req = Request.Builder()
-                .url(baseUrl.trimEnd('/') + "/chat/completions")
-                .addHeader("Authorization", "Bearer $apiKey")
-                .post(body.toRequestBody(JSON))
-                .build()
-            var attempt = 0
+            var tokens = maxTokens
+            var retry = 0
             var truncRetried = false
+            var lastTruncated: Pair<String, String>? = null
             while (true) {
+                coroutineContext.ensureActive()
+                val req = Request.Builder()
+                    .url(baseUrl.trimEnd('/') + "/chat/completions")
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .post(buildBody(messages, temperature, tokens).toString().toRequestBody(JSON))
+                    .build()
+                var status: Int? = null; var raw = ""; var retryAfter: String? = null; var failure: Throwable? = null
                 try {
-                    http.newCall(req).execute().use { resp ->
-                        val raw = resp.body?.string().orEmpty()
-                        val latency = System.currentTimeMillis() - started
-                        if (resp.isSuccessful) {
-                            var content = contentOrReasoningJson(raw)
-                            // Output cut by max_tokens → the JSON is truncated: retry once with a doubled budget.
-                            if (finishReason(raw) == "length" && !truncRetried) {
-                                truncRetried = true
-                                val retry = Request.Builder().url(req.url).headers(req.headers)
-                                    .post(buildBody(messages, temperature, maxTokens * 2).toString().toRequestBody(JSON)).build()
-                                http.newCall(retry).execute().use { r2 ->
-                                    val raw2 = r2.body?.string().orEmpty()
-                                    if (r2.isSuccessful) return@withContext LlmResponse(contentOrReasoningJson(raw2), name, System.currentTimeMillis() - started, rawBody = raw2)
-                                }
-                            }
-                            // JSON mode may occasionally return empty content (api-docs.deepseek.com/guides/json_mode): retry once.
-                            if (content.isBlank() && attempt == 0) { attempt++; return@use }
-                            return@withContext LlmResponse(content, name, latency, rawBody = raw)
-                        }
-                        if (resp.code == 400 && raw.contains("thinking", true) && !thinkingRejected) {
-                            // API rejected the optional `thinking` param: drop it for the rest of the process and retry once.
-                            thinkingRejected = true
-                            val retry = Request.Builder().url(req.url).headers(req.headers)
-                                .post(buildBody(messages, temperature).toString().toRequestBody(JSON)).build()
-                            http.newCall(retry).execute().use { r2 ->
-                                val raw2 = r2.body?.string().orEmpty()
-                                val lat = System.currentTimeMillis() - started
-                                return@withContext if (r2.isSuccessful) LlmResponse(LocalMnnClient.parseContent(raw2), name, lat, rawBody = raw2)
-                                else LlmResponse("", name, lat, "HTTP ${r2.code}: ${raw2.take(300)}", raw2)
-                            }
-                        }
-                        if (resp.code == 400 && !imageRejected && messages.any { it.imageBase64 != null }) {
-                            // Model/provider doesn't take images: remember for the process, retry once text-only.
-                            imageRejected = true
-                            val retry = Request.Builder().url(req.url).headers(req.headers)
-                                .post(buildBody(messages, temperature).toString().toRequestBody(JSON)).build()
-                            http.newCall(retry).execute().use { r2 ->
-                                val raw2 = r2.body?.string().orEmpty()
-                                val lat = System.currentTimeMillis() - started
-                                return@withContext if (r2.isSuccessful) LlmResponse(LocalMnnClient.parseContent(raw2), name, lat, rawBody = raw2)
-                                else LlmResponse("", name, lat, "HTTP ${r2.code}: ${raw2.take(300)}", raw2)
-                            }
-                        }
-                        if ((resp.code == 429 || resp.code >= 500) && attempt == 0) {
-                            attempt++; delay(800L); return@use
-                        }
-                        // Never echo the key; trim provider error bodies.
-                        return@withContext LlmResponse("", name, latency, "HTTP ${resp.code}: ${raw.take(300)}", raw)
+                    http.newCall(req).awaitResponse().use { resp ->
+                        status = resp.code; retryAfter = resp.header("Retry-After"); raw = resp.body?.string().orEmpty()
                     }
-                } catch (e: Exception) {
-                    if (attempt == 0) { attempt++; delay(600L); continue }
-                    return@withContext LlmResponse("", name, System.currentTimeMillis() - started, e.message ?: e.toString())
+                } catch (e: CancellationException) { throw e }   // 急停 / step timeout: never retry after cancel
+                catch (e: Exception) { failure = e }
+                val latency = System.currentTimeMillis() - started
+                val code: LlmErrors.Code
+                if (failure == null && status in 200..299) {
+                    val content = contentOrReasoningJson(raw)
+                    // Output cut by max_tokens → truncated JSON: one retry with a doubled budget.
+                    if (finishReason(raw) == "length" && !truncRetried) {
+                        truncRetried = true; tokens = maxTokens * 2; lastTruncated = content to raw; continue
+                    }
+                    if (content.isNotBlank()) return@withContext LlmResponse(content, name, latency, rawBody = raw)
+                    // The doubled retry came back empty: the truncated first answer is still better than nothing.
+                    lastTruncated?.takeIf { it.first.isNotBlank() }?.let { return@withContext LlmResponse(it.first, name, latency, rawBody = it.second) }
+                    code = LlmErrors.Code.EMPTY_RESPONSE   // JSON mode may return empty content (api-docs json_mode)
+                } else {
+                    if (failure == null && status == 400 && raw.contains("thinking", true) && !thinkingRejected) {
+                        thinkingRejected = true; continue   // optional `thinking` field unsupported: drop it for the process
+                    }
+                    if (failure == null && status == 400 && !imageRejected && messages.any { it.imageBase64 != null } &&
+                        !LlmErrors.CONTEXT_WINDOW_EXCEEDED_HINT.containsMatchIn(raw)) {
+                        imageRejected = true; continue      // provider/model takes no images: text-only from now on
+                    }
+                    code = LlmErrors.classify(status, raw, failure)
                 }
+                if (code in LlmErrors.RETRYABLE && retry < retryPolicy.maxRetries) {
+                    val wait = retryPolicy.delayMs(retry + 1, LlmErrors.retryAfterMs(retryAfter), kotlin.random.Random.nextDouble())
+                    if (latency + wait < retryPolicy.budgetMs) {
+                        retry++; onRetry?.invoke(code, retry, wait); delay(wait); continue
+                    }
+                }
+                // Never echo the key; trim provider error bodies.
+                val detail = failure?.let { it.message ?: it.javaClass.simpleName } ?: "HTTP $status: ${raw.take(300)}"
+                return@withContext LlmResponse("", name, latency, "${code.zh}（$detail）" + if (retry > 0) "，已重试 $retry 次" else "",
+                    raw.ifBlank { null }, errorCode = code.name)
             }
             @Suppress("UNREACHABLE_CODE")
             LlmResponse("", name, 0, "unreachable")

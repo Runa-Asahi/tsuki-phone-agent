@@ -44,6 +44,21 @@ object ActionValidator {
         is AgentAction.Fail ->
             if (a.reason.startsWith("Unknown action") || a.reason.startsWith("Cannot parse") || a.reason.startsWith("LLM returned empty"))
                 "无法解析：${a.reason.take(40)}" else null
+        // Generic phone tools: reject malformed arguments up front so the model is re-asked instead of failing on device.
+        is AgentAction.Global -> if (a.name !in PhoneTools.GLOBAL) "未知系统面板「${a.name}」，可用：${PhoneTools.GLOBAL.keys.joinToString("/")}" else null
+        is AgentAction.OpenUri -> when {
+            a.uri.isBlank() -> "open_url 需要 url"
+            PhoneTools.scheme(a.uri).isBlank() || a.uri.any { it.isWhitespace() } -> "url 必须是完整链接（含 scheme，如 https://…），不能有空格"
+            else -> null
+        }
+        is AgentAction.Intent -> if (!Regex("[A-Za-z0-9_.]+").matches(a.action) || !a.action.contains('.')) "intent 需要完整的 action（如 android.settings.WIFI_SETTINGS）" else null
+        is AgentAction.SetClipboard -> if (a.text.isBlank()) "set_clipboard 需要 text" else null
+        is AgentAction.Key -> if (a.name !in PhoneTools.KEYS) "不支持的按键「${a.name}」，可用：${PhoneTools.KEYS.joinToString("/")}" else null
+        is AgentAction.ScrollFind -> when {
+            a.text.isBlank() -> "scroll_find 需要 text"
+            a.direction !in PhoneTools.DIRECTIONS -> "direction 只能是 ${PhoneTools.DIRECTIONS.joinToString("/")}"
+            else -> null
+        }
         else -> null
     }
 }

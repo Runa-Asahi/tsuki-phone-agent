@@ -328,12 +328,11 @@ class A11yDevice(
         }
         if (t.textCount >= 3 && !quiet) {
             // The UI never went quiet (animation/player): accept the read only when two frames agree semantically.
-            repeat(2) {
-                delay(250); val t2 = treeScreen()
-                val stable = !com.runasakura.phoneagent.agent.SemanticDiff.compare(t.items, t2.items).meaningful
-                t = t2
-                if (stable) { TaskTiming.count("两帧一致"); return@repeat }
-            }
+            // (Earlier version used `return@repeat`, which only skipped one iteration and always read 3 frames.)
+            val (frame, stable) = StableFrames.confirm(t, extra = 2, pause = { delay(250) }, read = { treeScreen() }) { a, b ->
+                !com.runasakura.phoneagent.agent.SemanticDiff.compare(a.items, b.items).meaningful }
+            t = frame
+            TaskTiming.count(if (stable) "两帧一致" else "两帧仍在变化")
         }
         if (t.textCount >= 3) {
             val ms = System.currentTimeMillis() - start
@@ -360,14 +359,12 @@ class A11yDevice(
         fun record(pkg: String, quiet: Boolean) { busy[pkg] = if (quiet) 0 else (busy[pkg] ?: 0) + 1 }
     }
 
-    /** Overlay handling lives in the service gesture layer (overlay steps aside); coordinates stay exact. */
-    private fun avoidOverlay(x: Int, y: Int): Pair<Int, Int> = x to y
 
     override suspend fun tap(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
         invalidateOcr("tap")
         coroutineContext.ensureActive()
         val n = item.ref as? AccessibilityNodeInfo
-        val (x, y) = avoidOverlay(item.cx, item.cy)
+        val x = item.cx; val y = item.cy  // exact: the stop overlay steps aside in the gesture layer
         // Coordinates are what the user sees; prefer a real gesture (works for obfuscated trees too).
         s.tap(x, y) || (n != null && s.tapNode(n))
     }
@@ -377,14 +374,14 @@ class A11yDevice(
     override suspend fun longPress(item: ScreenItem): Boolean = withContext(Dispatchers.IO) {
         invalidateOcr("longPress")
         coroutineContext.ensureActive()
-        val (x, y) = avoidOverlay(item.cx, item.cy)
+        val x = item.cx; val y = item.cy  // exact: the stop overlay steps aside in the gesture layer
         s.longPress(x, y)
     }
 
     override suspend fun tapXY(x: Int, y: Int): Boolean = withContext(Dispatchers.IO) {
         invalidateOcr("tapXY")
         coroutineContext.ensureActive()
-        val (ax, ay) = avoidOverlay(x, y); s.tap(ax, ay)
+        s.tap(x, y)
     }
 
     override suspend fun type(text: String, hintX: Int?, hintY: Int?, attempt: Int): Boolean {
@@ -518,4 +515,17 @@ class A11yDevice(
     }
 
     companion object { private const val TAG = "A11yDevice" }
+}
+
+/** Two-frame stability check: read up to [extra] more frames until two consecutive ones agree. */
+object StableFrames {
+    suspend fun <T> confirm(first: T, extra: Int, pause: suspend () -> Unit, read: suspend () -> T, same: (T, T) -> Boolean): Pair<T, Boolean> {
+        var prev = first
+        for (i in 0 until extra) {
+            pause(); val next = read()
+            if (same(prev, next)) return next to true
+            prev = next
+        }
+        return prev to false
+    }
 }

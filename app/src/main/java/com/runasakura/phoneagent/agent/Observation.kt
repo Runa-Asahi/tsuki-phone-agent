@@ -203,13 +203,43 @@ class RepeatReminder(private val thresholds: List<Int> = listOf(3, 5, 8)) {
     private var lastKey: String? = null
     private var count = 0
     fun reset() { lastKey = null; count = 0 }
-    fun observe(a: com.runasakura.phoneagent.model.AgentAction): String? {
-        val k = a.toString()
+    /** [k] must be id-free (ActionDesc): e-ids are renumbered every step, so toString() would never repeat. */
+    fun observe(k: String): String? {
         count = if (k == lastKey) count + 1 else 1; lastKey = k
         return when {
             count !in thresholds -> null
             count == thresholds.first() -> "提醒：同一动作已连续做了 $count 次。先分析上一次的结果，再决定是否继续。"
             else -> "提醒：动作 ${k.take(120)} 已连续 $count 次。换一种方法、收集更多信息（look/scroll_find），或结束任务（done/fail）。"
         }
+    }
+}
+
+/**
+ * Step-level reaction to a model failure that survived the client's own retries (harness error taxonomy:
+ * route on the stable code, never on the message). Transient classes get a fresh observation (the screen
+ * may have changed while the network was down) instead of ending the task; context overflow compacts the
+ * transcript once; auth/quota/invalid requests stop immediately because repeating cannot help.
+ */
+object LlmRecovery {
+    enum class Action { COMPACT_AND_RETRY, REOBSERVE, STOP }
+    const val MAX_STEP_RETRIES = 2
+    const val PAUSE_MS = 3000L
+    fun decide(r: com.runasakura.phoneagent.llm.LlmResponse, streak: Int): Action {
+        if (streak >= MAX_STEP_RETRIES) return Action.STOP
+        return when (com.runasakura.phoneagent.llm.LlmErrors.codeOf(r)) {
+            com.runasakura.phoneagent.llm.LlmErrors.Code.CONTEXT_WINDOW_EXCEEDED -> Action.COMPACT_AND_RETRY
+            in com.runasakura.phoneagent.llm.LlmErrors.RETRYABLE -> Action.REOBSERVE
+            else -> Action.STOP
+        }
+    }
+}
+
+/** Loop recovery ladder (generic; no app knowledge): streak 3 → back out once, streak 4 → relaunch the target app. */
+object Recovery {
+    enum class Step { BACK_OUT, RELAUNCH }
+    fun forLoop(streak: Int, targetPkg: String?): Step? = when {
+        streak == 3 -> Step.BACK_OUT
+        streak == 4 && !targetPkg.isNullOrBlank() -> Step.RELAUNCH
+        else -> null
     }
 }
