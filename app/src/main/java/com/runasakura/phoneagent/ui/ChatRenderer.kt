@@ -73,7 +73,7 @@ class ChatRenderer(
     private val serif: Typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
 
     fun dp(v: Int) = (v * ctx.resources.displayMetrics.density).toInt()
-    fun color(id: Int) = ContextCompat.getColor(ctx, id)
+    fun color(id: Int) = TsukiTheme.color(ctx, id)
     fun round(bg: Int, r: Int = 16, stroke: Int? = null) = GradientDrawable().apply {
         setColor(bg); cornerRadius = dp(r).toFloat(); stroke?.let { setStroke(dp(1), it) }
     }
@@ -91,6 +91,9 @@ class ChatRenderer(
             FrameLayout.LayoutParams(dp(size * 4 / 7), dp(size * 4 / 7), Gravity.CENTER))
         layoutParams = LinearLayout.LayoutParams(dp(size), dp(size))
     }
+
+    /** Drop cached item views (after a palette switch every bubble is rebuilt in the new colours). */
+    fun reset(list: LinearLayout) { views.clear(); list.removeAllViews() }
 
     fun render(list: LinearLayout, items: List<ChatSession.Item>, phase: ChatSession.Phase,
                recent: List<Pair<String, Boolean>>, suggestions: List<String>, setup: List<SetupItem> = emptyList(), hour: Int = 20) {

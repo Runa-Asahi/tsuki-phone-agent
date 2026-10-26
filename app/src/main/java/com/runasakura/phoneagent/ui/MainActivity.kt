@@ -146,7 +146,7 @@ class MainActivity : AppCompatActivity() {
             else -> R.color.primary
         })
         binding.statusText.text = ph.label
-        binding.statusText.setTextColor(if (ph == ChatSession.Phase.IDLE) ContextCompat.getColor(this, R.color.text_secondary) else c)
+        binding.statusText.setTextColor(if (ph == ChatSession.Phase.IDLE) TsukiTheme.color(this, R.color.text_secondary) else c)
         val dot = ContextCompat.getDrawable(this, R.drawable.dot)!!.mutate().apply { setTint(c) }
         binding.statusText.setCompoundDrawablesRelativeWithIntrinsicBounds(dot, null, null, null)
         binding.sessionHint.text = ChatSession.lastGoal?.let { if (ph == ChatSession.Phase.IDLE) "同一会话 · 可追问" else it } ?: ""
@@ -176,14 +176,19 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Palette → sky, bars and the primary round button (palette may have changed in Settings). */
+    private var appliedLook: Any? = null
     private fun applyTsuki() {
         val k = TsukiTheme.current(this)
+        if (appliedLook != null && appliedLook != k) renderer.reset(binding.chatList)
+        appliedLook = k
+        TsukiTheme.retint(binding.root)
         TsukiTheme.applyBars(this)
         binding.sky.colors = k
         binding.sky.animateMotes = !TsukiTheme.reduceMotion(this)
         binding.btnStart.backgroundTintList = android.content.res.ColorStateList.valueOf(k.accent)
         binding.btnStart.imageTintList = android.content.res.ColorStateList.valueOf(k.onAccent)
         binding.btnStop.backgroundTintList = android.content.res.ColorStateList.valueOf(k.crimson)
+        binding.btnStop.imageTintList = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
     }
 
     /** First-run checklist shown in the empty state until everything is ready. */
@@ -318,7 +323,7 @@ class MainActivity : AppCompatActivity() {
         startActivity(
             Intent.createChooser(
                 Intent(Intent.ACTION_SEND).setType("text/plain")
-                    .putExtra(Intent.EXTRA_SUBJECT, "Phone Agent 诊断日志")
+                    .putExtra(Intent.EXTRA_SUBJECT, "Tsuki 诊断日志")
                     .putExtra(Intent.EXTRA_TEXT, text),
                 "分享诊断日志"
             )

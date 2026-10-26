@@ -27,6 +27,7 @@ class MoonSkyView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private val stars = List(26) { floatArrayOf(rnd.nextFloat(), rnd.nextFloat() * 0.55f, 0.6f + rnd.nextFloat() * 1.2f, rnd.nextFloat()) }
     private val motes = List(18) { floatArrayOf(rnd.nextFloat(), rnd.nextFloat(), 1.2f + rnd.nextFloat() * 2.2f, rnd.nextFloat() * 6.28f) }
     private var t = 0f
+    private val shape = Path()
     private var last = 0L
 
     init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
@@ -41,21 +42,39 @@ class MoonSkyView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         // halo + crescent, top right
         val cx = w * 0.84f; val cy = h * 0.09f; val r = w * 0.09f
         paint.shader = RadialGradient(cx, cy, r * 3.2f, k.glow, 0x00000000, Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r * 3.2f, paint); paint.shader = null
-        paint.color = k.star and 0x00FFFFFF or (0x55 shl 24)
-        crescent(c, cx, cy, r, paint)
+        if (k.fullMoon) {   // 纯月: a pearl full moon with a soft rim
+            paint.color = 0xFFFFFFFF.toInt(); c.drawCircle(cx, cy, r, paint)
+            paint.style = Paint.Style.STROKE; paint.strokeWidth = r * 0.08f; paint.color = k.star; c.drawCircle(cx, cy, r, paint); paint.style = Paint.Style.FILL
+        } else { paint.color = k.star and 0x00FFFFFF or (0x55 shl 24); crescent(c, cx, cy, r, paint) }
         // stars twinkle slowly (alpha only)
         for (s in stars) {
             val a = (0.35f + 0.65f * (0.5f + 0.5f * sin(t * 0.8f + s[3] * 6.28f))).coerceIn(0f, 1f)
             paint.color = (k.star and 0x00FFFFFF) or (((k.star ushr 24) * a).toInt() shl 24)
             c.drawCircle(s[0] * w, s[1] * h, s[2] * resources.displayMetrics.density * 0.7f, paint)
         }
-        // motes drift up and sway
-        for (m in motes) {
-            val y = ((m[1] - t * 0.012f * (0.5f + m[2] / 3f)) % 1f + 1f) % 1f
-            val x = m[0] * w + sin(t * 0.5f + m[3]) * w * 0.02f
-            val fade = sin(y * PI).toFloat()
-            paint.color = (k.glow and 0x00FFFFFF) or ((90 * fade).toInt() shl 24)
-            c.drawCircle(x, y * h, m[2] * resources.displayMetrics.density, paint)
+        val d = resources.displayMetrics.density
+        when (k.particle) {
+            TsukiTheme.Particle.PETALS -> for (m in motes) {   // 樱: petals fall, sway and spin
+                val y = ((m[1] + t * 0.018f * (0.6f + m[2] / 3f)) % 1f + 1f) % 1f
+                val x = ((m[0] + t * 0.006f) % 1f) * w + sin(t * 0.7f + m[3]) * w * 0.04f
+                paint.color = (k.glow and 0x00FFFFFF) or ((200 * sin(y * PI).toFloat()).toInt() shl 24)
+                c.save(); c.translate(x, y * h); c.rotate((t * 40f + m[3] * 57f) % 360f)
+                val s = m[2] * d * 2.2f; shape.reset(); shape.moveTo(0f, -s); shape.quadTo(s * 0.9f, 0f, 0f, s); shape.quadTo(-s * 0.9f, 0f, 0f, -s)
+                c.drawPath(shape, paint); c.restore()
+            }
+            TsukiTheme.Particle.SPARKLES -> for (m in motes) {   // 纯月: four-point glints pulse in place
+                val a = (0.5f + 0.5f * sin(t * 1.3f + m[3])).coerceIn(0f, 1f)
+                paint.color = (k.glow and 0x00FFFFFF) or ((180 * a).toInt() shl 24)
+                val x = m[0] * w; val y = m[1] * h; val s = m[2] * d * 2.4f * (0.6f + 0.4f * a)
+                shape.reset(); shape.moveTo(x, y - s); shape.quadTo(x, y, x + s, y); shape.quadTo(x, y, x, y + s); shape.quadTo(x, y, x - s, y); shape.quadTo(x, y, x, y - s)
+                c.drawPath(shape, paint)
+            }
+            TsukiTheme.Particle.MOTES -> for (m in motes) {   // 夜月: silver motes drift up and sway
+                val y = ((m[1] - t * 0.012f * (0.5f + m[2] / 3f)) % 1f + 1f) % 1f
+                val x = m[0] * w + sin(t * 0.5f + m[3]) * w * 0.02f
+                paint.color = (k.glow and 0x00FFFFFF) or ((110 * sin(y * PI).toFloat()).toInt() shl 24)
+                c.drawCircle(x, y * h, m[2] * d, paint)
+            }
         }
         if (animateMotes && isShown) {
             val now = System.nanoTime(); if (last != 0L) t += ((now - last) / 1e9f).coerceAtMost(0.1f); last = now

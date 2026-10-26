@@ -20,6 +20,37 @@ class TsukiThemeTest {
         }
     }
 
+    @Test fun everyPaletteHasReadableSurfaces() {
+        for (p in TsukiTheme.Palette.entries) for (dark in listOf(true, false)) {
+            val k = TsukiTheme.colors(p, dark); val tag = "$p dark=$dark"
+            for (bg in listOf(k.bg, k.surfaceVariant, k.accentContainer, k.skyBottom)) {
+                assertTrue("$tag text on ${Integer.toHexString(bg)}", contrast(k.onSurface, bg) >= 7.0)
+                assertTrue("$tag text2", contrast(k.text2, bg) >= 4.5)
+            }
+            assertTrue("$tag text3", contrast(k.text3, k.bg) >= 3.0)
+            assertTrue("$tag accent on bg", contrast(k.accent, k.bg) >= 3.0)
+        }
+    }
+
+    /** The bug Runa saw: switching palettes looked identical. Every pair must differ visibly in bg, sky, accent and particles. */
+    @Test fun palettesDifferMaterially() {
+        fun dist(a: Int, b: Int): Double { val dr = (a shr 16 and 255) - (b shr 16 and 255); val dg = (a shr 8 and 255) - (b shr 8 and 255); val db = (a and 255) - (b and 255); return Math.sqrt((dr * dr + dg * dg + db * db).toDouble()) }
+        for (dark in listOf(true, false)) {
+            val ks = TsukiTheme.Palette.entries.map { TsukiTheme.colors(it, dark) }
+            for (i in ks.indices) for (j in i + 1 until ks.size) {
+                val a = ks[i]; val b = ks[j]; val tag = "dark=$dark $i/$j"
+                val score = listOf(a.bg to b.bg, a.skyTop to b.skyTop, a.skyBottom to b.skyBottom, a.accent to b.accent, a.bubble to b.bubble, a.surfaceVariant to b.surfaceVariant).sumOf { dist(it.first, it.second) }
+                assertTrue("$tag score $score", score > 200)
+                assertTrue("$tag accent", dist(a.accent, b.accent) > 40)
+                assertNotEquals(tag, a.particle, b.particle)
+            }
+        }
+        assertEquals(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO, TsukiTheme.effectiveNight(TsukiTheme.Palette.PURE_MOON, TsukiTheme.Mode.DARK))
+        assertEquals(TsukiTheme.Mode.DARK.night, TsukiTheme.effectiveNight(TsukiTheme.Palette.SAKURA, TsukiTheme.Mode.DARK))
+        assertEquals(0xFF24102A.toInt(), TsukiTheme.colors(TsukiTheme.Palette.SAKURA, true).role("bg"))
+        assertNull(TsukiTheme.colors(TsukiTheme.Palette.SAKURA, true).role("ok_green"))
+    }
+
     @Test fun neutralTextContrastInBothModes() {
         fun colors(f: String) = Regex("<color name=\"(\\w+)\">#([0-9A-Fa-f]{8})</color>").findAll(File(f).readText())
             .associate { it.groupValues[1] to java.lang.Long.parseLong(it.groupValues[2], 16).toInt() }
@@ -44,5 +75,17 @@ class TsukiThemeTest {
         // compressed: the whole art set stays small
         val total = File("src/main/res").walk().filter { it.extension == "webp" }.sumOf { it.length() }
         assertTrue("art $total bytes", total < 700_000)
+    }
+}
+
+class TsukiOrbTest {
+    @Test fun snapsToNearestEdge() {
+        assertEquals(16, com.runasakura.phoneagent.overlay.TsukiOrb.snapX(300, 150, 1080, 16))
+        assertEquals(1080 - 150 - 16, com.runasakura.phoneagent.overlay.TsukiOrb.snapX(700, 150, 1080, 16))
+    }
+    @Test fun stepBadge() {
+        assertEquals(4, com.runasakura.phoneagent.overlay.TsukiOrb.stepOf("第 4 步 · 点击「晴天」"))
+        assertEquals(12, com.runasakura.phoneagent.overlay.TsukiOrb.stepOf("第12步"))
+        assertNull(com.runasakura.phoneagent.overlay.TsukiOrb.stepOf("运行中"))
     }
 }
