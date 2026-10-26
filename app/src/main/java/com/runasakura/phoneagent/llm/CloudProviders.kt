@@ -32,6 +32,9 @@ object CloudProviders {
     fun effectiveModel(provider: String, baseUrl: String, key: String, model: String): String =
         model.trim().ifBlank { byId(effectiveProvider(provider, baseUrl, key)).model.ifBlank { AgentPreferences.DEEPSEEK_MODEL } }
 
+    /** Models that accept OpenAI-style image_url input (screenshot only sent when the user allowed it). */
+    fun isVision(model: String): Boolean = Regex("vl|vision|gpt-4o|gpt-4\\.1|gpt-5|qwen-vl|qwen2\\.5-vl|qwen3-vl|glm-4v|omni", RegexOption.IGNORE_CASE).containsMatchIn(model)
+
     /** Reasoning models need a bigger budget and no JSON mode. */
     fun isReasoner(model: String) = model.contains("reasoner", true) || model.contains("-r1", true) || model.startsWith("o1") || model.startsWith("o3")
 

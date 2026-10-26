@@ -22,6 +22,13 @@ class StepHistory(private val maxLabels: Int = 6) {
         fun isLoading(labels: Collection<String>) = labels.any { LOADING.containsMatchIn(it.trim()) && it.trim().length <= 12 }
     }
 
+    /** Task-progress memory for the prompt: the last few actions in order. */
+    fun progress(): String = if (actions.isEmpty()) "" else
+        "已执行：" + actions.toList().takeLast(5).mapIndexed { i, a -> "${i + 1}.${a.take(40)}" }.joinToString(" ")
+
+    /** Same action issued ≥3 times in a row (even if the screen changed) → likely a loop. */
+    val looping: Boolean get() = actions.size >= 3 && actions.takeLast(3).toSet().size == 1
+
     fun recordAction(desc: String) {
         val d = desc.take(80)
         lastAction = d
