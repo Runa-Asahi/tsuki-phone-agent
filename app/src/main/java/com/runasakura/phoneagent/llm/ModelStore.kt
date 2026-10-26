@@ -52,9 +52,14 @@ object ModelStore {
         check(list.any { it.path == "config.json" }) { "这个仓库不是 MNN LLM 模型（缺少 config.json）" }
         val dir = dirFor(ctx, repo).apply { mkdirs() }
         val total = list.sumOf { it.size }
+        val canon = dir.canonicalPath + File.separator
+        check(list.all { File(dir, it.path).canonicalPath.startsWith(canon) }) { "文件列表含非法路径" }
         var done = list.sumOf { f -> File(dir, f.path).takeIf { it.isFile && it.length() == f.size }?.length() ?: 0L }
+        val need = total - done + (200L shl 20)
+        check(dir.usableSpace >= need) { "存储空间不足：还需约 ${need shr 20} MB" }
         for (f in list) {
             val out = File(dir, f.path); if (out.isFile && out.length() == f.size) continue
+            out.parentFile?.mkdirs()
             val part = File(dir, f.path + ".part")
             val have = if (part.isFile) part.length() else 0L
             val req = Request.Builder().url("${api(repo)}?Revision=master&FilePath=${Uri.encode(f.path)}").apply { if (have > 0) header("Range", "bytes=$have-") }.build()

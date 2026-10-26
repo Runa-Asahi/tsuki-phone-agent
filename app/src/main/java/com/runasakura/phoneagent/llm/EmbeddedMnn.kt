@@ -42,7 +42,8 @@ object EmbeddedMnn {
         if (handle != 0L && loadedDir == dir.absolutePath) return true
         if (!available) { lastError = "本机推理库不可用（仅支持 arm64）"; state = State.FAILED; return false }
         val cfg = File(dir, "config.json"); if (!cfg.isFile) { lastError = "模型目录缺少 config.json"; state = State.FAILED; return false }
-        release()
+        // Switching models: stop any running generation and free the old session only once it has returned.
+        if (handle != 0L) { cancel(); chatLock.withLock { releasePending = false; freeNow() } }
         state = State.LOADING
         val t0 = System.currentTimeMillis()
         val tmp = File(ctx.cacheDir, "mnn_mmap").apply { mkdirs() }.absolutePath
@@ -52,8 +53,12 @@ object EmbeddedMnn {
         handle = h; loadedDir = dir.absolutePath; state = State.READY; lastError = null; true
     }
 
+    /** One native session ⇒ one generation at a time (the step brain and the vision assist share it). */
+    private val chatLock = Mutex()
+    @Volatile private var releasePending = false
+
     /** Messages → plain-text reply. Images are written to cache and referenced with MNN's <img>path</img> tag. */
-    suspend fun chat(ctx: Context, messages: List<ChatMessage>, maxTokens: Int): String = withContext(Dispatchers.Default) {
+    suspend fun chat(ctx: Context, messages: List<ChatMessage>, maxTokens: Int): String = chatLock.withLock { withContext(Dispatchers.Default) {
         val h = handle; check(h != 0L) { "model not loaded" }
         val roles = ArrayList<String>(); val contents = ArrayList<String>()
         for ((i, m) in messages.withIndex()) {
@@ -66,13 +71,20 @@ object EmbeddedMnn {
         state = State.BUSY
         val t0 = System.currentTimeMillis()
         try { nativeChat(h, roles.toTypedArray(), contents.toTypedArray(), maxTokens) }
-        finally { lastLatencyMs = System.currentTimeMillis() - t0; if (state == State.BUSY) state = State.READY }
-    }
+        finally { lastLatencyMs = System.currentTimeMillis() - t0; if (state == State.BUSY) state = State.READY
+            if (releasePending) { releasePending = false; freeNow() } }
+    } }
 
     /** Stop the current generation within one token (step deadline / 急停). */
     fun cancel() { val h = handle; if (h != 0L) runCatching { nativeCancel(h) } }
 
+    /** Never frees the session under a running generation: a busy model is cancelled and freed when that call returns. */
     fun release() {
+        if (state == State.BUSY) { releasePending = true; cancel(); return }
+        freeNow()
+    }
+
+    private fun freeNow() {
         val h = handle; handle = 0L; loadedDir = null
         if (h != 0L) runCatching { nativeRelease(h) }
         if (state != State.FAILED) state = State.NONE
