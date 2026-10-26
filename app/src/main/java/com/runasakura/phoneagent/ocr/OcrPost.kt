@@ -33,7 +33,7 @@ object OcrPost {
             } else merged += ln
         }
         return merged.sortedWith(compareBy({ it.cy / 30 }, { it.l })).mapIndexed { idx, m ->
-            ScreenItem("e${idx + 1}", m.text.trim(), (m.l + m.r) / 2, m.cy, true, false, false, null)
+            ScreenItem("e${idx + 1}", m.text.trim(), (m.l + m.r) / 2, m.cy, true, false, false, null, m.r - m.l, m.b - m.t)
         }
     }
 

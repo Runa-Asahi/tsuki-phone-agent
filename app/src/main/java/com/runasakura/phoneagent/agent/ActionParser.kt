@@ -33,7 +33,7 @@ object ActionParser {
             )
         }
         val thought = obj.optString("thought").ifBlank { obj.optString("reasoning") }
-        val needShot = obj.optBoolean("need_screenshot", false)
+        var needShot = obj.optBoolean("need_screenshot", false)
         val backend = obj.nullableString("backend")
 
         val actionObj: JSONObject = when {
@@ -53,6 +53,8 @@ object ActionParser {
             if (obj.opt("action") is String) obj.optString("action") else ""
         }.lowercase().trim()
 
+        // "look": the model asks to see the screenshot next step (does nothing on screen)
+        if (type in setOf("look", "request_screenshot", "screenshot", "see", "observe")) { needShot = true; type = "look" }
         // Normalize aliases
         type = when (type) {
             "click", "press", "tap_text", "click_text", "touch" -> "tap"
@@ -122,6 +124,7 @@ object ActionParser {
             "home" -> AgentAction.Home
             "recents" -> AgentAction.Recents
             "wait" -> AgentAction.Wait(actionObj.optLong("ms", 800))
+            "look" -> AgentAction.Wait(100)
             "done" -> AgentAction.Done(
                 actionObj.optString("summary").ifBlank { thought }
             )

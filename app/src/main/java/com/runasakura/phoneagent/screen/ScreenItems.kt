@@ -22,7 +22,10 @@ data class ScreenItem(
     val tap: Boolean,
     val edit: Boolean,
     val scroll: Boolean,
-    val ref: Any?
+    val ref: Any?,
+    /** Bounding-box size (px); 0 = unknown (tree items). */
+    val bw: Int = 0,
+    val bh: Int = 0
 ) {
     fun format(): String = buildString {
         append('[').append(id).append("] ").append(label.ifBlank { "(输入框)" })

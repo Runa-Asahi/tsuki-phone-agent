@@ -256,7 +256,8 @@ class AgentLoop(
                 lowConfidence = sc.source != "tree"
             )
             onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
-            val diffNote = steps.observe(sc.items.map { it.label })
+            steps.observe(sc.items.map { it.label })   // counters (loading/stuck); the note below is semantic
+            val diffNote = semanticNote(sc)
             diffNote?.let { onLog(it) }
             loopStreak = if (steps.looping) loopStreak + 1 else 0
             if (loopStreak > 0) onLog("检测到循环（$loopStreak），要求模型换策略")
@@ -289,7 +290,11 @@ class AgentLoop(
             }
 
             // Text can't describe this screen well (games/landscape/icons) or we're stuck → use eyes.
-            val hardScreen = sc.w > sc.h || sc.items.size < 8 || steps.looping || steps.recentFailures >= 1
+            // Adaptive, not fixed: the model asked to look, the last action did nothing, we're looping, or the
+            // first look at a screen with almost no text. Otherwise text (OCR + structure) is enough.
+            val hardScreen = lookNext || lastNoEffect || steps.looping || steps.recentFailures >= 1 ||
+                (modelSteps == 0 && sc.items.size < 8) || sc.items.size < 3
+            lookNext = false; modelSteps++
             val vision = router.cloudReady && prefs.allowCloudScreenshot &&
                 com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)
             val wantSkill = !vision && hardScreen && router.visionSkill != null && !router.skillSidelined
@@ -306,6 +311,7 @@ class AgentLoop(
                 }
             }
             val brainShot = if (vision) shot else null
+            shotThisStep = brainShot != null || obsNote?.contains("视觉描述") == true
             if (brainShot != null) obsNote = listOfNotNull(obsNote, "已附当前截图：以截图为准（OCR 可能有错字/漏掉无文字按钮）；tap 坐标按屏幕 ${sc.w}x${sc.h}。").joinToString("\n")
             // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
             if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
@@ -399,7 +405,15 @@ class AgentLoop(
                 onLog("retry action: ${plan.action}")
                 err = validationError(plan, resp.content, sc)
             }
-            if (err != null) return Result(false, step, "模型连续给出无效动作（$err），已停止以免误操作")
+            if (err != null) {
+                // Don't abort the task: record it, force a fresh look / stronger model next step.
+                if (++invalidStreak >= 3) return Result(false, step, "模型连续给出无效动作（$err），已停止以免误操作")
+                onLog("本步放弃该动作：$err")
+                steps.recordAction("无效输出（$err）", ok = false)
+                lookNext = true; strongNext = true; lastExec = null
+                continue
+            }
+            invalidStreak = 0
 
             history += ChatMessage("assistant", resp.content)
 
@@ -439,6 +453,10 @@ class AgentLoop(
                 SafetyDecision.ALLOW -> Unit
             }
 
+            if (plan.needScreenshot) {
+                lookNext = true
+                if (plan.action is AgentAction.Wait) { onLog("模型请求看截图（下一步附图）"); lastExec = null; continue }
+            }
             when (val action = plan.action) {
                 is AgentAction.Done -> {
                     val v = if (doneRejections < 2) verify(dev, goal) else null
@@ -494,6 +512,7 @@ class AgentLoop(
                     val ok = execute(a11y, action, snap)
                     val desc = ActionDesc.of(action, tapped) + if (ok) "" else " ✗执行失败：${lastExecError ?: "未知原因"}"
                     steps.recordAction(desc, ok)
+                    lastExec = Triple(action, tapped ?: targetLabel(action, sc), ActionDesc.of(action, tapped))
                     onLog(if (ok) "执行成功：${ActionDesc.of(action, tapped)}" else "执行失败：${lastExecError ?: "未知原因"}")
                     if (action is AgentAction.Launch && ok) {
                         val fg = waitForeground(a11y, 3000) { it != before }
@@ -646,7 +665,49 @@ class AgentLoop(
 
     private fun validationError(plan: PlanStep, raw: String, sc: com.runasakura.phoneagent.flow.Screen): String? {
         if (ActionParser.hasThinkWithoutJson(raw)) return "只有思考没有 JSON"
-        return ActionValidator.validate(plan.action, sc.items, sc.w, sc.h)
+        ActionValidator.validate(plan.action, sc.items, sc.w, sc.h)?.let { return it }
+        val a = plan.action
+        val label = targetLabel(a, sc)
+        guard.check(a, label)?.let { return it }
+        if (a is AgentAction.Tap && a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x != null && a.y != null &&
+            !shotThisStep && !ObsFormat.nearAny(sc.items, a.x!!, a.y!!) && !LayoutHints.isGallery(sc))
+            return "坐标(${a.x},${a.y})附近没有任何识别到的元素，没有截图时禁止盲点；请点列表里的元素，或输出 {\"type\":\"look\"} 请求截图"
+        return null
+    }
+
+    // ---- R1: semantic outcome tracking ----
+    private val guard = NoEffectGuard()
+    private var prevItems: List<com.runasakura.phoneagent.screen.ScreenItem>? = null
+    private var lastExec: Triple<AgentAction, String?, String>? = null
+    private var invalidStreak = 0
+    private var lookNext = false
+    private var strongNext = false
+    private var shotThisStep = false
+    private var lastNoEffect = false
+    private var modelSteps = 0
+
+    private fun targetLabel(a: AgentAction, sc: com.runasakura.phoneagent.flow.Screen): String? = when (a) {
+        is AgentAction.Tap -> a.nodeId?.let { id -> sc.items.firstOrNull { it.id == id }?.label } ?: a.text
+            ?: if (a.x != null && a.y != null) LayoutHints.labelNear(sc, a.x!!, a.y!!, 60) else null
+        else -> null
+    }
+
+    /** Honest outcome of the previous action; no-ops are remembered and refused later. */
+    private fun semanticNote(sc: com.runasakura.phoneagent.flow.Screen): String? {
+        val prev = prevItems; prevItems = sc.items
+        lastNoEffect = false
+        val le = lastExec ?: return null
+        lastExec = null
+        if (prev == null) return "上一步：${le.third}"
+        val d = SemanticDiff.compare(prev, sc.items)
+        return if (!d.meaningful) {
+            guard.record(le.first, le.second, le.third); lastNoEffect = true
+            "上一步：${le.third} → 界面没有实质变化（只是 OCR 抖动）= 这个动作无效，不要再做"
+        } else buildString {
+            append("上一步：").append(le.third).append(" → 界面有变化")
+            if (d.added.isNotEmpty()) append(" 新出现:").append(d.added.take(6).joinToString("、"))
+            if (d.removed.isNotEmpty()) append(" 消失:").append(d.removed.take(6).joinToString("、"))
+        }
     }
 
     private suspend fun runSubgoals(dev: com.runasakura.phoneagent.a11y.A11yDevice, subs: List<Subgoal>): Pair<Result?, String?> {
@@ -665,7 +726,10 @@ class AgentLoop(
         return Result(true, subs.size, "已完成：" + subs.joinToString(" → ") { it.describe() } + "（确定性执行）") to null
     }
 
-    private fun buildDump(sc: com.runasakura.phoneagent.flow.Screen): String {
+    private fun buildDump(sc: com.runasakura.phoneagent.flow.Screen): String = ObsFormat.dump(sc)
+
+    @Suppress("unused")
+    private fun buildDumpLegacy(sc: com.runasakura.phoneagent.flow.Screen): String {
         val sb = StringBuilder()
         for (it in sc.items.take(45)) {
             val line = it.format()
@@ -767,6 +831,7 @@ class AgentLoop(
             stepsRef?.progress()?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
 
             lastScreen?.let { appendLine(LayoutHints.describe(it)) }
+            guard.summary()?.let { appendLine(it) }
             stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。不要重复，换一种方式（用坐标 x,y、别的元素、滑动或返回）。") }
             stepsRef?.loopHint()?.let { appendLine(it) }
             appendLine("要点(可点/可输入；e编号仅本步有效，坐标为元素中心):")
