@@ -1383,8 +1383,20 @@ class AgentLoop(
                 }
                 is AgentAction.ScrollFind -> scrollFind(a11y, action)
                 is AgentAction.Wait -> {
-                    // Sliced so 急停 is honoured within 50 ms even during a 10 s wait.
-                    sleepUnlessStopped(action.ms.coerceIn(100, 10_000).toLong())
+                    // Sliced so 急停 is honoured within 50 ms even during a 10 s wait. Long waits end early once the
+                    // screen has changed and then held still for one poll (page loaded / verification passed).
+                    val ms = action.ms.coerceIn(100, 10_000).toLong()
+                    val base = if (ms >= 1500) quickSig(a11y) else null
+                    if (base == null) sleepUnlessStopped(ms) else {
+                        val end = System.currentTimeMillis() + ms; var prev: Int = base; var ok = true
+                        while (System.currentTimeMillis() < end) {
+                            if (!sleepUnlessStopped(minOf(600L, end - System.currentTimeMillis()).coerceAtLeast(1))) { ok = false; break }
+                            val cur = quickSig(a11y) ?: continue
+                            if (WaitPolicy.settled(base, prev, cur)) { onLog("界面已变化并稳定，提前结束等待（省 ${end - System.currentTimeMillis()}ms）"); break }
+                            prev = cur
+                        }
+                        ok
+                    }
                 }
                 else -> true
             }
@@ -1395,6 +1407,11 @@ class AgentLoop(
             false
         }
     }
+
+    /** Cheap visible-text signature from the accessibility tree (no OCR / screenshot). */
+    private fun quickSig(a11y: com.runasakura.phoneagent.a11y.Phone): Int? = runCatching {
+        (a11y.foregroundPackage() + "|" + a11y.screenItems().map { it.label }.filter { it.isNotBlank() }.sorted().joinToString("|")).hashCode()
+    }.getOrNull()
 
     /** Blocking wait in 50 ms slices; false when the user hit 急停 meanwhile. */
     private fun sleepUnlessStopped(ms: Long): Boolean {

@@ -54,7 +54,9 @@ class ModelDownloadService : Service() {
             .setProgress(1000, if (total > 0) (done * 1000 / total).toInt() else 0, total <= 0).build()
         try {
             if (android.os.Build.VERSION.SDK_INT >= 34) startForeground(ID, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE) else startForeground(ID, n)
-        } catch (_: Throwable) { runCatching { NotificationManagerCompat.from(this).notify(ID, n) } }
+        } catch (_: Throwable) { runCatching {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+                android.os.Build.VERSION.SDK_INT < 33) NotificationManagerCompat.from(this).notify(ID, n) } }
     }
 
     override fun onDestroy() { scope.coroutineContext[Job]?.cancel(); super.onDestroy() }

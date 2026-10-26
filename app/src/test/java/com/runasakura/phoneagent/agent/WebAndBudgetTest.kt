@@ -43,3 +43,12 @@ class WebAddressTest {
         assertNull(WebAddress.normalize("v1.2"))
     }
 }
+
+class WaitPolicyTest {
+    @Test fun endsOnlyAfterChangeThenStable() {
+        assertFalse(WaitPolicy.settled(1, 1, 1))   // unchanged
+        assertFalse(WaitPolicy.settled(1, 1, 2))   // just changed, not yet stable
+        assertTrue(WaitPolicy.settled(1, 2, 2))    // changed and stable
+        assertFalse(WaitPolicy.settled(1, 2, 3))   // still moving
+    }
+}
