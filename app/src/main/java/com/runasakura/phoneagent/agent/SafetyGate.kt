@@ -69,6 +69,12 @@ class SafetyGate(private val prefs: AgentPreferences) {
         }
 
         when (action) {
+            is AgentAction.OpenUri -> return PhoneTools.uriNeedsConfirm(action.uri)?.let { SafetyResult(SafetyDecision.REQUIRE_CONFIRM, it) }
+                ?: SafetyResult(SafetyDecision.ALLOW)
+            is AgentAction.Intent -> return if (PhoneTools.intentAllowedWithoutConfirm(action.action)) SafetyResult(SafetyDecision.ALLOW)
+                else SafetyResult(SafetyDecision.REQUIRE_CONFIRM, PhoneTools.intentNeedsConfirm(action.action) ?: "将执行系统操作 ${action.action}")
+            is AgentAction.Global -> if (action.name == "power_dialog" || action.name == "lock_screen")
+                return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, "将打开${if (action.name == "lock_screen") "锁屏" else "电源菜单"}")
             is AgentAction.AskConfirm ->
                 return if (ConfirmPolicy.isSensitive(action))
                     SafetyResult(SafetyDecision.REQUIRE_CONFIRM, action.reason)

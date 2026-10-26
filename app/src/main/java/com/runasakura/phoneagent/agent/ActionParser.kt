@@ -123,6 +123,16 @@ object ActionParser {
             "back" -> AgentAction.Back
             "home" -> AgentAction.Home
             "recents" -> AgentAction.Recents
+            "notifications", "quick_settings", "power_dialog", "lock_screen", "take_screenshot", "split_screen" -> AgentAction.Global(type)
+            "global" -> AgentAction.Global(actionObj.optString("name"))
+            "open_url", "open_uri", "deeplink", "deep_link" -> AgentAction.OpenUri(
+                actionObj.optString("url").ifBlank { actionObj.optString("uri") }, actionObj.nullableString("package"))
+            "intent" -> AgentAction.Intent(actionObj.optString("action"), actionObj.nullableString("data"))
+            "set_clipboard", "copy" -> AgentAction.SetClipboard(actionObj.optString("text"))
+            "read_clipboard", "paste_read" -> AgentAction.ReadClipboard
+            "key", "press_key" -> AgentAction.Key(actionObj.optString("key").ifBlank { actionObj.optString("name") }.lowercase())
+            "scroll_find", "scroll_to" -> AgentAction.ScrollFind(actionObj.optString("text"),
+                actionObj.optString("direction").ifBlank { "down" }, actionObj.optInt("max", 6).coerceIn(1, 15))
             "wait" -> AgentAction.Wait(actionObj.optLong("ms", 800))
             "look" -> AgentAction.Wait(100)
             "done" -> AgentAction.Done(

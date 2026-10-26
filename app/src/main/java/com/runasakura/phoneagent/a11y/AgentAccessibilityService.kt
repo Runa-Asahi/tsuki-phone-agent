@@ -566,6 +566,49 @@ class AgentAccessibilityService : AccessibilityService() {
     fun back(): Boolean = performGlobalAction(GLOBAL_ACTION_BACK)
     fun home(): Boolean = performGlobalAction(GLOBAL_ACTION_HOME)
     fun recents(): Boolean = performGlobalAction(GLOBAL_ACTION_RECENTS)
+    fun global(id: Int): Boolean = performGlobalAction(id)
+
+    /** ACTION_VIEW on a URI/deep link (optionally pinned to a package). */
+    fun openUri(uri: String, pkg: String?): Boolean = try {
+        val i = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!pkg.isNullOrBlank()) i.setPackage(pkg)
+        startActivity(i); true
+    } catch (_: Exception) { false }
+
+    fun fireIntent(action: String, data: String?): Boolean = try {
+        val i = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!data.isNullOrBlank()) i.data = android.net.Uri.parse(data)
+        startActivity(i); true
+    } catch (_: Exception) { false }
+
+    fun setClipboard(text: String): Boolean = try {
+        val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("agent", text)); true
+    } catch (_: Exception) { false }
+
+    /** Android 10+ only lets the focused app or IME read the clipboard; an a11y service usually gets null. */
+    fun readClipboard(): String? = try {
+        (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
+    } catch (_: Exception) { null }
+
+    /** IME "enter/search/go" on the input-focused field (API 30+). */
+    fun imeEnter(): Boolean {
+        val f = rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return false
+        return if (android.os.Build.VERSION.SDK_INT >= 30)
+            f.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id) else false
+    }
+
+    fun volume(name: String): Boolean = try {
+        val am = getSystemService(AUDIO_SERVICE) as android.media.AudioManager
+        val dir = when (name) { "volume_up" -> android.media.AudioManager.ADJUST_RAISE; "volume_down" -> android.media.AudioManager.ADJUST_LOWER
+            "mute" -> android.media.AudioManager.ADJUST_MUTE; else -> android.media.AudioManager.ADJUST_UNMUTE }
+        am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, dir, android.media.AudioManager.FLAG_SHOW_UI); true
+    } catch (_: Exception) { false }
+
+    /** True when an editable node holds input focus (verified, not guessed). */
+    fun editableFocused(): Boolean = try {
+        rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.isEditable == true
+    } catch (_: Exception) { false }
 
     fun launchApp(packageName: String): Boolean {
         // Honor/MagicOS: system Settings often needs ACTION_SETTINGS, not launcher intent

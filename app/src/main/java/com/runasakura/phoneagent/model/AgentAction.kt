@@ -15,6 +15,18 @@ sealed class AgentAction {
     data object Back : AgentAction()
     data object Home : AgentAction()
     data object Recents : AgentAction()
+    /** System surface: notifications / quick_settings / power_dialog / lock_screen / take_screenshot / split_screen. */
+    data class Global(val name: String) : AgentAction()
+    /** Open a URI / deep link (ACTION_VIEW). Dial/message/pay schemes require confirmation. */
+    data class OpenUri(val uri: String, val packageName: String? = null) : AgentAction()
+    /** Fire a system intent action (e.g. a settings page). */
+    data class Intent(val action: String, val data: String? = null) : AgentAction()
+    data class SetClipboard(val text: String) : AgentAction()
+    data object ReadClipboard : AgentAction()
+    /** enter (IME action on the focused field) / volume_up / volume_down / mute / unmute. */
+    data class Key(val name: String) : AgentAction()
+    /** Scroll (up|down|left|right) until an element containing [text] is visible, at most [max] swipes. */
+    data class ScrollFind(val text: String, val direction: String = "down", val max: Int = 6) : AgentAction()
     data class Wait(val ms: Long = 800) : AgentAction()
     data class Done(val summary: String = "") : AgentAction()
     data class Fail(val reason: String) : AgentAction()
