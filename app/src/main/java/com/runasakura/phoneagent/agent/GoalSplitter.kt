@@ -33,7 +33,7 @@ sealed class Subgoal {
 }
 
 object GoalSplitter {
-    private const val VERBS = "进入|打开|点击|点开|找到|去|发送|发|说|输入|填写|搜索|上滑|下滑|向上滑|向下滑|往上滑|往下滑|滑动|返回|回到|回桌面|长按|滑到|滚动到|翻到|撤销|在"
+    private const val VERBS = "进入|打开|点击|点开|找到|去|发送|发|说|输入|填写|搜索|上滑|下滑|向上滑|向下滑|往上滑|往下滑|滑动|返回|回到|回桌面|长按|滑到|滚动到|翻到|撤销|在|播放|收藏|关注|点赞|评论|分享|下载|选择|选|关闭|开启|切换|复制|粘贴"
     // Connectives only split when followed by an action verb (so 「再见」「合并」 stay intact).
     private val SEP = Regex("[，,、；;。]|(?:然后|接着|并且|并|再)(?=(?:$VERBS))")
     private val SEND = Regex("^(?:然后|接着|再|并)?(?:发送|发|说)[：:\\s]*(.+)$", RegexOption.DOT_MATCHES_ALL)

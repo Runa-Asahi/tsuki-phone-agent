@@ -31,17 +31,22 @@ object LayoutHints {
             rn[k.first] + cn[k.second] + "=" + v.take(4).joinToString("、") { it.label.take(8) } }
     }
 
+    /**
+     * Per-step layout notes. Kept short: the element lines already carry coordinates + region, the header carries
+     * the screen size, and bottom-tab items are in the element list, so those are no longer repeated here.
+     * The region map is only added for landscape screens (few, stylised labels).
+     */
     fun describe(s: Screen): String = buildString {
         val land = s.w > s.h
-        append("布局：屏${s.w}x${s.h}${if (land) "（横屏：x 范围 0..${s.w}，y 范围 0..${s.h}）" else ""}，无文字的图标/图片可用 tap x,y 坐标；4列网格单元≈${s.w / 4}px 宽。")
-        append("\n").append(regions(s))
-        if (land) append("\n横屏游戏：主按钮常是无文字或艺术字，OCR 可能读错；「开始/对战/匹配」类按钮通常在右下角，弹窗关闭按钮通常在弹窗右上角。")
+        append("布局：无文字的图标/图片用 tap x,y；4列网格单元≈${s.w / 4}px 宽。")
+        if (land) {
+            append("\n横屏：x 范围 0..${s.w}，y 范围 0..${s.h}；主按钮常是无文字或艺术字，OCR 可能读错，看不清就 look。")
+            append("\n").append(regions(s))
+        }
         if (isGallery(s)) {
             val (x, y) = firstThumbnail(s)
             append("\n提示：这是相册/图库网格，缩略图没有文字；第一张照片约在 ($x,$y)，打开它用 {\"type\":\"tap\",\"x\":$x,\"y\":$y}。")
         }
-        val tabs = s.items.filter { it.cy > s.h * 0.9 }.sortedBy { it.cx }
-        if (tabs.size >= 3) append("\n底部导航：" + tabs.take(5).joinToString(" ") { "${it.label.take(6)}(${it.cx},${it.cy})" })
     }
 
     /** Label of the item a coordinate tap lands on (≤ r px), so the safety gate sees 「发送」 even for x,y taps. */

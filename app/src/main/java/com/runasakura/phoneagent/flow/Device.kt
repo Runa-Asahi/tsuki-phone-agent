@@ -49,6 +49,8 @@ interface Device {
     suspend fun sleep(ms: Long)
     /** Drop any cached observation (call after overlays that didn't emit a11y events). */
     suspend fun invalidateObservation()
+    /** Package of the foreground app window ("" = unknown). */
+    fun foregroundPackage(): String = ""
 }
 
 object Text {

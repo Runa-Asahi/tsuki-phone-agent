@@ -22,6 +22,8 @@ object ActionDesc {
         is AgentAction.Intent -> "打开系统页 ${a.action.substringAfterLast('.')}"
         is AgentAction.SetClipboard -> "复制「${a.text.take(16)}」到剪贴板"
         AgentAction.ReadClipboard -> "读取剪贴板"
+        is AgentAction.Copy -> "复制" + (label?.let { "「${it.take(16)}」" } ?: a.nodeId)
+        is AgentAction.Paste -> "粘贴"
         is AgentAction.Key -> KEY_ZH[a.name] ?: "按键 ${a.name}"
         is AgentAction.ScrollFind -> "滚动查找「${a.text.take(16)}」"
         else -> a.toString().take(40)

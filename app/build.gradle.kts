@@ -11,8 +11,8 @@ android {
         applicationId = "com.runasakura.phoneagent"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.6.2-mvp"
+        versionCode = 15
+        versionName = "0.6.3-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Honor PPG-AN00 / Android 16: document 16KB page alignment for future .so embeds
@@ -36,6 +36,8 @@ android {
         }
     }
 
+    // Offline simulator runs the real AgentLoop on the JVM: framework stubs (Log, Build…) return defaults.
+    testOptions { unitTests.isReturnDefaultValues = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

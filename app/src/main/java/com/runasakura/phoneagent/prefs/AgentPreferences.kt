@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-class AgentPreferences(context: Context) {
+class AgentPreferences(context: Context) : AgentSettings {
     private val sp: SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -60,15 +60,15 @@ class AgentPreferences(context: Context) {
         get() = secure.getString(KEY_CLOUD_KEY, "") ?: ""
         set(v) = secure.edit().putString(KEY_CLOUD_KEY, v).apply()
 
-    var cloudModel: String
+    override var cloudModel: String
         get() = sp.getString(KEY_CLOUD_MODEL, "deepseek-chat") ?: "deepseek-chat"
         set(v) = sp.edit().putString(KEY_CLOUD_MODEL, v).apply()
 
-    var maxSteps: Int
+    override var maxSteps: Int
         get() = sp.getInt(KEY_MAX_STEPS, 25)
         set(v) = sp.edit().putInt(KEY_MAX_STEPS, v.coerceIn(1, 100)).apply()
 
-    var allowCloudScreenshot: Boolean
+    override var allowCloudScreenshot: Boolean
         get() = sp.getBoolean(KEY_CLOUD_SHOT, false)
         set(v) = sp.edit().putBoolean(KEY_CLOUD_SHOT, v).apply()
 
@@ -92,8 +92,8 @@ class AgentPreferences(context: Context) {
         set(v) = sp.edit().putString("vision_local_model", v.trim()).apply()
     /** Confirm before creating an alarm (default ON; user can turn it off). */
     /** Per-app learned memory (see AppMemory); plain UI facts only. */
-    fun appMemory(pkg: String): String? = sp.getString("appmem_$pkg", null)
-    fun setAppMemory(pkg: String, v: String) = sp.edit().putString("appmem_$pkg", v.take(4000)).apply()
+    override fun appMemory(pkg: String): String? = sp.getString("appmem_$pkg", null)
+    override fun setAppMemory(pkg: String, v: String) = sp.edit().putString("appmem_$pkg", v.take(4000)).apply()
     fun allAppMemory(): Map<String, String> = sp.all.filterKeys { it.startsWith("appmem_") }
         .mapKeys { it.key.removePrefix("appmem_") }.mapValues { it.value?.toString().orEmpty() }
     fun clearAppMemory(pkg: String) = sp.edit().remove("appmem_$pkg").apply()
@@ -104,11 +104,16 @@ class AgentPreferences(context: Context) {
         get() = sp.getBoolean("cloud_thinking", false)
         set(v) = sp.edit().putBoolean("cloud_thinking", v).apply()
 
-    var confirmAlarm: Boolean
+    /** Summarise compacted transcript spans with one cheap model call (default off: deterministic checkpoint). */
+    override var modelCheckpoint: Boolean
+        get() = sp.getBoolean("model_checkpoint", false)
+        set(v) = sp.edit().putBoolean("model_checkpoint", v).apply()
+
+    override var confirmAlarm: Boolean
         get() = sp.getBoolean("confirm_alarm", true)
         set(v) = sp.edit().putBoolean("confirm_alarm", v).apply()
 
-    var sensitivePackages: Set<String>
+    override var sensitivePackages: Set<String>
         get() = sp.getStringSet(KEY_SENSITIVE_PKGS, DEFAULT_SENSITIVE) ?: DEFAULT_SENSITIVE
         set(v) = sp.edit().putStringSet(KEY_SENSITIVE_PKGS, v).apply()
 

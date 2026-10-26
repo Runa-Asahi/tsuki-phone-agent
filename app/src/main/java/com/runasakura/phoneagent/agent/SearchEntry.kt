@@ -45,11 +45,13 @@ object SearchEntry {
         if (band.isEmpty()) return null
         band.firstOrNull { it.edit }?.let { return it }
         band.firstOrNull { isSearchWord(it.label) && !isCameraOnly(it.label) }?.let { return it }
-        // Shopping-app hot-query bar: left/center, not the camera icon on the right.
-        return band
+        // Shopping-app hot-query bar: left/center, not the camera icon on the right. A placeholder bar is wide;
+        // when the width is known, small chips (an ad's 「跳过 3」, a back arrow) are not search entries.
+        val bar = band.filter { it.bw == 0 || it.bw >= s.w * 0.35 }
+        return bar
             .filter { it.cx < s.w * 0.75 && !isCameraOnly(it.label) }
             .minByOrNull { it.cy * 10_000 + it.cx }
-            ?: band.firstOrNull { !isCameraOnly(it.label) }
+            ?: bar.firstOrNull { !isCameraOnly(it.label) }
     }
 
     fun dumpTop(s: Screen, n: Int = 20): String =

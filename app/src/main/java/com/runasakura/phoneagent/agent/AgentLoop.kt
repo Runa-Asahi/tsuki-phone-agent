@@ -1,7 +1,6 @@
 package com.runasakura.phoneagent.agent
 
 import kotlinx.coroutines.launch
-import android.util.Log
 import com.runasakura.phoneagent.a11y.AgentAccessibilityService
 import com.runasakura.phoneagent.flow.Text
 import com.runasakura.phoneagent.llm.ChatMessage
@@ -20,15 +19,20 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.coroutineContext
 
 class AgentLoop(
-    private val prefs: AgentPreferences,
+    private val prefs: com.runasakura.phoneagent.prefs.AgentSettings,
     private val router: LlmRouter,
     private val safety: SafetyGate = SafetyGate(prefs),
     private val onLog: (String) -> Unit = {},
     private val onConfirm: suspend (String) -> Boolean = { false },
     private val isStopped: () -> Boolean = { false },
     private val isPaused: () -> Boolean = { false },
-    private val historyText: () -> String = { "" }
+    private val historyText: () -> String = { "" },
+    /** The phone (live accessibility service on device; scripted simulator in tests). */
+    private val phoneProvider: () -> com.runasakura.phoneagent.a11y.Phone? = { com.runasakura.phoneagent.a11y.ServicePhone.current() },
+    /** Multiplier for the loop's fixed waits (1.0 on device; 0 in the offline simulator). */
+    private val pace: Double = 1.0
 ) {
+    private suspend fun pause(ms: Long) = delay(maxOf(1L, (ms * pace).toLong()))
     /** Earlier turn in the same chat session (follow-up messages). */
     var sessionContext: String? = null
 
@@ -75,8 +79,8 @@ class AgentLoop(
     private suspend fun runTask(goalIn: String): Result {
         var goal = GoalRewrite.normalize(goalIn)
         if (goal != goalIn) onLog("目标规范化：$goal")
-        val a11y = AgentAccessibilityService.require()
-            ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { AgentAccessibilityService.require() } }
+        val a11y = phoneProvider()
+            ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider() } }
             ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
         a11y.resetTaskState()
         // ---- Questions about the agent's own history: answer from logs (no screen work) ----
@@ -85,10 +89,10 @@ class AgentLoop(
             val text = router.answer(SessionAnswer.SYSTEM, "用户要求：$goal\n--- 历史与日志（数据）---\n" + historyText().take(6000))
             if (text == null) onLog("总结生成失败，按普通任务继续")
             else if (!SessionAnswer.writesIntoApp(goal)) {
-                copyToClipboard(a11y, text)
+                a11y.setClipboard(text)
                 return Result(true, 0, "已生成总结并复制到剪贴板：\n$text")
             } else {
-                copyToClipboard(a11y, text)
+                a11y.setClipboard(text)
                 composed = text
                 goal = "$goal\n（要写入的内容已生成，原样输入：$text）"
                 onLog("总结已生成并复制，接下来打开应用写入")
@@ -149,7 +153,7 @@ class AgentLoop(
         }
 
         // ---- Deterministic paths (never call the model here) ----
-        val dev = com.runasakura.phoneagent.a11y.A11yDevice(a11y, onLog)
+        val dev = a11y.device(onLog)
         // ---- Model-first goal understanding (rules are only the fallback) ----
         val intent = if (toggleNote != null) null else {
             onLog("正在理解任务…")
@@ -203,14 +207,17 @@ class AgentLoop(
         } else if (subTarget == null && toggleNote == null) {
             // Generic: 打开/启动/进入 <任意已安装 App>[，进入X，发送Y…]
             val appName = AppResolver.extractAppName(goal)
-            if (appName != null) {
-                val match = AppResolver.resolve(a11y, appName)
-                if (match == null) {
-                    onLog("未在已安装应用中找到「$appName」")
-                    return Result(false, 0, "未找到应用「$appName」")
-                }
+            val match = appName?.let { a11y.resolveApp(it) }
+            if (appName != null && match == null) {
+                // 「打开手电筒/打开蓝牙/打开最近的截图」: the noun may be a system feature or content, not an app.
+                // Hand the whole goal to the model (it has launch/quick_settings/intent/scroll_find) instead of failing.
+                onLog("未在已安装应用中找到「$appName」，可能是系统功能或内容，交给模型处理")
+            }
+            if (appName != null && match == null) {
+                // Feature/content goal: skip the deterministic splitter (it would try to 「进入手电筒」 on the launcher).
+            } else if (appName != null && match != null) {
                 onLog("匹配应用：${match.label} (${match.packageName}) score=${match.score}")
-                targetPkg = match.packageName; appLabel = "${match.label}（${match.packageName}）"
+                targetPkg = match.packageName; appLabel = "${match.label}（${match.packageName}）"; taskApps += match.packageName
                 targetPkgForMemory = match.packageName
                 appMem = runCatching { AppMemory.decode(prefs.appMemory(match.packageName)) }.getOrNull()
                 appMem?.hint(goal)?.let { onLog("载入应用经验：" + it.replace("\n", " | ")) }
@@ -238,7 +245,10 @@ class AgentLoop(
                     else if (res != null && known.size == subs.size) {
                         val v = verify(dev, goal); if (v == null || v.first) return res.copy(summary = res.summary + (v?.let { "（已验收：${it.second}）" } ?: ""))
                         onLog("验收未通过：${v.second}，交给模型继续"); remaining
-                    } else if (res != null) subs.drop(known.size).joinToString("，") { it.describe() } else left0 ?: remaining
+                    } else if (res != null) subs.drop(known.size).joinToString("，") { it.describe() }
+                    // The deterministic prefix stopped early: hand over what it left PLUS the steps it never reached
+                    // (previously 「搜索晴天 → 播放」 became just 「搜索晴天」 and the model lost the 播放 part).
+                    else left0?.let { (listOf(it) + subs.drop(known.size).map { s -> s.describe() }).joinToString("，") } ?: remaining
                 onLog("交给模型完成剩余目标：$left")
                 history.clear()
                 history += ChatMessage("system", SystemPrompt.FOCUSED)
@@ -271,12 +281,12 @@ class AgentLoop(
             waitIfPaused()
             if (isStopped()) return Result(false, step, "已急停")
 
-            if (AgentAccessibilityService.require() !== a11y) {
+            if (!a11y.isCurrent()) {
                 onLog("无障碍服务已断开/重启，等待重连…")
-                val again = com.runasakura.phoneagent.util.Await.nonNull(10_000) { AgentAccessibilityService.require() }
+                val again = com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider()?.takeIf { it.isCurrent() } }
                 return Result(false, step, if (again == null) "无障碍服务已断开（10 秒未重连），任务停止" else "无障碍服务已重启，为安全起见停止本次任务，请重试")
             }
-            step++
+            step++; stepNow = step
             onLog("—— 步骤 $step/$max ——")
             val sc = dev.screen()
             lastScreen = sc
@@ -288,7 +298,7 @@ class AgentLoop(
                 lowConfidence = sc.source != "tree"
             )
             onLog("前台=${sc.pkg} 来源=${sc.source} 文本=${sc.textCount}")
-            steps.observe(sc.items.map { it.label })   // counters (loading/stuck); the note below is semantic
+            steps.observe(sc.items.map { it.label }, exact = prevSource == "tree" && sc.source == "tree")   // counters (loading/stuck); the note below is semantic
             val diffNote = semanticNote(sc)
             diffNote?.let { onLog(it) }
             loopStreak = if (steps.looping) loopStreak + 1 else 0
@@ -296,15 +306,14 @@ class AgentLoop(
             if (loopStreak >= 5) return Result(false, step, "多次换策略后仍在原地打转，已停止（可描述得更具体，或在设置里换用视觉模型）")
             // Generic recovery ladder before giving up: back out one screen, then restart the target app fresh.
             when (Recovery.forLoop(loopStreak, targetPkg ?: targetPkgForMemory)) {
-                Recovery.Step.BACK_OUT -> { onLog("恢复：返回上一界面，换个入口"); a11y.back(); delay(800)
+                Recovery.Step.BACK_OUT -> { onLog("恢复：返回上一界面，换个入口"); a11y.back(); pause(800)
                     transcript.note("系统已自动返回上一界面以跳出循环，请从这里换一条路线。"); step--; continue }
                 Recovery.Step.RELAUNCH -> { val p = (targetPkg ?: targetPkgForMemory)!!
-                    onLog("恢复：重新启动目标应用 $p，回到已知入口"); a11y.home(); delay(500); a11y.launchApp(p)
-                    waitForeground(a11y, 3000) { it == p }
+                    onLog("恢复：重新启动目标应用 $p（重置任务栈），回到已知入口"); dev.bringToFront(p, p, force = true)
                     transcript.clear(); transcript.note("系统已重启目标应用回到首页，请按目标重新开始（不要重复之前无效的路线）。"); step--; continue }
                 null -> {}
             }
-            if (steps.isLoadingNow) { onLog("页面加载中，额外等待"); delay(1500) }
+            if (steps.isLoadingNow) { onLog("页面加载中，额外等待"); pause(1500) }
             if (steps.stuck) return Result(false, step, "连续多次动作后界面无变化，已停止以免乱点")
             if (sc.isEmpty() && !AppResolver.isAgentOrBrain(sc.pkg)) {
                 return Result(false, step, "读不到界面（无障碍树与 OCR 均为空），为避免盲猜不调用模型")
@@ -318,7 +327,9 @@ class AgentLoop(
 
             // Never let the model see the Agent's / MNN Chat's own UI
             val tp = targetPkg
-            if (tp != null && snap.packageName != tp) {
+            // Multi-app tasks: an app the model itself opened (launch/open_url/intent/system panel) is part of the
+            // task, so we only pull the target back when something ELSE took the foreground (crash, ad redirect…).
+            if (tp != null && snap.packageName != tp && snap.packageName !in taskApps) {
                 if (++refocus > 3) return Result(false, step, "多次无法回到目标应用 $tp")
                 onLog("前台(${snap.packageName})不是目标应用，重新启动 $tp（不调用模型）")
                 if (!dev.bringToFront(tp, tp)) return Result(false, step, "目标应用无法到前台（${dev.foregroundPackage()}）")
@@ -327,7 +338,7 @@ class AgentLoop(
             if (tp == null && AppResolver.isAgentOrBrain(snap.packageName)) {
                 if (++refocus > 3) return Result(false, step, "无法离开 Agent/MNN 界面")
                 onLog("前台是 Agent/MNN 自身，先回桌面再观察")
-                a11y.home(); delay(800)
+                a11y.home(); pause(800)
                 step--; continue
             }
 
@@ -420,7 +431,7 @@ class AgentLoop(
                     LlmRecovery.Action.REOBSERVE -> {
                         llmFailStreak++; pendingObs = null
                         onLog("网络/服务暂时异常（${resp.errorCode}），${LlmRecovery.PAUSE_MS / 1000}s 后重新观察屏幕再试（$llmFailStreak/${LlmRecovery.MAX_STEP_RETRIES}）")
-                        delay(LlmRecovery.PAUSE_MS); step--; continue
+                        pause(LlmRecovery.PAUSE_MS); step--; continue
                     }
                     LlmRecovery.Action.STOP -> return Result(false, step, "LLM 不可用: ${resp.error}")
                 }
@@ -478,14 +489,19 @@ class AgentLoop(
             invalidStreak = 0
 
             history += ChatMessage("assistant", resp.content)
-            pendingObs?.let { transcript.append(it, resp.content) { steps.progress() } }; pendingObs = null
+            val folded = pendingObs?.let { transcript.append(it, resp.content) { steps.progress() } }; pendingObs = null
+            if (folded != null && prefs.modelCheckpoint && router.cloudReady) {
+                router.checkpoint(goal, folded.filter { it.role == "assistant" }.joinToString("\n") { it.content.take(300) }, memory.text())
+                    ?.let { transcript.replaceCheckpoint(it); onLog("对话已压缩：检查点由模型整理") }
+                    ?: onLog("对话已压缩：使用确定性检查点")
+            } else if (folded != null) onLog("对话已压缩：使用确定性检查点")
 
             // Rewrite ambiguous tap on "设置" while still in our app → system settings launch
             plan = rewriteSettingsAmbiguity(plan, snap, goal)
 
             val ty = plan.action as? AgentAction.Type
             if (ty != null) {
-                if (!Injection.typeAllowed(ty.text, goal)) {
+                if (!Injection.typeAllowed(ty.text, goal) && ty.text != copied) {
                     injectionBlocks++
                     onLog("⚠ 疑似注入：拦截输入「${ty.text.take(40)}」——不在用户目标中")
                     if (injectionBlocks >= 2) return Result(false, step, "疑似注入：模型多次尝试输入用户目标之外的文字，已停止")
@@ -496,13 +512,17 @@ class AgentLoop(
                 lastTyped = ty.text
             }
             val clip = plan.action as? AgentAction.SetClipboard
-            if (clip != null && !Injection.typeAllowed(clip.text, goal)) { onLog("⚠ 拦截写剪贴板「${clip.text.take(30)}」——不在用户目标中"); lastExec = null
+            if (clip != null && !Injection.typeAllowed(clip.text, goal) && clip.text != copied) { onLog("⚠ 拦截写剪贴板「${clip.text.take(30)}」——不在用户目标中"); lastExec = null
                 transcript.note("上一步被拦截：剪贴板只能写用户目标里的文字。"); continue }
             val gateAction = (plan.action as? AgentAction.Tap)?.let { t ->
                 if (t.nodeId.isNullOrBlank() && t.text.isNullOrBlank() && t.x != null && t.y != null)
                     LayoutHints.labelNear(sc, t.x!!, t.y!!)?.let { t.copy(text = it) } else null
             } ?: plan.action
-            val gate = safety.check(gateAction, snap, goal)
+            val gate = safety.check(gateAction, snap, goal).let { g ->
+                if (g.decision == SafetyDecision.REQUIRE_CONFIRM && approvedAtStep == step - 1) {
+                    onLog("安全闸：上一步用户已确认，不再重复询问 — ${g.reason}"); SafetyResult(SafetyDecision.ALLOW)
+                } else g
+            }
             when (gate.decision) {
                 SafetyDecision.BLOCK_HUMAN -> {
                     onLog("安全闸：人工接管 — ${gate.reason}")
@@ -541,7 +561,7 @@ class AgentLoop(
                     if (isOpenSettingsGoal(goal)) {
                         onLog("模型 Fail，回退打开系统设置")
                         if (a11y.launchSystemSettings()) {
-                            delay(1000)
+                            pause(1000)
                             val s = a11y.dumpUiTree()
                             if (a11y.isSettingsForeground(s.packageName)) {
                                 return Result(true, step, "Fail 回退成功")
@@ -562,7 +582,7 @@ class AgentLoop(
                                 onLog("启发式：点顶部搜索栏「${bar.label}」")
                                 execute(a11y, AgentAction.Tap(nodeId = bar.id, text = bar.label, x = bar.cx, y = bar.cy), snap)
                                 steps.recordAction("heuristic_tap_search")
-                                delay(900)
+                                pause(900)
                             }
                         } else if (uselessConfirms >= 2) {
                             return Result(false, step, "模型连续输出无意义 ask_confirm（${action.reason}），已停止；请改用云端模型或更明确的目标")
@@ -574,6 +594,10 @@ class AgentLoop(
                     uselessConfirms = 0
                     val ok = onConfirm(confirmText(action.reason, sc, goal))
                     if (!ok) return Result(false, step, "用户取消")
+                    // One-shot approval: the NEXT step may tap the commit button (send/pay…) without being refused
+                    // by the validator or asked a second time. Previously the approved send could never be tapped.
+                    approvedAtStep = step; onLog("用户已确认：下一步可以执行提交操作")
+                    transcript.note("用户已确认（${action.reason.take(40)}），现在执行提交操作。")
                 }
                 else -> {
                     val before = a11y.foregroundPackage()
@@ -592,8 +616,13 @@ class AgentLoop(
                     if (action is AgentAction.Launch && ok) {
                         val fg = waitForeground(a11y, 3000) { it != before }
                         onLog("启动后前台=$fg")
+                        if (fg != before && !AppResolver.isAgentOrBrain(fg)) { taskApps += fg; targetPkg = fg; onLog("任务切换到应用 $fg（之前的应用仍属于本任务）") }
                     } else {
-                        delay(if (action is AgentAction.Wait) 200 else 650)
+                        pause(if (action is AgentAction.Wait) 200 else 650)
+                    }
+                    if (ok && (action is AgentAction.OpenUri || action is AgentAction.Intent || action is AgentAction.Global ||
+                            action == AgentAction.Recents)) {
+                        pause(300); a11y.foregroundPackage().takeIf { it.isNotBlank() && !AppResolver.isAgentOrBrain(it) }?.let { taskApps += it }
                     }
                     val after = a11y.dumpUiTree()
                     onLog("执行后前台=${after.packageName}")
@@ -644,7 +673,7 @@ class AgentLoop(
     }
 
     private suspend fun waitForeground(
-        a11y: AgentAccessibilityService,
+        a11y: com.runasakura.phoneagent.a11y.Phone,
         timeoutMs: Long,
         pred: (String) -> Boolean
     ): String {
@@ -653,25 +682,20 @@ class AgentLoop(
         while (System.currentTimeMillis() < deadline) {
             fg = a11y.foregroundPackage()
             if (pred(fg) && !AppResolver.isAgentOrBrain(fg)) return fg
-            delay(200)
+            pause(200)
         }
         return fg
     }
 
-    private suspend fun tapTextWithScroll(a11y: AgentAccessibilityService, target: String): Boolean {
+    private suspend fun tapTextWithScroll(a11y: com.runasakura.phoneagent.a11y.Phone, target: String): Boolean {
         val (w, h) = a11y.screenSize()
         for (attempt in 0..3) {
             coroutineContext.ensureActive()
-            val node = a11y.findByText(target)
-            if (node != null) {
-                val ok = a11y.tapNode(node)
-                onLog("点击「$target」${if (ok) "成功" else "失败"}")
-                if (ok) return true
-            }
+            if (a11y.tapText(target)) { onLog("点击「$target」成功"); return true }
             if (attempt < 3) {
                 onLog("未见「$target」，上滑 ${attempt + 1}/3")
                 a11y.swipe(w / 2, (h * 0.75).toInt(), w / 2, (h * 0.30).toInt(), 350)
-                delay(700)
+                pause(700)
             }
         }
         return false
@@ -743,7 +767,7 @@ class AgentLoop(
 
     private fun validationError(plan: PlanStep, raw: String, sc: com.runasakura.phoneagent.flow.Screen): String? {
         if (ActionParser.hasThinkWithoutJson(raw)) return "只有思考没有 JSON"
-        ActionValidator.validate(plan.action, sc.items, sc.w, sc.h)?.let { return it }
+        ActionValidator.validate(plan.action, sc.items, sc.w, sc.h, approved = approvedAtStep == stepNow - 1)?.let { return it }
         val a = plan.action
         val label = targetLabel(a, sc)
         guard.check(a, label)?.let { return it }
@@ -760,6 +784,7 @@ class AgentLoop(
     private var prevItems: List<com.runasakura.phoneagent.screen.ScreenItem>? = null
     private var prevIme: Int? = null
     private var prevFocus = false
+    private var prevSource: String? = null
     private var verifyNext = false
     private val repeatReminder = RepeatReminder()
     private var cleanShotNext = false
@@ -779,6 +804,13 @@ class AgentLoop(
     private var appMem: AppMemory? = null
     private var reusedPath = false
     private var llmFailStreak = 0
+    /** Step at which the user approved an ask_confirm (valid for the next step only). */
+    private var approvedAtStep = -10
+    private var stepNow = 0
+    /** Exact on-screen text captured by copy{node_id}: the only non-goal text that may be typed (paste). */
+    private var copied: String? = null
+    /** Every app the model deliberately brought up during this task (multi-app tasks; resume after switching). */
+    private val taskApps = LinkedHashSet<String>()
 
     /** Persist what this task learned about the app (facts, useless actions, and the path on success). */
     private fun saveAppMemory(goal: String, success: Boolean, path: String) {
@@ -803,6 +835,7 @@ class AgentLoop(
     /** Honest outcome of the previous action; no-ops are remembered and refused later. */
     private fun semanticNote(sc: com.runasakura.phoneagent.flow.Screen): String? {
         val prev = prevItems; prevItems = sc.items
+        val exact = prevSource == "tree" && sc.source == "tree"; prevSource = sc.source
         val imeBefore = prevIme; prevIme = sc.imeTop
         val focusBefore = prevFocus; prevFocus = sc.inputFocused
         lastNoEffect = false
@@ -810,12 +843,12 @@ class AgentLoop(
         lastExec = null
         if (prev == null) return "上一步：${le.third}"
         val exp = lastExpect?.let { "（你预期：$it —— 对照下面判断是否达到）" } ?: ""
-        val d = SemanticDiff.compare(prev, sc.items)
+        val d = SemanticDiff.compare(prev, sc.items, exact)
         val stateNote = SemanticDiff.stateChange(imeBefore, sc.imeTop, focusBefore, sc.inputFocused)
         if (!d.meaningful && stateNote != null) return "上一步：${le.third}$exp → 文字没变，但$stateNote"
         return if (!d.meaningful) {
             guard.record(le.first, le.second, le.third); lastNoEffect = true
-            "上一步：${le.third}$exp → 界面没有实质变化（只是 OCR 抖动）= 这个动作无效，不要再做"
+            "上一步：${le.third}$exp → 界面没有实质变化${if (exact) "" else "（只是 OCR 抖动）"}= 这个动作无效，不要再做"
         } else buildString {
             append("上一步：").append(le.third).append(exp).append(" → 界面有变化")
             if (d.added.isNotEmpty()) append(" 新出现:").append(d.added.take(6).joinToString("、"))
@@ -823,7 +856,7 @@ class AgentLoop(
         }
     }
 
-    private suspend fun runSubgoals(dev: com.runasakura.phoneagent.a11y.A11yDevice, subs: List<Subgoal>): Pair<Result?, String?> {
+    private suspend fun runSubgoals(dev: com.runasakura.phoneagent.flow.Device, subs: List<Subgoal>): Pair<Result?, String?> {
         val exec = SubgoalExecutor(dev, onLog, onConfirm)
         for ((i, sg) in subs.withIndex()) {
             coroutineContext.ensureActive()
@@ -853,7 +886,7 @@ class AgentLoop(
     }
 
     private suspend fun runMessaging(
-        dev: com.runasakura.phoneagent.a11y.A11yDevice,
+        dev: com.runasakura.phoneagent.flow.Device,
         pkg: String, contact: String, message: String, reallySend: Boolean = true, forceText: Boolean = false
     ): Result {
         val profile = com.runasakura.phoneagent.flow.AppProfile.forPackage(pkg)
@@ -865,7 +898,7 @@ class AgentLoop(
         }
         flow.locate = { sc, what ->
             val shot = if (prefs.allowCloudScreenshot && com.runasakura.phoneagent.llm.CloudProviders.isVision(prefs.cloudModel))
-                try { AgentAccessibilityService.require()?.screenshotJpegBase64() } catch (_: Exception) { null } else null
+                try { phoneProvider()?.screenshotJpegBase64() } catch (_: Exception) { null } else null
             router.locate(what, buildDump(sc), sc.w, sc.h, shot)
         }
         if (!forceText && MessageContent.isSticker(message)) {
@@ -884,12 +917,12 @@ class AgentLoop(
     private var lastExecError: String? = null
 
     @Suppress("UNUSED_PARAMETER")
-    private fun itemByText(a11y: AgentAccessibilityService, text: String) =
+    private fun itemByText(a11y: com.runasakura.phoneagent.a11y.Phone, text: String) =
         obsItems.firstOrNull { com.runasakura.phoneagent.flow.Text.eq(it.label, text) }
             ?: obsItems.filter { it.label.contains(text) }.minByOrNull { it.label.length }
             ?: KeyMatchLite.best(obsItems, text)
 
-    private fun tapTargetMissing(a11y: AgentAccessibilityService, tap: AgentAction.Tap): Boolean {
+    private fun tapTargetMissing(a11y: com.runasakura.phoneagent.a11y.Phone, tap: AgentAction.Tap): Boolean {
         val id = tap.nodeId
         if (!id.isNullOrBlank()) return obsItems.none { it.id == id } && tap.x == null
         val txt = tap.text
@@ -900,14 +933,6 @@ class AgentLoop(
     private var tapped: String? = null
     private var composed: String? = null
 
-    private fun copyToClipboard(ctx: android.content.Context, text: String) {
-        try {
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
-                    .setPrimaryClip(android.content.ClipData.newPlainText("phone-agent", text))
-            }
-        } catch (_: Exception) {}
-    }
     private var loopStreak = 0
     private var escalateNext = false
     private var lastActionKey: String? = null
@@ -917,7 +942,7 @@ class AgentLoop(
     private var stepsRef: StepHistory? = null
 
     /** Verifier: cloud judge on the current screen; null = no judge available (deterministic result stands). */
-    private suspend fun verify(dev: com.runasakura.phoneagent.a11y.A11yDevice, goal: String): Pair<Boolean, String>? {
+    private suspend fun verify(dev: com.runasakura.phoneagent.flow.Device, goal: String): Pair<Boolean, String>? {
         if (!router.cloudReady) return null
         val sc = dev.screen()
         val v = try { router.judge(goal, buildDump(sc), sc.pkg) } catch (e: Exception) { null }
@@ -961,7 +986,7 @@ class AgentLoop(
     }
 
     private fun execute(
-        a11y: AgentAccessibilityService,
+        a11y: com.runasakura.phoneagent.a11y.Phone,
         action: AgentAction,
         @Suppress("UNUSED_PARAMETER") snap: UiSnapshot
     ): Boolean {
@@ -1034,12 +1059,10 @@ class AgentLoop(
                     action.x1, action.y1, action.x2, action.y2, action.durationMs
                 )
                 is AgentAction.Type -> {
-                    val node = action.nodeId?.let { a11y.findNodeById(it) }
-                    a11y.typeText(action.text, node)
+                    a11y.typeText(action.text, action.nodeId)
                 }
                 is AgentAction.Clear -> {
-                    val node = action.nodeId?.let { a11y.findNodeById(it) }
-                    a11y.clearText(node)
+                    a11y.clearText(action.nodeId)
                 }
                 AgentAction.Back -> a11y.back()
                 AgentAction.Home -> a11y.home()
@@ -1048,6 +1071,21 @@ class AgentLoop(
                 is AgentAction.OpenUri -> a11y.openUri(action.uri, action.packageName).also { if (!it) lastExecError = "没有应用能打开 ${action.uri}" }
                 is AgentAction.Intent -> a11y.fireIntent(action.action, action.data).also { if (!it) lastExecError = "系统不支持 ${action.action}" }
                 is AgentAction.SetClipboard -> a11y.setClipboard(action.text)
+                is AgentAction.Copy -> {
+                    val el = obsItems.firstOrNull { it.id == action.nodeId }
+                    if (el == null || el.label.isBlank()) { lastExecError = "元素 ${action.nodeId} 没有可复制的文字"; false }
+                    else {
+                        copied = el.label; tapped = el.label
+                        memory.add("已复制：「${el.label.take(60)}」（换到目标应用后用 paste 粘贴）")
+                        toolNote = "已复制「${el.label.take(80)}」"
+                        a11y.setClipboard(el.label); true   // system clipboard is best-effort; paste uses the captured text
+                    }
+                }
+                is AgentAction.Paste -> {
+                    val c = copied
+                    if (c == null) { lastExecError = "本任务还没有 copy 过文字"; false }
+                    else a11y.typeText(c, action.nodeId).also { if (it) lastTyped = c }
+                }
                 is AgentAction.ReadClipboard -> {
                     val c = a11y.readClipboard()
                     toolNote = if (c == null) "剪贴板：系统不允许后台读取（Android 10+ 限制），请改为在界面上长按→复制/粘贴"
@@ -1069,7 +1107,6 @@ class AgentLoop(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "execute failed", e)
             onLog("执行异常: ${e.message}")
             false
         }
@@ -1085,7 +1122,7 @@ class AgentLoop(
     /** Tool output fed into the next observation (clipboard text, scroll-find result). */
     private var toolNote: String? = null
 
-    private fun scrollFind(a11y: AgentAccessibilityService, a: AgentAction.ScrollFind): Boolean {
+    private fun scrollFind(a11y: com.runasakura.phoneagent.a11y.Phone, a: AgentAction.ScrollFind): Boolean {
         val (w, h) = a11y.screenSize()
         val (x1, y1, x2, y2) = when (a.direction) {
             "up" -> listOf(w / 2, h * 3 / 10, w / 2, h * 7 / 10)

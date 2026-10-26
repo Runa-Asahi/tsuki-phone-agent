@@ -27,15 +27,27 @@ object ObsFormat {
         if (it.edit) append(" edit")
     }
 
+    /**
+     * Element list for the model. Compression (no information the model can act on is dropped):
+     *  - a label repeated ≥ [GROUP_MIN] times (list rows' 「播放」「关注」…) becomes ONE line listing every id+coordinate;
+     *  - when the budget runs out, the tail is summarised with a count instead of silently disappearing.
+     */
     fun dump(s: Screen, maxChars: Int = 1600): String {
-        val sb = StringBuilder()
-        for (it in s.items.take(50)) {
-            val l = line(it, s.w, s.h)
+        val groups = s.items.filter { !it.edit && it.label.isNotBlank() }.groupBy { it.label }.filterValues { it.size >= GROUP_MIN }
+        val sb = StringBuilder(); val emitted = HashSet<String>(); var shown = 0
+        for (it in s.items.take(MAX_ITEMS)) {
+            val g = if (it.edit) null else groups[it.label]
+            if (g != null && !emitted.add(it.label)) continue
+            val l = if (g != null) "「${it.label}」×${g.size}：" + g.joinToString(" ") { e -> "[${e.id}](${e.cx},${e.cy})" } else line(it, s.w, s.h)
             if (sb.length + l.length > maxChars) break
-            sb.append(l).append('\n')
+            sb.append(l).append('\n'); shown += g?.size ?: 1
         }
+        val hidden = s.items.size - shown
+        if (hidden > 0 && sb.isNotEmpty()) sb.append("…另有 $hidden 个元素未列出（用 scroll_find 找，或 look 看图）")
         return sb.toString().trimEnd().ifBlank { "(空)" }
     }
+    const val GROUP_MIN = 3
+    const val MAX_ITEMS = 60
 
     /** Is (x,y) on or near any recognised element? */
     fun nearAny(items: List<ScreenItem>, x: Int, y: Int, pad: Int = 120): Boolean = items.any {
@@ -72,8 +84,17 @@ object SemanticDiff {
     private fun samePlace(a: ScreenItem, b: ScreenItem) =
         kotlin.math.abs(a.cx - b.cx) <= 90 && kotlin.math.abs(a.cy - b.cy) <= 50
 
-    fun compare(prev: List<ScreenItem>, cur: List<ScreenItem>): Result {
+    /**
+     * [exact] = both reads came from the accessibility tree: text is exact, so there is no OCR jitter to forgive.
+     * Fuzzy matching there made a scrolled list (「联系人1…4」→「联系人5…8」, same positions, similar text) look
+     * unchanged, so a working swipe was recorded as a no-op and then refused.
+     */
+    fun compare(prev: List<ScreenItem>, cur: List<ScreenItem>, exact: Boolean = false): Result {
         val p = prev.filter { !volatile(it.label.trim()) }; val c = cur.filter { !volatile(it.label.trim()) }
+        if (exact) {
+            val pl = p.map { Text.norm(it.label) }.toSet(); val cl = c.map { Text.norm(it.label) }.toSet()
+            return Result(c.filter { Text.norm(it.label) !in pl }.map { it.label.take(10) }, p.filter { Text.norm(it.label) !in cl }.map { it.label.take(10) })
+        }
         val added = c.filter { a -> p.none { similar(it.label, a.label) || samePlace(it, a) } }
         val removed = p.filter { r -> c.none { similar(it.label, r.label) || samePlace(it, r) } }
         return Result(added.map { it.label.take(10) }, removed.map { it.label.take(10) })
@@ -140,22 +161,29 @@ class Transcript {
     fun size() = turns.size
     fun note(text: String) { turns += ChatMessage("user", text) }
 
-    fun append(obs: String, answer: String, progress: () -> String = { "" }) {
+    /** @return the span that was folded into the checkpoint when this append triggered a compaction, else null. */
+    fun append(obs: String, answer: String, progress: () -> String = { "" }): List<ChatMessage>? {
         turns += ChatMessage("user", obs); turns += ChatMessage("assistant", answer)
-        if (turns.size > MAX) compact(progress())
+        return if (turns.size > MAX) compact(progress()) else null
     }
+
+    /**
+     * Optional model-written checkpoint (setting, default off) replacing the deterministic one. Only valid right
+     * after a compaction — the series has just restarted, so no cached prefix is invalidated.
+     */
+    fun replaceCheckpoint(summary: String) { checkpoint = "<checkpoint>\n${summary.trim()}\n</checkpoint>" }
 
     fun window(): List<ChatMessage> = listOfNotNull(checkpoint?.let { ChatMessage("user", it) }) + turns
 
     fun clear() { turns.clear(); checkpoint = null; series++ }
 
-    private fun compact(progress: String) {
+    private fun compact(progress: String): List<ChatMessage> {
         val keepFrom = (turns.size - RETAIN_MSGS).coerceAtLeast(0).let { if (turns[it].role == "assistant") it + 1 else it }
         val old = turns.subList(0, keepFrom).toList()
         val kept = turns.subList(keepFrom, turns.size).map { m ->
             if (m.role == "user") ChatMessage("user", "（较早的屏幕，已过时，仅供参考）\n" + prune(m.content)) else m
         }
-        val lines = old.filter { it.role == "assistant" }.mapNotNull { stepLine(it.content) }
+        val lines = collapse(old.filter { it.role == "assistant" }.mapNotNull { stepLine(it.content) })
         checkpoint = buildString {
             appendLine("<checkpoint>")
             appendLine("## 已做过的步骤（较早部分已压缩）")
@@ -165,6 +193,7 @@ class Transcript {
             append("</checkpoint>")
         }
         turns.clear(); turns.addAll(kept); series++
+        return old
     }
 
     companion object {
@@ -177,14 +206,28 @@ class Transcript {
         fun prune(text: String): String = if (text.length <= HEAD + TAIL + 20) text else
             text.take(HEAD) + "\n…（中间已省略）…\n" + text.takeLast(TAIL)
 
-        /** One line per earlier step from the model's own JSON scratchpad. */
+        /**
+         * One line per earlier step from the model's own JSON scratchpad. node_id is deliberately omitted: e-ids are
+         * renumbered every step, so an old "node_id=e3" in a checkpoint would point at a different element now.
+         */
         fun stepLine(answer: String): String? = try {
             val o = org.json.JSONObject(answer.substring(answer.indexOf('{'), answer.lastIndexOf('}') + 1))
             val a = o.optJSONObject("action")
-            val act = a?.let { x -> x.optString("type") + listOf("node_id", "text", "x", "y", "url", "action", "name").mapNotNull { k -> x.opt(k)?.toString()?.takeIf { it.isNotBlank() }?.let { "$k=$it" } }.joinToString(",", " ") }
-            listOfNotNull(o.optString("state").takeIf { it.isNotBlank() }?.let { "在「$it」" }, act?.let { "做了 $it" },
-                o.optString("expect").takeIf { it.isNotBlank() }?.let { "预期 $it" }).joinToString("，").ifBlank { null }
+            val act = a?.let { x -> x.optString("type") + listOf("text", "x", "y", "url", "action", "name", "key", "app").mapNotNull { k -> x.opt(k)?.toString()?.takeIf { it.isNotBlank() }?.let { "$k=$it" } }.joinToString(",", " ") }
+            listOfNotNull(o.optString("subgoal").takeIf { it.isNotBlank() }?.let { "[$it]" },
+                o.optString("state").takeIf { it.isNotBlank() }?.let { "在「${it.take(40)}」" }, act?.let { "做了 $it" },
+                o.optString("expect").takeIf { it.isNotBlank() }?.let { "预期 ${it.take(30)}" }).joinToString("，").ifBlank { null }
         } catch (_: Exception) { null }
+
+        /** Identical consecutive lines (a repeated attempt) become one line with a count. */
+        fun collapse(lines: List<String>): List<String> {
+            val out = ArrayList<String>(); var n = 0
+            for ((i, l) in lines.withIndex()) {
+                n++
+                if (i == lines.lastIndex || lines[i + 1] != l) { out += if (n > 1) "$l（重复 $n 次）" else l; n = 0 }
+            }
+            return out
+        }
     }
 }
 
@@ -226,7 +269,10 @@ object LlmRecovery {
     const val PAUSE_MS = 3000L
     fun decide(r: com.runasakura.phoneagent.llm.LlmResponse, streak: Int): Action {
         if (streak >= MAX_STEP_RETRIES) return Action.STOP
+        val local = r.backend.startsWith("mnn") || r.backend.startsWith("local") || r.backend.startsWith("本机")
         return when (com.runasakura.phoneagent.llm.LlmErrors.codeOf(r)) {
+            // A stalled on-device model will stall again: re-trying would cost minutes per attempt.
+            com.runasakura.phoneagent.llm.LlmErrors.Code.TIMEOUT -> if (local) Action.STOP else Action.REOBSERVE
             com.runasakura.phoneagent.llm.LlmErrors.Code.CONTEXT_WINDOW_EXCEEDED -> Action.COMPACT_AND_RETRY
             in com.runasakura.phoneagent.llm.LlmErrors.RETRYABLE -> Action.REOBSERVE
             else -> Action.STOP

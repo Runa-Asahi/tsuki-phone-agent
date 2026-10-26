@@ -15,7 +15,7 @@ data class SafetyResult(
     val reason: String = ""
 )
 
-class SafetyGate(private val prefs: AgentPreferences) {
+class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSettings) {
 
     private val confirmKeywords = listOf(
         "发送", "发给", "付款", "支付", "转账", "删除", "卸载", "授权",

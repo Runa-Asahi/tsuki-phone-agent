@@ -10,7 +10,8 @@ object ActionValidator {
         "发送", "Send", "確認支付", "确认支付", "立即支付", "确认转账", "转账", "付款", "确认付款"
     )
 
-    fun validate(a: AgentAction, items: List<ScreenItem>, w: Int, h: Int): String? = when (a) {
+    /** [approved] = the user just approved an ask_confirm for this commit: the next sensitive tap may proceed. */
+    fun validate(a: AgentAction, items: List<ScreenItem>, w: Int, h: Int, approved: Boolean = false): String? = when (a) {
         is AgentAction.Tap -> {
             val label = when {
                 !a.nodeId.isNullOrBlank() -> items.firstOrNull { it.id == a.nodeId }?.label
@@ -26,7 +27,7 @@ object ActionValidator {
                 a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x != null && a.y != null &&
                     (a.x !in 0 until w || a.y !in 0 until h) -> "坐标超出屏幕"
                 a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x == null -> "tap 需要 node_id"
-                label != null && SENSITIVE.any { Text.eq(it, label) } ->
+                !approved && label != null && SENSITIVE.any { Text.eq(it, label) } ->
                     "点击「$label」必须先输出 type=ask_confirm，不能直接 tap"
                 else -> null
             }
@@ -52,6 +53,8 @@ object ActionValidator {
             else -> null
         }
         is AgentAction.Intent -> if (!Regex("[A-Za-z0-9_.]+").matches(a.action) || !a.action.contains('.')) "intent 需要完整的 action（如 android.settings.WIFI_SETTINGS）" else null
+        is AgentAction.Copy -> if (items.none { it.id == a.nodeId }) "copy 的 node_id ${a.nodeId} 不存在" else null
+        is AgentAction.Paste -> if (!a.nodeId.isNullOrBlank() && items.none { it.id == a.nodeId }) "node_id ${a.nodeId} 不存在" else null
         is AgentAction.SetClipboard -> if (a.text.isBlank()) "set_clipboard 需要 text" else null
         is AgentAction.Key -> if (a.name !in PhoneTools.KEYS) "不支持的按键「${a.name}」，可用：${PhoneTools.KEYS.joinToString("/")}" else null
         is AgentAction.ScrollFind -> when {

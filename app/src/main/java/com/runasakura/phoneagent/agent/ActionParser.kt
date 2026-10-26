@@ -128,7 +128,9 @@ object ActionParser {
             "open_url", "open_uri", "deeplink", "deep_link" -> AgentAction.OpenUri(
                 actionObj.optString("url").ifBlank { actionObj.optString("uri") }.trim(), actionObj.nullableString("package"))
             "intent" -> AgentAction.Intent(actionObj.optString("action").trim(), actionObj.nullableString("data"))
-            "set_clipboard", "copy" -> AgentAction.SetClipboard(actionObj.optString("text"))
+            "copy" -> actionObj.nullableString("node_id")?.let { AgentAction.Copy(it) } ?: AgentAction.SetClipboard(actionObj.optString("text"))
+            "set_clipboard" -> AgentAction.SetClipboard(actionObj.optString("text"))
+            "paste" -> AgentAction.Paste(actionObj.nullableString("node_id"))
             "read_clipboard", "paste_read" -> AgentAction.ReadClipboard
             "key", "press_key" -> AgentAction.Key(actionObj.optString("key").ifBlank { actionObj.optString("name") }.lowercase().trim())
             "scroll_find", "scroll_to" -> AgentAction.ScrollFind(actionObj.optString("text"),

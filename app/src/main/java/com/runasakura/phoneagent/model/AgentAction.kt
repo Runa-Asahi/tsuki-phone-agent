@@ -22,6 +22,10 @@ sealed class AgentAction {
     /** Fire a system intent action (e.g. a settings page). */
     data class Intent(val action: String, val data: String? = null) : AgentAction()
     data class SetClipboard(val text: String) : AgentAction()
+    /** Copy the exact text of an on-screen element (multi-app tasks: carry it to another app). */
+    data class Copy(val nodeId: String) : AgentAction()
+    /** Type what [Copy] captured into the focused / given field. */
+    data class Paste(val nodeId: String? = null) : AgentAction()
     data object ReadClipboard : AgentAction()
     /** enter (IME action on the focused field) / volume_up / volume_down / mute / unmute. */
     data class Key(val name: String) : AgentAction()

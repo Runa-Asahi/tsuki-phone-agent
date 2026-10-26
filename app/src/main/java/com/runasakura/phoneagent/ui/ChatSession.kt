@@ -139,6 +139,8 @@ object ActionText {
         a.startsWith("Intent") -> "打开系统页" + (field(a, "action")?.let { " ${it.substringAfterLast('.')}" } ?: "")
         a.startsWith("SetClipboard") -> "复制到剪贴板"
         a.startsWith("ReadClipboard") -> "读取剪贴板"
+        a.startsWith("Copy") -> "复制屏幕文字"
+        a.startsWith("Paste") -> "粘贴"
         a.startsWith("Key") -> field(a, "name")?.let { com.runasakura.phoneagent.agent.ActionDesc.KEY_ZH[it] } ?: "按键"
         a.startsWith("ScrollFind") -> "滚动查找" + (field(a, "text")?.let { "「$it」" } ?: "")
         a.startsWith("Recents") -> "最近任务"
