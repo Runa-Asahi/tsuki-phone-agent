@@ -91,7 +91,7 @@ class PassRTest {
     @Test fun deepseekPreset() {
         val p = CloudProviders.byId(AgentPreferences.PROVIDER_DEEPSEEK)
         assertEquals("https://api.deepseek.com/v1", p.baseUrl)
-        assertEquals("deepseek-chat", p.model)
+        assertEquals("deepseek-flash", p.model)
         assertEquals(AgentPreferences.DEEPSEEK_BASE, p.baseUrl)
         assertEquals(AgentPreferences.DEEPSEEK_MODEL, p.model)
         assertTrue(CloudProviders.ALL.any { it.id == AgentPreferences.PROVIDER_DEEPSEEK })

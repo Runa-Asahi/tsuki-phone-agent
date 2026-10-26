@@ -132,6 +132,7 @@ open class FakeWeChat(
                 }
                 when (chatPanel) {
                     "plus" -> plusLabels.forEachIndexed { i, l -> if (l.isNotEmpty()) items += item(l, 200 + i * 300, plusRowY) }
+                    "emoji" -> { items += item("最近使用", 200, 2100); items += item("所有表情", 200, 2350) }
                     "sheet" -> { items += item("视频通话", 632, 2300); items += item("语音通话", 632, 2450); items += item("取消", 632, 2600) }
                 }
                 if (inputText.isBlank() && showPlusLabel && !voiceMode) items += item("+", 1200, 2660)
@@ -173,6 +174,8 @@ open class FakeWeChat(
             state == "search" && label == "取消" -> state = "main"
             state == "search" && label in currentSearchRows() && !resultTapWorks -> Unit
             state == "search" && label in currentSearchRows() -> { state = "chat:" + chatTitleFor(label); inputText = draft; resultPage = 0 }
+            state.startsWith("chat:") && chatPanel == "" && label.startsWith("@") && x in 1050..1120 && y > 2500 -> chatPanel = "emoji"
+            state.startsWith("chat:") && chatPanel == "emoji" && label.startsWith("@") && x < 160 && y in 2150..2300 -> inputText += "😀"
             state.startsWith("chat:") && chatPanel == "" && inputText.isBlank() && (label == "+" || (x > 1150 && y in 2600..2720)) -> chatPanel = "plus"
             state.startsWith("chat:") && chatPanel == "plus" && (label == plusLabels.getOrNull(2) || (label.startsWith("@") && x in 700..900 && kotlin.math.abs(y - plusRowY) < 120)) -> chatPanel = "sheet"
             state.startsWith("chat:") && chatPanel == "sheet" && (label == "语音通话" || label == "视频通话") -> {

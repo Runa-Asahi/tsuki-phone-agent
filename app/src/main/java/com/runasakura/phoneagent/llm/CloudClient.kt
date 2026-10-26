@@ -33,6 +33,8 @@ class CloudClient(
         put("stream", false)
         put("max_tokens", maxTokens)
         if (jsonMode) put("response_format", JSONObject().put("type", "json_object"))
+        // DeepSeek V4 models think by default; agent steps want fast direct JSON.
+        if (baseUrl.contains("deepseek", true) && !CloudProviders.isReasoner(model)) put("thinking", JSONObject().put("type", "disabled"))
         put("messages", JSONArray().apply {
             messages.forEach { m ->
                 val img = m.imageBase64

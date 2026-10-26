@@ -29,12 +29,15 @@ import kotlin.coroutines.coroutineContext
  * (WeChat ≥ 8.0.52 hides its tree from non-whitelisted services).
  * Create a fresh instance per task: it holds per-task caches only.
  */
+private val BLIND: MutableSet<String> = java.util.Collections.synchronizedSet(hashSetOf("com.tencent.mm"))
+
 class A11yDevice(
     private val s: AgentAccessibilityService,
     private val log: (String) -> Unit
 ) : Device {
     /** Packages that returned an empty tree in this task → poll shorter before OCR. */
-    private val blindPkgs = HashSet<String>()
+    /** Process-wide: packages whose a11y tree is empty on this device (PPG-AN00 WeChat) — skip the 1.5 s tree poll. */
+    private val blindPkgs get() = BLIND
     private var lastShotAt = 0L
     /** Cached OCR result until the accessibility event clock advances (screen change). */
     private var ocrCache: Screen? = null
@@ -305,7 +308,8 @@ class A11yDevice(
         TaskTiming.time("等待界面稳定") { s.awaitSettle(300, 1200) }
         val start = System.currentTimeMillis()
         var t = treeScreen()
-        val budget = if (t.pkg in blindPkgs) 0L else 1500L
+        // Known-blind apps skip polling; others poll ≤0.9 s (a fresh launch rarely builds its tree later than that).
+        val budget = if (t.pkg in blindPkgs) 0L else 900L
         while (t.textCount < 3 && System.currentTimeMillis() - start < budget) {
             delay(300); t = treeScreen()
         }

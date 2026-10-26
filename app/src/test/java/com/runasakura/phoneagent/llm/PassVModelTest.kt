@@ -20,7 +20,7 @@ class PassVModelTest {
 
     @Test fun blankModelFallsBackToProviderDefault() {
         assertEquals("qwen-plus", CloudProviders.effectiveModel(CloudProviders.PROVIDER_QWEN, "https://dashscope.aliyuncs.com/compatible-mode/v1", "k", " "))
-        assertEquals("deepseek-chat", CloudProviders.effectiveModel(AgentPreferences.PROVIDER_NONE, AgentPreferences.DEEPSEEK_BASE, "k", ""))
+        assertEquals("deepseek-flash", CloudProviders.effectiveModel(AgentPreferences.PROVIDER_NONE, AgentPreferences.DEEPSEEK_BASE, "k", ""))
         assertEquals("my-custom", CloudProviders.effectiveModel(AgentPreferences.PROVIDER_OPENAI, "https://x/v1", "k", "my-custom"))
     }
 
@@ -35,6 +35,6 @@ class PassVModelTest {
         assertEquals(qw.baseUrl to "qwen-plus", CloudProviders.onProviderChange(ds, qw, ds.baseUrl, "deepseek-reasoner"))
         assertEquals("https://my/v1" to "my-model", CloudProviders.onProviderChange(ds, qw, "https://my/v1", "my-model"))
         val none = CloudProviders.byId(AgentPreferences.PROVIDER_NONE)
-        assertEquals(ds.baseUrl to "deepseek-chat", CloudProviders.onProviderChange(none, ds, "", ""))
+        assertEquals(ds.baseUrl to "deepseek-flash", CloudProviders.onProviderChange(none, ds, "", ""))
     }
 }

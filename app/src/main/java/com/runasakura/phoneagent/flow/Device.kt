@@ -63,7 +63,14 @@ object Text {
      * Canonical form used for ALL label comparisons: strip whitespace/zero-width, full→half width.
      * Exact matching stays exact after this normalization (no fuzzy/edit-distance).
      */
-    fun norm(s: String): String = fold(TradSimp.toSimp(halfWidth(SPACES.replace(s, "")).trim()))
+    fun norm(s: String): String = fold(TradSimp.toSimp(halfWidth(SPACES.replace(emoji(s), "")).trim()))
+
+    private val EMOJI_VARIANTS = Regex("[\\uFE0E\\uFE0F\\x{1F3FB}-\\x{1F3FF}]")
+    /** Emoji canonical form: NFKC, drop VS15/VS16 and skin-tone modifiers (「💩️」==「💩」). ZWJ is dropped via SPACES. */
+    fun emoji(s: String): String = EMOJI_VARIANTS.replace(java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKC), "")
+
+    /** Target has no letters/digits/CJK at all (emoji / symbols only) → OCR can't read it. */
+    fun ocrBlind(s: String): Boolean { val n = norm(s); return n.isNotEmpty() && n.none { it.isLetterOrDigit() } }
 
     /**
      * OCR confusables + Latin case-fold, applied identically to both sides of every comparison:

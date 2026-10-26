@@ -9,7 +9,8 @@ object CloudProviders {
     val ALL = listOf(
         Preset(AgentPreferences.PROVIDER_NONE, "不使用云端", "", "", emptyList()),
         Preset(AgentPreferences.PROVIDER_DEEPSEEK, "DeepSeek", AgentPreferences.DEEPSEEK_BASE, AgentPreferences.DEEPSEEK_MODEL,
-            listOf("deepseek-chat", "deepseek-reasoner")),
+            // api-docs.deepseek.com (2026-10): deepseek-flash, deepseek-v4-pro; deepseek-chat/-reasoner are legacy aliases.
+            listOf("deepseek-flash", "deepseek-v4-pro", "deepseek-chat", "deepseek-reasoner")),
         Preset(PROVIDER_QWEN, "通义千问（阿里云百炼）", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus",
             listOf("qwen-plus", "qwen-turbo", "qwen-max", "qwen-flash")),
         Preset(AgentPreferences.PROVIDER_OPENAI, "OpenAI 兼容（自定义）", "", "gpt-4o-mini",
@@ -92,11 +93,22 @@ object CloudProviders {
         }
     }
 
-    /** 「测试连接」: tiny JSON request; returns (ok, message with latency/model). */
+    /** Warning text when [model] is not a known/served id (null = fine or can't tell). */
+    fun modelWarning(model: String, served: List<String>, preset: Preset?): String? {
+        val m = model.trim()
+        if (m.isBlank()) return "模型名为空"
+        if (served.isNotEmpty()) return if (m in served) null else "服务端模型列表里没有「$m」（可选：${served.take(6).joinToString("、")}）"
+        if (preset != null && preset.models.isNotEmpty() && m !in preset.models) return "「$m」不在 ${preset.label} 的已知模型里，确认拼写"
+        return null
+    }
+
+    /** 「测试连接」: GET /models (validate model id) + tiny JSON request; returns (ok, message with latency/model). */
     suspend fun test(baseUrl: String, key: String, model: String): Pair<Boolean, String> {
+        val (served, _) = listModels(baseUrl, key)
+        val warn = modelWarning(model, served, ALL.firstOrNull { it.baseUrl.isNotBlank() && baseUrl.startsWith(it.baseUrl.substringBefore("/v1")) })
         val c = CloudClient(baseUrl, key, model, maxTokens = 20)
         val r = c.chat(listOf(ChatMessage("system", "只输出 JSON。"), ChatMessage("user", "输出 {\"ok\":true}")), 0.0)
-        return if (r.error == null && r.content.isNotBlank()) true to "连接成功 ${r.latencyMs}ms 模型=$model"
+        return if (r.error == null && r.content.isNotBlank()) (warn == null) to ("连接成功 ${r.latencyMs}ms 模型=$model" + (warn?.let { "\n⚠ $it" } ?: ""))
         else false to "失败：${r.error ?: "空响应"}（${r.latencyMs}ms）"
     }
 }

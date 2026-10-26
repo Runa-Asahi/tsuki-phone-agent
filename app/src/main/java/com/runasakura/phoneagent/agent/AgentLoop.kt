@@ -105,12 +105,12 @@ class AgentLoop(
                 }
                 onLog("匹配应用：${match.label} (${match.packageName}) score=${match.score}")
                 targetPkg = match.packageName
-                if (!dev.bringToFront(match.packageName, match.label)) {
+                if (!com.runasakura.phoneagent.util.TaskTiming.time("启动应用") { dev.bringToFront(match.packageName, match.label) }) {
                     return Result(false, 1, "无法把「${match.label}」带到前台（前台=${dev.foregroundPackage()}）")
                 }
                 onLog("✓ 前台=${match.packageName}")
-                val remaining = AppResolver.remainingGoal(goal, appName)
-                if (remaining == null) return Result(true, 1, "已打开${match.label}")
+                val remaining = AppResolver.remainderAfterApp(goal, appName, match.label, match.packageName)
+                if (remaining == null) return Result(true, 1, "已打开${match.label}（前台已核对）")
                 onLog("剩余子目标：$remaining")
                 val subs = GoalSplitter.split(remaining)
                 onLog("拆分：" + subs.joinToString(" → ") { it.describe() })
@@ -122,12 +122,18 @@ class AgentLoop(
                     MessagingGoals.validate(o.target, sd.text)?.let { return Result(false, 0, it) }
                     return runMessaging(dev, match.packageName, o.target, sd.text, reallySend = sd.send)
                 }
-                val (res, left) = runSubgoals(dev, subs)
-                if (res != null) return res
-                onLog("确定性执行未完成，剩余交给模型（最后手段）：$left")
+                // Fast paths are sub-skills: run the deterministic prefix, stop at the first step they can't do.
+                val known = subs.takeWhile { it !is Subgoal.Unknown }
+                val (res, left0) = if (known.isEmpty()) null to remaining else runSubgoals(dev, known)
+                val left = if (res != null && !res.success) return res
+                    else if (res != null && known.size == subs.size) {
+                        val v = verify(dev, goal); if (v == null || v.first) return res.copy(summary = res.summary + (v?.let { "（已验收：${it.second}）" } ?: ""))
+                        onLog("验收未通过：${v.second}，交给模型继续"); remaining
+                    } else if (res != null) subs.drop(known.size).joinToString("，") { it.describe() } else left0 ?: remaining
+                onLog("交给模型完成剩余目标：$left")
                 history.clear()
                 history += ChatMessage("system", SystemPrompt.FOCUSED)
-                history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$left")
+                history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$left（总目标：$goal）")
             } else {
                 // No app named: generic gestures/navigation on the current app (通用点击滑动)
                 val subs = GoalSplitter.split(goal)
@@ -202,8 +208,7 @@ class AgentLoop(
                 onLog("界面文本少于3项，附带截图（仅 VL 模型会使用）")
                 try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
             } else null
-            if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_CLOUD_ONLY &&
-                router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
+            if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
                 cloudPlanText = router.cloudPlan(goal, snap.compressedText)?.let { st ->
                     onLog("云端规划（本机按此执行）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")
                 } ?: ""
@@ -310,7 +315,16 @@ class AgentLoop(
             }
 
             when (val action = plan.action) {
-                is AgentAction.Done -> return Result(true, step, action.summary.ifBlank { "完成" })
+                is AgentAction.Done -> {
+                    val v = if (doneRejections < 2) verify(dev, goal) else null
+                    if (v != null && !v.first) {
+                        doneRejections++
+                        onLog("模型说完成，但验收未通过：${v.second}（继续）")
+                        history += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。")
+                        continue
+                    }
+                    return Result(true, step, action.summary.ifBlank { "完成" } + (v?.let { "（已验收）" } ?: ""))
+                }
                 is AgentAction.Fail -> {
                     if (isOpenSettingsGoal(goal)) {
                         onLog("模型 Fail，回退打开系统设置")
@@ -545,6 +559,12 @@ class AgentLoop(
         val flow = com.runasakura.phoneagent.flow.MessagingFlow(dev, profile, onLog) { text ->
             if (!reallySend) false else onConfirm(text)
         }
+        if (MessageContent.isSticker(message)) {
+            onLog("内容意图：表情（不是文字「$message」）")
+            val o = flow.sendSticker(contact); return Result(o.ok, 1, o.summary)
+        }
+        if (MessageContent.isOtherMedia(message))
+            return Result(false, 0, "「$message」是图片/文件/红包等非文字内容，暂不自动发送（避免把它当文字发出）")
         val out = flow.run(contact, message)
         if (!reallySend && out.cancelled) return Result(true, 1, "已在「$contact」聊天中输入：$message（未发送）")
         return Result(out.ok, 1, out.summary)
@@ -565,6 +585,16 @@ class AgentLoop(
     private var escalateNext = false
     private var lastActionKey: String? = null
     private var cloudPlanText: String? = null
+    private var doneRejections = 0
+
+    /** Verifier: cloud judge on the current screen; null = no judge available (deterministic result stands). */
+    private suspend fun verify(dev: com.runasakura.phoneagent.a11y.A11yDevice, goal: String): Pair<Boolean, String>? {
+        if (!router.cloudReady) return null
+        val sc = dev.screen()
+        val v = try { router.judge(goal, buildDump(sc), sc.pkg) } catch (e: Exception) { null }
+        v?.let { onLog("验收：${if (it.first) "✓ 已完成" else "✗ 未完成"} ${it.second}") }
+        return v
+    }
     private var injectionBlocks = 0
     private var lastTyped: String? = null
 

@@ -60,13 +60,15 @@ class MessagingFlow(
         )
         const val CALL_ENTRY = "音视频通话"
         private const val PLUS_X = 0.95
+        /** WeChat 表情 button sits left of 「+」. */
+        private const val EMOJI_X = 0.86
         val CALL_MARKERS = listOf("等待对方接受邀请", "正在呼叫", "挂断", "切到语音通话", "免提", "通话中")
         val CONTACT_SECTIONS = setOf("联系人", "最常使用", "好友", "更多联系人")
         private const val SEND = "发送"
     }
 
     suspend fun run(contact: String, message: String): Outcome {
-        containsTitle = null; fuzzyTitle = null
+        containsTitle = null; fuzzyTitle = null; blindPicked = false; titleAnchor = null
         com.runasakura.phoneagent.agent.MessagingGoals.validate(contact, message)?.let { return fail(it) }
         log("消息流程：${app.label} → 「$contact」 内容「${message.take(40)}${if (message.length > 40) "…" else ""}」")
         openChat(contact)?.let { return fail(it) }
@@ -150,7 +152,11 @@ class MessagingFlow(
             d.bringToFront(app.pkg, app.label); d.afterAction(1500); s = d.screen()
         }
         if (!d.alive()) return fail(DISCONNECTED)
-        if (!titleMatches(s, contact)) return fail("确认期间界面已变化，未发送")
+        if (!stillSameChat(s, contact)) {
+            // Toast / IME candidate redraw can transiently cover the title: re-read once.
+            d.sleep(400); d.invalidateObservation(); s = d.screen()
+            if (!stillSameChat(s, contact)) return fail("确认期间界面已变化（标题不再是「${titleAnchor ?: contact}」），未发送")
+        }
         val fieldNow = InputCheck.judge(d.fieldText(), message)
         if (fieldNow == InputCheck.Verdict.REPEATED || fieldNow == InputCheck.Verdict.WRONG) return fail("确认期间输入框内容变化，未发送")
         if (fieldNow == InputCheck.Verdict.UNKNOWN && !InputVerify.barEquals(s, findSend(s)?.cy ?: InputVerify.barY(s, hy), message))
@@ -296,10 +302,23 @@ class MessagingFlow(
         val hy = searchEdit?.cy ?: fieldXY?.second ?: cancel?.cy ?: (s.h * 0.07).toInt()
         var typedOk = false
         for (attempt in 0..2) {
-            if (attempt > 0) { d.clearField(); d.afterAction(400) }
+            if (attempt > 0) {
+                // Never retype if the IME channel already shows exactly the contact (emoji can't be OCR'd).
+                if (d.fieldText()?.let { Text.norm(it) == Text.norm(contact) } == true) { typedOk = true; log("✓ 输入法通道读到搜索框=「$contact」"); break }
+                d.clearField(); d.afterAction(400)
+            }
             if (!d.type(contact, hx, hy, attempt)) continue
             d.afterAction(1500)
             s = d.screen()
+            d.fieldText()?.let { ft ->
+                if (Text.norm(ft) == Text.norm(contact)) { typedOk = true; log("✓ 输入法通道读到搜索框=「$contact」") }
+            }
+            if (typedOk) break
+            if (Text.ocrBlind(contact) && d.fieldText() == null && SearchPage.isSearchPage(s) &&
+                s.items.any { Text.norm(it.label) in SECTION_HEADERS }) {
+                log("⚠ 「$contact」无法 OCR 识别，搜索结果已出现分区，按已输入处理（不重复输入）")
+                typedOk = true; break
+            }
             // postcondition: the search box (top band) shows the contact text
             if (s.items.any { it.cy < s.h * 0.15 && Text.norm(it.label).contains(Text.norm(contact)) }) { typedOk = true; break }
             log("搜索框未显示「$contact」，换输入方式重试（${attempt + 1}/3）")
@@ -327,6 +346,15 @@ class MessagingFlow(
                 }
                 hits.size > 1 ->
                     return "搜索结果中有 ${hits.size} 个同名「$contact」，无法确定是哪一位，已停止，请改用唯一备注名"
+                hits.isEmpty() && Text.ocrBlind(contact) -> {
+                    val row = blindContactRow(s, barBottom)
+                        ?: return "「$contact」是表情/符号，OCR 无法识别名称，且「联系人」分区不是唯一一行；为安全起见未点击，请改用文字备注名"
+                    log("⚠ 名称无法识别：选择「联系人」分区唯一一行「${row.label}」，发送前会请你核对")
+                    blindPicked = true
+                    d.tap(row); d.afterAction(2000)
+                    if (SearchPage.strong(d.screen())) return "点击联系人后仍停在搜索页，未进入聊天"
+                    return null
+                }
                 page < SearchScroll.MAX_PAGES -> {
                     page++
                     log("当前页无精确匹配，搜索结果上滑第 ${page}/${SearchScroll.MAX_PAGES} 页")
@@ -383,7 +411,7 @@ class MessagingFlow(
      * 给X打语音/视频电话: verified chat → 「+」 → 「音视频通话」 → confirm (recipient + type) → 语音通话/视频通话 → verify call screen.
      */
     suspend fun call(contact: String, video: Boolean): Outcome {
-        containsTitle = null; fuzzyTitle = null
+        containsTitle = null; fuzzyTitle = null; blindPicked = false; titleAnchor = null
         if (app.pkg != MessagingGoals.WECHAT) return fail("音视频通话目前只支持微信")
         if (Text.norm(contact).isEmpty()) return fail("联系人为空，拒绝拨打")
         val kind = if (video) "视频通话" else "语音通话"
@@ -545,16 +573,91 @@ class MessagingFlow(
     /** Set when the chat title only matched fuzzily; shown verbatim in the send confirmation. */
     private var fuzzyTitle: String? = null
 
+    /**
+     * 「给X发一个表情包/表情」: semantic content, not literal text. Verified chat → 表情 button (left of 「+」,
+     * fuzzy label or position) → panel (anchored by 「最近使用」/「所有表情」) → first emoji inserted into the bar →
+     * confirm (content shown as 表情) → 发送 → bar empty.
+     */
+    suspend fun sendSticker(contact: String): Outcome {
+        containsTitle = null; fuzzyTitle = null; blindPicked = false; titleAnchor = null
+        if (Text.norm(contact).isEmpty()) return fail("联系人为空，拒绝发送")
+        log("表情流程：${app.label} → 「$contact」 发送表情")
+        openChat(contact)?.let { return fail(it) }
+        var s = leaveVoiceMode(d.screen()) ?: return fail("无法退出语音输入模式，未发送")
+        val barY = s.items.filter { it.cy > s.h * 0.85 && (s.imeTop == null || it.cy < s.imeTop) }.maxByOrNull { it.cy }?.cy
+            ?: (s.h * app.inputFallback.second).toInt()
+        val emojiBtn = KeyMatch.find(s, listOf("表情", "☺", "😊", "🙂"), allowContains = false) {
+            it.cy > s.h * 0.8 && it.cx in (s.w * 0.72).toInt()..(s.w * 0.92).toInt() }
+        if (emojiBtn != null) d.tap(emojiBtn) else { log("未识别到表情按钮，按位置点击「+」左侧"); d.tapXY((s.w * EMOJI_X).toInt(), barY) }
+        d.afterAction(900); s = d.screen()
+        var anchor = KeyMatch.find(s, listOf("最近使用", "所有表情")) { it.cy > s.h * 0.4 }
+        if (anchor == null) { s = d.refineScreen(); anchor = KeyMatch.find(s, listOf("最近使用", "所有表情")) { it.cy > s.h * 0.4 } }
+        dump("表情面板", s)
+        if (anchor == null) { d.back(); return fail("未识别到表情面板（最近使用/所有表情），未发送") }
+        val cellX = s.w / 16; val cellY = anchor.cy + (s.h * 0.045).toInt()
+        log("点击面板第一个表情 ($cellX,$cellY)")
+        d.tapXY(cellX, cellY); d.afterAction(600)
+        s = d.screen()
+        val ft = d.fieldText()
+        val inserted = ft?.let { Text.norm(it).isNotEmpty() } ?: (findSend(s) != null)
+        if (!inserted) { d.back(); return fail("表情未插入输入框（可能点到了贴图分类），未发送") }
+        if (!confirm("发送确认（${app.label}）\n收件人：$contact（" + (fuzzyTitle?.let { "⚠ $it" } ?: "已核对聊天标题") +
+                "）\n内容：表情（面板中第一个表情${ft?.let { "「$it」" } ?: ""}）\n\n确认后将点击「发送」。")) {
+            d.clearField(); return Outcome(false, "用户取消发送", cancelled = true)
+        }
+        d.invalidateObservation(); s = d.screen()
+        if (!stillSameChat(s, contact)) return fail("确认期间界面已变化，未发送")
+        val send = findSend(s) ?: sendFallback(s, barY)
+        d.tap(send); d.afterAction(1200)
+        val after = d.fieldText()
+        return if (after != null && Text.norm(after).isNotEmpty()) fail("点击发送后输入框仍有内容，未确认发出")
+        else Outcome(true, "已向「$contact」发送表情" + if (after == null) "（未能核验，请看一眼手机）" else "（输入框已清空）", verified = after != null)
+    }
+
+    /** Set when an emoji-only contact was chosen as the unique 联系人 row (name unreadable). */
+    private var blindPicked = false
+    /** Title label seen when the chat was verified — the post-confirm stability anchor. */
+    private var titleAnchor: String? = null
+
+    /** The single row under 「联系人」 (until the next section header) for an OCR-blind target. */
+    fun blindContactRow(s: Screen, top: Int): ScreenItem? {
+        val sorted = s.items.filter { it.cy > top && (s.imeTop == null || it.cy < s.imeTop) }.sortedBy { it.cy }
+        val hi = sorted.indexOfFirst { Text.norm(it.label) == "联系人" }
+        if (hi < 0) return null
+        val rows = sorted.drop(hi + 1).takeWhile { Text.norm(it.label) !in SECTION_HEADERS && !Text.norm(it.label).startsWith("搜索网络") &&
+            !Text.norm(it.label).endsWith("搜索网络结果") }
+        val distinctRows = rows.groupBy { it.cy / (s.h / 40) }
+        return if (distinctRows.size == 1) rows.first() else null
+    }
+
+    /**
+     * Post-confirm stability: only key anchors matter — chat title (same anchor label as before, fuzzy),
+     * not IME candidates / keyboard keys / toasts (all ignored by looking above the bar only).
+     */
+    fun stillSameChat(s: Screen, contact: String): Boolean {
+        if (s.pkg != app.pkg) return false
+        if (titleMatches(s, contact)) return true
+        val a = titleAnchor ?: return false
+        val top = s.items.filter { it.cy < s.h * 0.14 && !it.edit }
+        return top.any { val n = KeyMatch.clean(it.label); val k = KeyMatch.clean(a)
+            n == k || n.contains(k) || k.contains(n) && n.length >= 2 || Text.editDistance(n, k) <= maxOf(1, k.length / 4) }
+    }
+
     fun titleMatches(s: Screen, contact: String): Boolean {
         if (s.pkg != app.pkg) return false
         // Still on the search page (search box holds the same text) is NOT a chat
         if (s.items.any { it.cy < s.h * 0.12 && (it.edit || KeyMatch.isKey(it.label, "取消", allowContains = false)) }) return false
         val titles = s.items.filter { it.cy < s.h * 0.14 && !it.edit }.map { it.label }
-        if (TitleMatch.findMatching(titles, contact) != null) return true
+        TitleMatch.findMatching(titles, contact)?.let { titleAnchor = it; return true }
+        if (Text.ocrBlind(contact) && blindPicked) {
+            // Name unreadable: accept a chat page (title row present, input bar area present) and warn in the confirm.
+            val t = s.items.filter { it.cy < s.h * 0.14 && it.cx in (s.w / 5)..(s.w * 4 / 5) && !it.edit }.minByOrNull { it.cy }
+            if (t != null || titles.isEmpty()) { fuzzyTitle = "无法识别名称（表情/符号），请核对"; titleAnchor = t?.label; return true }
+        }
         containsTitle?.let { full -> TitleMatch.findMatching(titles, full)?.let { fuzzyTitle = full; return true } }
         TitleMatch.findFuzzy(titles, contact)?.let {
             log("⚠ 标题模糊匹配：看到「$it」≈「$contact」（OCR 误差，唯一候选）")
-            fuzzyTitle = it; return true
+            fuzzyTitle = it; titleAnchor = it; return true
         }
         return false
     }

@@ -17,6 +17,6 @@ object TaskTiming {
     @Synchronized fun summary(): String {
         val total = if (start == 0L) 0 else System.currentTimeMillis() - start
         val parts = n.keys.joinToString("，") { k -> ms[k]?.let { "$k ${it}ms/${n[k]}次" } ?: "$k ${n[k]}次" }
-        return "总 ${total}ms：$parts"
+        return "总 ${total}ms：" + parts.ifBlank { "（未读屏、未调用模型）" }
     }
 }

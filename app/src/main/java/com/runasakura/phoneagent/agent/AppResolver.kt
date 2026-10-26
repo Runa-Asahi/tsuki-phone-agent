@@ -48,6 +48,28 @@ object AppResolver {
         return rest.ifBlank { null }
     }
 
+    /**
+     * Remainder after the app that was ACTUALLY resolved. 「打开图库第一张照片」: extractAppName gives
+     * 「图库第一张照片」 (no separator) but the resolved app is 「图库」 → remainder 「第一张照片」.
+     */
+    fun remainderAfterApp(goal: String, appName: String, label: String, pkg: String): String? {
+        val keys = (listOf(label) + ALIASES.filterValues { pkg in it }.keys).filter { it.isNotBlank() }
+            .sortedByDescending { it.length }
+        val lower = goal.lowercase()
+        for (k in keys) {
+            val i = lower.indexOf(k.lowercase())
+            if (i >= 0) return clean(goal.substring(i + k.length))
+        }
+        return remainingGoal(goal, appName)
+    }
+
+    private fun clean(rest0: String): String? {
+        val rest = rest0.removePrefix("应用").removePrefix("App").removePrefix("app")
+            .trimStart('并', '且', '然', '后', '再', '，', ',', '、', ' ', '。', '里', '中', '上', '的')
+            .removePrefix("然后").trim()
+        return rest.ifBlank { null }
+    }
+
     /** Remaining subgoal after the app-opening prefix, or null if nothing remains. */
     fun remainingGoal(goal: String, appName: String): String? {
         val idx = goal.indexOf(appName)

@@ -47,6 +47,15 @@ object MessagingGoals {
     }
 }
 
+/** Semantic message content: 「一个表情包」 is a request for a sticker/emoji, not literal text. */
+object MessageContent {
+    private val STICKER = Regex("^(?:发|发送)?(?:一|1)?(?:个|张|波)?(?:可爱的|好玩的|搞笑的|随便的?)?(?:表情包|表情|动图|贴图|emoji|表情符号)(?:吧|呗|过去|给他|给她)?[。！!]*$", RegexOption.IGNORE_CASE)
+    private val MEDIA = Regex("^(?:一|1)?(?:张|个|段)?(?:图片|照片|视频|文件|语音|位置|红包)[。！!]*$")
+    fun isSticker(msg: String) = STICKER.matches(msg.trim())
+    /** Non-text content we don't do deterministically (photo/file/红包…) → model/human. */
+    fun isOtherMedia(msg: String) = MEDIA.matches(msg.trim())
+}
+
 /** 「给X打语音/视频电话」 (WeChat only). */
 data class CallGoal(val contact: String, val video: Boolean)
 

@@ -113,7 +113,7 @@ class AgentPreferences(context: Context) {
         const val PROVIDER_OPENAI = "openai_compatible"
 
         const val DEEPSEEK_BASE = "https://api.deepseek.com/v1"
-        const val DEEPSEEK_MODEL = "deepseek-chat"
+        const val DEEPSEEK_MODEL = "deepseek-flash"
 
         val DEFAULT_SENSITIVE = setOf(
             "com.eg.android.AlipayGphone",
