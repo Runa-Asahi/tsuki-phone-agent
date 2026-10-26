@@ -44,6 +44,7 @@ class AgentAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         try { super.onServiceConnected() } catch (e: Throwable) { Log.e(TAG, "super.onServiceConnected", e) }
         instance = this
+        A11yEvents.record("已连接")
         Log.i(TAG, "AccessibilityService connected")
         try { sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, true)) } catch (e: Throwable) { Log.w(TAG, "broadcast", e) }
     }
@@ -58,6 +59,7 @@ class AgentAccessibilityService : AccessibilityService() {
 
     override fun onUnbind(intent: Intent?): Boolean {
         try { if (instance === this) instance = null } catch (_: Throwable) {}
+        A11yEvents.record("解绑(onUnbind)")
         return try { super.onUnbind(intent) } catch (_: Throwable) { false }
     }
 
@@ -176,6 +178,7 @@ class AgentAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         if (instance === this) instance = null
+        A11yEvents.record("销毁(onDestroy)")
         try { sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, false)) } catch (_: Throwable) {}
         try { super.onDestroy() } catch (e: Throwable) { Log.w(TAG, "onDestroy", e) }
     }

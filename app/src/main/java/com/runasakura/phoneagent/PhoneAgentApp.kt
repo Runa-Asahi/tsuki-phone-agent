@@ -17,6 +17,14 @@ class PhoneAgentApp : Application() {
         prefs = AgentPreferences(this)
         createNotificationChannels()
         installCrashGuard()
+        // Shizuku audit + UiAutomation gate: while our accessibility service is connected or enabled, never let a
+        // `uiautomator`-style command run (it makes the system unbind us).
+        val app = this
+        com.runasakura.phoneagent.shell.ShellLog.a11yActive = {
+            com.runasakura.phoneagent.a11y.AgentAccessibilityService.instance != null ||
+                com.runasakura.phoneagent.a11y.AgentAccessibilityService.isEnabledInSettings(app)
+        }
+        com.runasakura.phoneagent.shell.ShellLog.sink = { com.runasakura.phoneagent.util.Diagnostics.log(it) }
         // MagicOS may have switched the accessibility service off after a kill: heal it (and restore keep-alive).
         Thread {
             com.runasakura.phoneagent.a11y.A11ySelfHeal.heal(this, "应用启动")

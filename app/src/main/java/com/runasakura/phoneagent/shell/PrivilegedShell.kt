@@ -34,8 +34,16 @@ object BackendSelector {
     /** Wraps a shell so a failing binder (Shizuku killed mid-task) degrades to "no shell" instead of crashing. */
     fun guarded(shell: PrivilegedShell?): PrivilegedShell? = shell?.let { s ->
         object : PrivilegedShell {
-            override fun exec(argv: List<String>, timeoutMs: Long): ShellResult =
-                try { s.exec(argv, timeoutMs) } catch (e: Exception) { ShellResult(-1, ByteArray(0), e.message ?: e.toString()) }
+            override fun exec(argv: List<String>, timeoutMs: Long): ShellResult {
+                val caller = ShellLog.caller()
+                if (ShellLog.usesUiAutomation(argv) && runCatching { ShellLog.a11yActive() }.getOrDefault(true)) {
+                    ShellLog.record(argv, caller, "已拦截：无障碍服务在线时不运行 UiAutomation 命令（会使系统断开无障碍服务）")
+                    return ShellResult(-1, ByteArray(0), "blocked: accessibility service active")
+                }
+                val r = try { s.exec(argv, timeoutMs) } catch (e: Exception) { ShellResult(-1, ByteArray(0), e.message ?: e.toString()) }
+                ShellLog.record(argv, caller, "exit=${r.code}")
+                return r
+            }
             override fun readClipboard(): String? = try { s.readClipboard() } catch (_: Exception) { null }
         }
     }

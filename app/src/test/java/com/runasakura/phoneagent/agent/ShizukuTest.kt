@@ -202,4 +202,37 @@ class ShizukuTest {
         assertTrue(last, last.contains("<<<屏幕内容")); assertNull(r.world.flags["uninstalled"])
     }
     @Test fun simMediaKeyViaShizuku() { pass(Scenarios3.mediaKey) }
+
+    // ---- pt67 (A): never run uiautomator while our accessibility service is enabled/connected ----
+    @Test fun augmentedDeviceNeverDumpsWhileA11yActive() = runBlocking {
+        val empty = Screen("p", 2800, 1264, emptyList(), "none")
+        val before = xmlShell.calls; val logs = ArrayList<String>()
+        val s = ShellAugmentedDevice(FakeDev(empty), { xmlShell }, { logs += it }, a11yActive = { true }).screen()
+        assertSame(empty, s); assertEquals("no shell command at all", before, xmlShell.calls)
+        assertTrue(logs.any { it.contains("不使用 uiautomator") })
+        // service off → the dump is still available as before
+        assertEquals("uia", ShellAugmentedDevice(FakeDev(empty), { xmlShell }, {}, a11yActive = { false }).screen().source)
+    }
+
+    @Test fun guardedShellBlocksUiAutomationCommandsAndLogsCaller() {
+        val ran = ArrayList<List<String>>()
+        val raw = object : PrivilegedShell { override fun exec(argv: List<String>, timeoutMs: Long): ShellResult { ran += argv; return ShellResult(0, ByteArray(0)) } }
+        val old = ShellLog.a11yActive
+        try {
+            ShellLog.clear(); ShellLog.a11yActive = { true }
+            val sh = BackendSelector.guarded(raw)!!
+            assertFalse(sh.exec(listOf("uiautomator", "dump", "/sdcard/x.xml")).ok)
+            assertFalse(sh.exec(listOf("am", "instrument", "-w", "x")).ok)
+            assertTrue(sh.exec(listOf("input", "text", "secret")).ok)
+            assertEquals(listOf(listOf("input", "text", "secret")), ran)
+            val e = ShellLog.entries()
+            assertEquals(3, e.size)
+            assertTrue(e[0].result.contains("已拦截"))
+            assertFalse("typed text is redacted", e[2].cmd.contains("secret"))
+            assertTrue("caller recorded", e.all { it.caller != "?" && it.caller.isNotBlank() })
+            assertTrue(e[0].atMs > 0)
+            ShellLog.a11yActive = { false }
+            assertTrue(sh.exec(listOf("uiautomator", "dump")).ok)
+        } finally { ShellLog.a11yActive = old; ShellLog.clear() }
+    }
 }

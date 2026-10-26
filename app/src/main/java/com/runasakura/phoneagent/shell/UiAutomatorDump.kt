@@ -69,7 +69,12 @@ object UiAutomatorDump {
  * Flutter/web content) and the privileged shell is active, read the UI through `uiautomator dump` before falling
  * back to OCR. A rich a11y tree is used unchanged (it is faster and its nodes support node-level actions).
  */
-class ShellAugmentedDevice(private val d: Device, private val shell: () -> PrivilegedShell?, private val log: (String) -> Unit) : Device by d {
+class ShellAugmentedDevice(
+    private val d: Device, private val shell: () -> PrivilegedShell?, private val log: (String) -> Unit,
+    /** True while our accessibility service is connected/enabled: then NEVER dump (it unbinds the service). */
+    private val a11yActive: () -> Boolean = { ShellLog.a11yActive() },
+) : Device by d {
+    private var skipLogged = false
     private var failures = 0
 
     override suspend fun screen(): Screen = augment(d.screen())
@@ -78,6 +83,10 @@ class ShellAugmentedDevice(private val d: Device, private val shell: () -> Privi
     private fun augment(s: Screen): Screen {
         if (s.source == "tree" && s.textCount >= MIN_TREE_TEXT) return s
         if (failures >= 3) return s
+        if (a11yActive()) {
+            if (!skipLogged) { skipLogged = true; log("界面树稀疏：无障碍服务在线，不使用 uiautomator（会断开无障碍服务），改用 OCR + 色块候选") }
+            return s
+        }
         val sh = shell() ?: return s
         val parsed = UiAutomatorDump.dump(sh)
         if (parsed == null) { failures++; return s }

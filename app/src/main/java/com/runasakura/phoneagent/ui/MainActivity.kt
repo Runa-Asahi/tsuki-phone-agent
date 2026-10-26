@@ -32,9 +32,11 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 refreshA11yStatus()
                 if (!on) {
-                    UiLog.add("⚠ 无障碍服务已断开（常见于刚更新 APK）。请到系统设置重新打开本服务。")
-                    Toast.makeText(this@MainActivity, "无障碍服务已断开，请重新开启", Toast.LENGTH_LONG).show()
-                    AgentForegroundService.stop(this@MainActivity, "无障碍服务断开")
+                    // Don't kill the running task: the agent waits for the rebind and resumes (or stops with the reason).
+                    val cause = com.runasakura.phoneagent.a11y.A11yEvents.cause(com.runasakura.phoneagent.a11y.A11yEvents.lastDisconnect(),
+                        AgentAccessibilityService.isEnabledInSettings(this@MainActivity))
+                    UiLog.add("⚠ 无障碍服务断开：$cause。任务会等待重连后继续。")
+                    Toast.makeText(this@MainActivity, "无障碍服务断开，正在等待重连", Toast.LENGTH_SHORT).show()
                 }
             }
         }

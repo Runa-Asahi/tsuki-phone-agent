@@ -42,6 +42,10 @@ object Diagnostics {
         appendLine("观察次数: 树=$treeCount OCR=$ocrCount")
         appendLine("--- 自检 ---")
         appendLine(selfTest)
+        appendLine("--- 无障碍连接记录 ---")
+        appendLine(com.runasakura.phoneagent.a11y.A11yEvents.export())
+        appendLine("--- Shizuku 命令记录（时间/调用方/命令） ---")
+        appendLine(com.runasakura.phoneagent.shell.ShellLog.export())
         appendLine("--- 日志 ---")
         lines.forEach { appendLine(it) }
     }
