@@ -46,12 +46,12 @@ class CloudClient(
         }
         put("messages", JSONArray().apply {
             messages.forEach { m ->
-                val img = m.imageBase64?.takeIf { !imageRejected }
+                val img = m.imageBase64?.takeIf { !imageRejected && m.role == "user" }
                 if (img != null) {
                     val parts = JSONArray()
                         .put(JSONObject().put("type", "text").put("text", m.content))
                         .put(JSONObject().put("type", "image_url").put("image_url",
-                            JSONObject().put("url", "data:image/jpeg;base64,$img")))
+                            JSONObject().put("url", "data:image/jpeg;base64,$img").put("detail", "low")))
                     put(JSONObject().put("role", m.role).put("content", parts))
                 } else put(JSONObject().put("role", m.role).put("content", m.content))
             }
@@ -147,9 +147,9 @@ class CloudClient(
         val SHARED: OkHttpClient by lazy {
             OkHttpClient.Builder()
                 .connectTimeout(5, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(45, TimeUnit.SECONDS)
                 .writeTimeout(15, TimeUnit.SECONDS)
-                .callTimeout(40, TimeUnit.SECONDS)
+                .callTimeout(55, TimeUnit.SECONDS)
                 .connectionPool(okhttp3.ConnectionPool(2, 5, TimeUnit.MINUTES))
                 .build()
         }

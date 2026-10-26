@@ -34,7 +34,7 @@ object LocalWarmup {
     fun status(ctx: Context): String {
         val dir = ModelStore.selected(ctx) ?: return "未安装"
         return when (EmbeddedMnn.state) {
-            EmbeddedMnn.State.READY -> "已就绪 · ${dir.name}" + (EmbeddedMnn.lastLatencyMs.takeIf { it > 0 }?.let { " · 上次 ${it}ms" } ?: "")
+            EmbeddedMnn.State.READY -> "已就绪 · ${dir.name} · ${EmbeddedMnn.backend.uppercase()}" + (EmbeddedMnn.lastLatencyMs.takeIf { it > 0 }?.let { " · 上次 ${it}ms" } ?: "")
             EmbeddedMnn.State.BUSY -> "推理中 · ${dir.name}"
             EmbeddedMnn.State.LOADING -> "加载中 · ${dir.name}"
             EmbeddedMnn.State.FAILED -> "失败：${EmbeddedMnn.lastError}"

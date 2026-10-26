@@ -41,4 +41,24 @@ class FlashAdaptTest {
         val p = ActionParser.parse("""好的 {"screen":"列表","goal_match":"否","action":{"type":"tap","node_id":"e3"},"expect":"进入"} 多余""")
         assertTrue(p.action is AgentAction.Tap); assertEquals("进入", p.expect)
     }
+
+    @Test fun visionImageUsesLowDetailOnUserOnly() {
+        val withImg = listOf(
+            ChatMessage("system", "sys", imageBase64 = "SHOULD_IGNORE"),
+            ChatMessage("user", "see", imageBase64 = "abc123")
+        )
+        val b = CloudClient("https://api.deepseek.com", "k", "deepseek-flash").buildBody(withImg, 0.0)
+        val msgs = b.getJSONArray("messages")
+        assertTrue(msgs.getJSONObject(0).get("content") is String) // system stays plain text
+        val parts = msgs.getJSONObject(1).getJSONArray("content")
+        assertEquals(2, parts.length())
+        val img = parts.getJSONObject(1).getJSONObject("image_url")
+        assertEquals("data:image/jpeg;base64,abc123", img.getString("url"))
+        assertEquals("low", img.getString("detail"))
+    }
+
+    @Test fun cpuThreadClamp() {
+        assertTrue(EmbeddedMnn.cpuThreads() in 2..6)
+    }
+
 }

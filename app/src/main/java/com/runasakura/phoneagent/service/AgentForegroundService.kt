@@ -118,10 +118,10 @@ class AgentForegroundService : Service() {
         router.vision = com.runasakura.phoneagent.llm.CloudProviders.visionClientFor(prefs)
         val embeddedVision = embedded && com.runasakura.phoneagent.llm.ModelStore.selected(app)?.let { com.runasakura.phoneagent.llm.ModelStore.isVision(it) } == true
         if (embeddedVision && com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) {
-            router.visionSkill = com.runasakura.phoneagent.llm.EmbeddedMnnClient(app, { com.runasakura.phoneagent.llm.ModelStore.selected(app) }, maxTokens = 400)
+            router.visionSkill = com.runasakura.phoneagent.llm.EmbeddedMnnClient(app, { com.runasakura.phoneagent.llm.ModelStore.selected(app) }, maxTokens = 96, assist = true)
             log("看图技能：Tsuki 内置本机模型 ${com.runasakura.phoneagent.llm.ModelStore.selected(app)?.name}（不依赖 MNN Chat，后台并行，不阻塞决策）")
         } else if (prefs.visionLocal) {
-            router.visionSkill = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.visionLocalModel.ifBlank { prefs.mnnModel }, maxTokens = 400)
+            router.visionSkill = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.visionLocalModel.ifBlank { prefs.mnnModel }, maxTokens = 96)
             if (com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) log("看图技能：本机 MNN 视觉模型 ${prefs.visionLocalModel.ifBlank { prefs.mnnModel }}（需在 MNN Chat 里加载 VL 模型并开启 API）")
         }
         if (router.vision != null) log("视觉辅助：${prefs.visionModel}（截图${if (prefs.allowCloudScreenshot) "已允许" else "未允许，视觉不会使用"}）")

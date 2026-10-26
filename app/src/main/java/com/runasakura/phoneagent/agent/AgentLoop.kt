@@ -438,7 +438,11 @@ class AgentLoop(
                 com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)
             val wantSkill = !vision && hardScreen && router.visionSkill != null && !router.skillSidelined
             val shot = if ((vision && hardScreen) || wantSkill) {
-                try { if (wantSkill) a11y.screenshotJpegBase64(640) else (if (cleanShotNext) a11y.screenshotJpegBase64(1280) else a11y.screenshotJpegBase64(1280, sc.items, sc.w, sc.h)).also { cleanShotNext = false } } catch (_: Exception) { null }
+                try {
+                    if (wantSkill) a11y.screenshotJpegBase64(640)
+                    else if (cleanShotNext) a11y.screenshotJpegBase64(768).also { cleanShotNext = false }
+                    else a11y.screenshotJpegBase64(768, sc.items, sc.w, sc.h)  // SoM labels; DeepSeek detail=low → ~512
+                } catch (_: Exception) { null }
             } else null
             if (shot != null && vision) onLog("附带截图给云端模型（${prefs.cloudModel} 支持看图）")
             var obsNote = diffNote
@@ -454,7 +458,7 @@ class AgentLoop(
             if (assistWanted && assistJob == null) {
                 val ashot = if (wantSkill) shot else try { a11y.screenshotJpegBase64(640) } catch (_: Exception) { null }
                 if (ashot != null) { assistSig = sigNow; onLog("本机看图：后台描述屏幕（不阻塞本步）")
-                    assistJob = planScope.async { runCatching { router.describeScreen(goal, ashot, sc.w, sc.h, 60_000) }.getOrNull() } }
+                    assistJob = planScope.async { runCatching { router.describeScreen(goal, ashot, sc.w, sc.h, 45_000, sparseWeb = sc.source == "tree+ocr") }.getOrNull() } }
             }
             // With no other eyes (brain cannot see images) give it a short grace period; otherwise only use it if done.
             val ready = assistJob?.let { j -> if (wantSkill) kotlinx.coroutines.withTimeoutOrNull(3_000) { j.await() } ?: if (j.isCompleted) j.await() else null
