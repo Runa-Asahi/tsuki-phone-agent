@@ -38,7 +38,7 @@ class CloudClient(
             put("thinking", JSONObject().put("type", "disabled"))
         put("messages", JSONArray().apply {
             messages.forEach { m ->
-                val img = m.imageBase64
+                val img = m.imageBase64?.takeIf { !imageRejected }
                 if (img != null) {
                     val parts = JSONArray()
                         .put(JSONObject().put("type", "text").put("text", m.content))
@@ -83,6 +83,18 @@ class CloudClient(
                                 else LlmResponse("", name, lat, "HTTP ${r2.code}: ${raw2.take(300)}", raw2)
                             }
                         }
+                        if (resp.code == 400 && !imageRejected && messages.any { it.imageBase64 != null }) {
+                            // Model/provider doesn't take images: remember for the process, retry once text-only.
+                            imageRejected = true
+                            val retry = Request.Builder().url(req.url).headers(req.headers)
+                                .post(buildBody(messages, temperature).toString().toRequestBody(JSON)).build()
+                            http.newCall(retry).execute().use { r2 ->
+                                val raw2 = r2.body?.string().orEmpty()
+                                val lat = System.currentTimeMillis() - started
+                                return@withContext if (r2.isSuccessful) LlmResponse(LocalMnnClient.parseContent(raw2), name, lat, rawBody = raw2)
+                                else LlmResponse("", name, lat, "HTTP ${r2.code}: ${raw2.take(300)}", raw2)
+                            }
+                        }
                         if ((resp.code == 429 || resp.code >= 500) && attempt == 0) {
                             attempt++; delay(800L); return@use
                         }
@@ -102,6 +114,8 @@ class CloudClient(
         private val JSON = "application/json; charset=utf-8".toMediaType()
         /** Set once a provider rejects the DeepSeek `thinking` field; it is then never sent again. */
         @Volatile var thinkingRejected = false
+        /** Set once the cloud model rejects image_url parts (HTTP 400); screenshots are then never sent again. */
+        @Volatile var imageRejected = false
         /** One pooled client for the whole process: TLS + HTTP/2 connection reuse between steps. */
         val SHARED: OkHttpClient by lazy {
             OkHttpClient.Builder()

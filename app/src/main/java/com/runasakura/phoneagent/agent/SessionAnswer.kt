@@ -6,7 +6,8 @@ package com.runasakura.phoneagent.agent
  */
 object SessionAnswer {
     private val SUMMARY = Regex("总结|汇总|复盘|整理|记录|概括|写下")
-    private val ABOUT_SELF = Regex("历史|日志|之前|刚才|上次|这次|这几次|前面|任务过程|错误|失败|记录下来")
+    // Must clearly refer to the AGENT's own runs (not "记录今天的错误" in a notes app).
+    private val ABOUT_SELF = Regex("历史日志|任务历史|历史记录|执行日志|日志|任务过程|(之前|刚才|上次|前面|这几次|这次|最近)[^，,。]{0,6}(任务|失败|执行|操作|运行)|之前[^，,。]{0,3}(三|几|两)次")
     private val OPEN_APP = Regex("(打开|在|用)\\S{1,8}(里|中|，|,|把|并)")
 
     fun aboutHistory(goal: String) = SUMMARY.containsMatchIn(goal) && ABOUT_SELF.containsMatchIn(goal)

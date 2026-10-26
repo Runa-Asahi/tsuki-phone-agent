@@ -33,7 +33,8 @@ object CloudProviders {
         model.trim().ifBlank { byId(effectiveProvider(provider, baseUrl, key)).model.ifBlank { AgentPreferences.DEEPSEEK_MODEL } }
 
     /** Models that accept OpenAI-style image_url input (screenshot only sent when the user allowed it). */
-    fun isVision(model: String): Boolean = Regex("vl|vision|gpt-4o|gpt-4\\.1|gpt-5|qwen-vl|qwen2\\.5-vl|qwen3-vl|glm-4v|omni", RegexOption.IGNORE_CASE).containsMatchIn(model)
+    // deepseek-flash takes image_url parts (api-docs.deepseek.com/guides/vision); a 400 flips CloudClient.imageRejected.
+    fun isVision(model: String): Boolean = Regex("deepseek-flash|vl|vision|gpt-4o|gpt-4\\.1|gpt-5|qwen-vl|qwen2\\.5-vl|qwen3-vl|glm-4v|omni", RegexOption.IGNORE_CASE).containsMatchIn(model)
 
     /** Reasoning models need a bigger budget and no JSON mode. */
     fun isReasoner(model: String) = model.contains("reasoner", true) || model.contains("-r1", true) || model.startsWith("o1") || model.startsWith("o3")
@@ -85,7 +86,9 @@ object CloudProviders {
     }
 
     /** Shown in settings / after failures on screens with little text. */
-    const val VISION_TIP = "游戏、图标多的界面文字很少，纯文本模型（如 deepseek-flash）只能靠 OCR 猜。建议在设置里配置「视觉辅助模型」：阿里云百炼 https://dashscope.aliyuncs.com/compatible-mode/v1 ，模型 qwen3-vl-plus 或 qwen-vl-max，并勾选允许发送截图。"
+    const val VISION_TIP = "deepseek-flash 官方 API 支持直接看图：勾选「允许向云端发送截图」后，游戏/图标界面会把截图一起发给它。也可以另配视觉辅助：本机 MNN 的 VL 模型（Qwen2.5-VL/Qwen3-VL，较慢）或云端 qwen3-vl-plus。"
+
+    fun cloudSeesImages(model: String) = isVision(model) && !CloudClient.imageRejected
 
     fun clientFor(prefs: AgentPreferences): CloudClient? {
         if (!ready(prefs.cloudProvider, prefs.cloudBaseUrl, prefs.cloudApiKey)) return null

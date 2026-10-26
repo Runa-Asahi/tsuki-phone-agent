@@ -83,6 +83,18 @@ class AgentPreferences(context: Context) {
         get() = sp.getString("vision_model", "") ?: ""
         set(v) = sp.edit().putString("vision_model", v.trim()).apply()
 
+    /** Use the on-device MNN VL model as a "看图" skill (describes the screenshot for a text brain). */
+    var visionLocal: Boolean
+        get() = sp.getBoolean("vision_local", false)
+        set(v) = sp.edit().putBoolean("vision_local", v).apply()
+    var visionLocalModel: String
+        get() = sp.getString("vision_local_model", "") ?: ""
+        set(v) = sp.edit().putString("vision_local_model", v.trim()).apply()
+    /** Confirm before creating an alarm (default ON; user can turn it off). */
+    var confirmAlarm: Boolean
+        get() = sp.getBoolean("confirm_alarm", true)
+        set(v) = sp.edit().putBoolean("confirm_alarm", v).apply()
+
     var sensitivePackages: Set<String>
         get() = sp.getStringSet(KEY_SENSITIVE_PKGS, DEFAULT_SENSITIVE) ?: DEFAULT_SENSITIVE
         set(v) = sp.edit().putStringSet(KEY_SENSITIVE_PKGS, v).apply()

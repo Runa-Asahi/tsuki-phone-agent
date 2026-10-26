@@ -153,7 +153,8 @@ class AgentLoop(
             }
             "alarm" -> {
                 val h = intent.hour!!; val m = intent.minute ?: 0
-                // Alarms are harmless and reversible: no confirmation prompt (ConfirmPolicy covers send/call/pay/order/uninstall).
+                if (prefs.confirmAlarm && !onConfirm("设置闹钟确认\n时间：%02d:%02d\n由系统时钟创建。（可在设置里关闭此确认）".format(h, m)))
+                    return Result(false, 0, "用户取消设置闹钟")
                 if (a11y.setAlarm(h, m, "Phone Agent")) return Result(true, 1, "已设置 %02d:%02d 的闹钟（由系统时钟创建）".format(h, m))
                 onLog("时钟 Intent 失败，交给模型"); goal = "打开时钟，新建%02d:%02d的闹钟".format(h, m)
             }
@@ -287,12 +288,25 @@ class AgentLoop(
                 step--; continue
             }
 
+            // Text can't describe this screen well (games/landscape/icons) or we're stuck → use eyes.
+            val hardScreen = sc.w > sc.h || sc.items.size < 8 || steps.looping || steps.recentFailures >= 1
             val vision = router.cloudReady && prefs.allowCloudScreenshot &&
-                com.runasakura.phoneagent.llm.CloudProviders.isVision(prefs.cloudModel)
-            val shot = if (vision || sc.items.size < 3) {
-                onLog("界面文本少于3项，附带截图（仅 VL 模型会使用）")
-                try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
+                com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)
+            val wantSkill = !vision && hardScreen && router.visionSkill != null && !router.skillSidelined
+            val shot = if ((vision && hardScreen) || wantSkill) {
+                try { a11y.screenshotJpegBase64(if (wantSkill) 640 else 1280) } catch (_: Exception) { null }
             } else null
+            if (shot != null && vision) onLog("附带截图给云端模型（${prefs.cloudModel} 支持看图）")
+            var obsNote = diffNote
+            if (wantSkill && shot != null) {
+                onLog("看图技能：本机视觉模型描述屏幕…")
+                router.describeScreen(goal, shot, sc.w, sc.h)?.let { d ->
+                    onLog("视觉描述：" + d.replace('\n', ' ').take(160))
+                    obsNote = listOfNotNull(diffNote, "视觉描述（本机 VL 看截图所得，坐标可直接用于 tap x,y）：\n$d").joinToString("\n")
+                }
+            }
+            val brainShot = if (vision) shot else null
+            if (brainShot != null) obsNote = listOfNotNull(obsNote, "已附当前截图：以截图为准（OCR 可能有错字/漏掉无文字按钮）；tap 坐标按屏幕 ${sc.w}x${sc.h}。").joinToString("\n")
             // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
             if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
                 cloudPlanText = router.cloudPlan(goal, snap.compressedText)?.let { st ->
@@ -316,19 +330,19 @@ class AgentLoop(
             val msgs = if (useFocused) {
                 // system + first user + last assistant turn only
                 history.take(2) + history.drop(2).takeLast(1) +
-                    ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote), shot)
+                    ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote), brainShot)
             } else {
                 // Keep history short for VL: system SHORT + last user observe only
                 listOf(
                     ChatMessage("system", SystemPrompt.SHORT),
                     ChatMessage("user", "目标：$goal" + (cloudPlanText?.takeIf { it.isNotBlank() }?.let { "\n$it" } ?: "")),
-                    ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote), shot)
+                    ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote), brainShot)
                 )
             }
             // Local↔cloud collaboration: simple steps stay local; escalate to cloud on no-progress
             // or after the previous step's invalid/unparseable output.
             val lowConf = sc.items.size < 3  // almost nothing readable (OCR-only alone is not low-confidence)
-            val escalate = escalateNext || steps.stuckCount >= 2 || lowConf || steps.looping || (vision && shot != null)
+            val escalate = escalateNext || steps.stuckCount >= 2 || lowConf || steps.looping || (vision && brainShot != null)
             if (escalate && router.canEscalate) onLog("升级到云端：" + when {
                 escalateNext -> "上一步本机输出无效或低置信（重复同一动作）"
                 lowConf -> "界面文字过少（低置信）"
@@ -338,10 +352,10 @@ class AgentLoop(
             val needEyes = router.visionReady && prefs.allowCloudScreenshot &&
                 (sc.w > sc.h || sc.items.size < 6 || steps.looping || steps.recentFailures >= 2)
             val eyes = if (needEyes) {
-                val img = shot ?: try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
+                val img = brainShot ?: try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
                 img?.let { router.visionPlan(listOf(ChatMessage("system", SystemPrompt.SHORT),
                     ChatMessage("user", "目标：$goal" + (cloudPlanText?.takeIf { it.isNotBlank() }?.let { "\n$it" } ?: "")),
-                    ChatMessage("user", buildObserveMessage(goal, snap, step, diffNote) + "\n已附截图（屏幕 ${sc.w}x${sc.h}，坐标按此）。", it))) }
+                    ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote) + "\n已附截图（屏幕 ${sc.w}x${sc.h}，坐标按此）。", it))) }
             } else null
             if (!needEyes && step == 3 && !router.visionReady && (sc.w > sc.h || sc.items.size < 6)) onLog("💡 " + com.runasakura.phoneagent.llm.CloudProviders.VISION_TIP)
             var resp = eyes ?: planWithTimeout(msgs, forceCloud = escalate && router.canEscalate)

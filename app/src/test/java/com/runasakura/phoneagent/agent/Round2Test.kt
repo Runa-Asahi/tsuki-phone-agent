@@ -38,7 +38,7 @@ class Round2Test {
 
     @Test fun visionModels() {
         assertTrue(CloudProviders.isVision("qwen-vl-max")); assertTrue(CloudProviders.isVision("gpt-4o-mini"))
-        assertFalse(CloudProviders.isVision("deepseek-flash")); assertFalse(CloudProviders.isVision("qwen-plus"))
+        assertFalse(CloudProviders.isVision("qwen-plus"))
     }
 
     @Test fun coordinateTapIsValid() {
