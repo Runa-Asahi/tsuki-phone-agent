@@ -88,4 +88,15 @@
     <string name="shizuku_grant">请求授权</string>
     <string name="shizuku_refresh">刷新状态</string>
     <string name="shizuku_guide">荣耀 / MagicOS：每次重启后 Shizuku 会停止，需要在 Shizuku 应用里通过「无线调试」重新启动（开发者选项 → 无线调试 → 配对后启动）。卸载、清数据、改权限/安全设置、重启、拨号发信等命令始终需要你确认。</string>
+    <string name="keepalive_title">Agent 待命中</string>
+    <string name="keepalive_text">保持无障碍服务常驻；异常关闭时自动恢复</string>
+    <string name="alive_title">后台保活（荣耀/MagicOS）</string>
+    <string name="alive_desc">荣耀系统会在清理后台或应用崩溃后自动关闭无障碍。以下设置可大幅减少被关闭的次数。</string>
+    <string name="alive_self_heal">无障碍被关闭时自动重新开启</string>
+    <string name="alive_keep">常驻通知保活（低优先级）</string>
+    <string name="alive_battery">忽略电池优化</string>
+    <string name="alive_launch">应用启动管理</string>
+    <string name="alive_a11y">无障碍设置</string>
+    <string name="alive_grant">用 Shizuku 授予自愈权限</string>
+    <string name="alive_guide">建议：① 忽略电池优化；② 手机管家 → 应用启动管理 → 本应用改为「手动管理」并打开自启动、关联启动、后台活动；③ 多任务界面下拉本应用卡片「锁定」。自动重开需要一次性授予系统设置写权限（Shizuku 就绪时点上面的按钮），之后即使 Shizuku 未运行、重启后也能自愈。</string>
 </resources>

@@ -295,9 +295,19 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
+    private var healTried = 0L
+
     private fun refreshA11yStatus() {
         val connected = AgentAccessibilityService.require() != null
         val enabled = isA11yEnabled()
+        // Switched off (MagicOS after a kill/crash): try to self-heal at most every 10 s, then re-check.
+        if (!connected && !enabled && System.currentTimeMillis() - healTried > 10_000) {
+            healTried = System.currentTimeMillis()
+            Thread {
+                val r = com.runasakura.phoneagent.a11y.A11ySelfHeal.heal(this, "检测到被关闭")
+                if (r != null) runOnUiThread { android.widget.Toast.makeText(this, r, android.widget.Toast.LENGTH_SHORT).show(); binding.root.postDelayed({ refreshA11yStatus() }, 1500) }
+            }.start()
+        }
         binding.a11yStatus.text = when {
             connected -> "已连接"
             enabled -> "已开启·未连接"

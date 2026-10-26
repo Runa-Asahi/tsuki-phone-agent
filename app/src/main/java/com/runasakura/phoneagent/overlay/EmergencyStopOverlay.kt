@@ -154,7 +154,7 @@ object OverlayPill {
             background = android.graphics.drawable.GradientDrawable().apply { setColor(0xE6111113.toInt()); cornerRadius = 999f * d }
             elevation = 6 * d
         }
-        val dot = View(context).apply { background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFF8B8CF8.toInt()) } }
+        val dot = View(context).apply { background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFF5BD68A.toInt()) } }
         box.addView(dot, LinearLayout.LayoutParams(px(8), px(8)))
         val lbl = TextView(context).apply {
             textSize = 12f; setTextColor(android.graphics.Color.WHITE); maxWidth = px(150); maxLines = 1
@@ -182,7 +182,10 @@ object OverlayPill {
         box.setOnTouchListener { _, e ->
             when (e.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> { startY = e.rawY; startPos = p.y; false }
-                android.view.MotionEvent.ACTION_MOVE -> { p.y = (startPos + (e.rawY - startY)).toInt().coerceAtLeast(0); apply(); true }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    // Clamp to the screen: a fling past the bottom edge would otherwise lose the stop button off-screen.
+                    val maxY = (box.resources.displayMetrics.heightPixels - box.height).coerceAtLeast(0)
+                    p.y = (startPos + (e.rawY - startY)).toInt().coerceIn(0, maxY); apply(); true }
                 else -> false
             }
         }

@@ -37,6 +37,7 @@ object ToolIcon {
             t.startsWith("复制") || t.startsWith("粘贴") || t.contains("剪贴板") -> Kind.COPY
             t.startsWith("看图") || t.startsWith("截屏") -> Kind.LOOK
             t.startsWith("问你") -> Kind.ASK
+            t.startsWith("系统命令") -> Kind.LAUNCH
             else -> Kind.THINK
         }
     }

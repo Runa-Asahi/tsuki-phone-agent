@@ -148,6 +148,7 @@ object ActionText {
         a.startsWith("Done") -> "完成"
         a.startsWith("Fail") -> "无法继续"
         a.startsWith("AskConfirm") -> "请求确认"
+        a.startsWith("Shell") -> "系统命令" + (field(a, "cmd")?.let { " ${it.take(30)}" } ?: "")
         a.startsWith("AskUser") -> "问你：" + (field(a, "question") ?: "")
         a.startsWith("HumanTakeover") -> "交给你处理"
         a.startsWith("Global") -> field(a, "name")?.let { com.runasakura.phoneagent.agent.ActionDesc.GLOBAL_ZH[it] } ?: "系统面板"

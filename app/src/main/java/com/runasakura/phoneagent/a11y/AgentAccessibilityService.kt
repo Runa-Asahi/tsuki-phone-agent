@@ -39,17 +39,26 @@ class AgentAccessibilityService : AccessibilityService() {
     var lastPackage: String = ""
         private set
 
+    // Every framework callback is guarded: an exception escaping here crashes the process, and MagicOS then turns the
+    // service OFF (the user had to re-enable it). Callbacks stay O(1) on the main thread; heavy work is elsewhere.
     override fun onServiceConnected() {
-        super.onServiceConnected()
+        try { super.onServiceConnected() } catch (e: Throwable) { Log.e(TAG, "super.onServiceConnected", e) }
         instance = this
         Log.i(TAG, "AccessibilityService connected")
-        sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, true))
+        try { sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, true)) } catch (e: Throwable) { Log.w(TAG, "broadcast", e) }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
-        event.packageName?.toString()?.let { lastPackage = it }
-        lastEventAt = System.currentTimeMillis()
+        try {
+            if (event == null) return
+            event.packageName?.toString()?.let { lastPackage = it }
+            lastEventAt = System.currentTimeMillis()
+        } catch (e: Throwable) { Log.w(TAG, "onAccessibilityEvent", e) }
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        try { if (instance === this) instance = null } catch (_: Throwable) {}
+        return try { super.onUnbind(intent) } catch (_: Throwable) { false }
     }
 
     @Volatile
@@ -162,13 +171,13 @@ class AgentAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        Log.w(TAG, "AccessibilityService interrupted")
+        try { Log.w(TAG, "AccessibilityService interrupted") } catch (_: Throwable) {}
     }
 
     override fun onDestroy() {
         if (instance === this) instance = null
-        sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, false))
-        super.onDestroy()
+        try { sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, false)) } catch (_: Throwable) {}
+        try { super.onDestroy() } catch (e: Throwable) { Log.w(TAG, "onDestroy", e) }
     }
 
     fun isReady(): Boolean = true

@@ -28,6 +28,24 @@
         </com.google.android.material.card.MaterialCardView>
         <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/alive_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/alive_desc" />
+            <TextView android:id="@+id/aliveStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_field" android:padding="12dp" android:textSize="13sp" android:lineSpacingMultiplier="1.2" android:textColor="@color/text_primary" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/selfHeal" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/alive_self_heal" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/keepAlive" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/alive_keep" />
+            <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none" android:layout_marginTop="4dp">
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnBattery" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_battery" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLaunchMgr" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_launch" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnA11ySettings" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_a11y" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnGrantSecure" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_grant" />
+            </LinearLayout>
+            </HorizontalScrollView>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="12sp" android:lineSpacingMultiplier="1.2" android:textColor="@color/text_tertiary" android:text="@string/alive_guide" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
             <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_1" />
             <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_2" />
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="@string/ui_3" />

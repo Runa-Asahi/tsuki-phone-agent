@@ -42,6 +42,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.cloudThinking.isChecked = prefs.cloudThinking
         binding.modelCheckpoint.isChecked = prefs.modelCheckpoint
         setupShizuku()
+        setupKeepAlive()
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
@@ -168,7 +169,57 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnShizukuGrant.isEnabled = st != com.runasakura.phoneagent.shell.ShizukuStatus.READY
     }
 
-    override fun onResume() { super.onResume(); if (::binding.isInitialized) refreshShizuku() }
+    override fun onResume() { super.onResume(); if (::binding.isInitialized) { refreshShizuku(); refreshAlive() } }
+
+    private fun setupKeepAlive() {
+        val heal = com.runasakura.phoneagent.a11y.A11ySelfHeal
+        binding.selfHeal.isChecked = heal.isOn(this)
+        binding.selfHeal.setOnCheckedChangeListener { _, on -> heal.setOn(this, on) }
+        binding.keepAlive.isChecked = com.runasakura.phoneagent.service.KeepAliveService.isOn(this)
+        binding.keepAlive.setOnCheckedChangeListener { _, on -> com.runasakura.phoneagent.service.KeepAliveService.setOn(this, on) }
+        binding.btnBattery.setOnClickListener {
+            val pm = getSystemService(android.os.PowerManager::class.java)
+            if (pm?.isIgnoringBatteryOptimizations(packageName) == true) Toast.makeText(this, "已忽略电池优化", Toast.LENGTH_SHORT).show()
+            else tryStart(android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:$packageName")),
+                android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+        binding.btnLaunchMgr.setOnClickListener {
+            // The vendor "app launch" manager first (Honor/Huawei system manager), then this app's details page.
+            val vendor = com.runasakura.phoneagent.a11y.KeepAliveIntents.launchManagerCandidates().map { (p, c) -> android.content.Intent().setClassName(p, c) }
+            tryStart(*(vendor + android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName"))).toTypedArray())
+        }
+        binding.btnA11ySettings.setOnClickListener { tryStart(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        binding.btnGrantSecure.setOnClickListener {
+            Thread {
+                val ok = heal.grantSecurePermViaShizuku(this)
+                runOnUiThread {
+                    Toast.makeText(this, if (ok) "已授予：之后无障碍被关闭会自动重新开启" else "需要 Shizuku 已就绪并已授权本应用", Toast.LENGTH_LONG).show()
+                    refreshAlive()
+                }
+            }.start()
+        }
+        refreshAlive()
+    }
+
+    private fun tryStart(vararg intents: android.content.Intent) {
+        for (i in intents) try { startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)); return } catch (_: Exception) {}
+        Toast.makeText(this, "无法打开该设置页，请在系统设置里手动查找", Toast.LENGTH_LONG).show()
+    }
+
+    private fun refreshAlive() {
+        val heal = com.runasakura.phoneagent.a11y.A11ySelfHeal
+        val connected = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() != null
+        val st = com.runasakura.phoneagent.a11y.A11yHealth.state(connected, runCatching { heal.listed(this) }.getOrDefault(false), true)
+        val battery = getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) == true
+        binding.aliveStatus.text = listOfNotNull(
+            "无障碍：${st.label}",
+            "电池优化：" + if (battery) "已忽略 ✓" else "受限制（建议忽略）",
+            "自愈权限：" + if (heal.hasSecurePerm(this)) "已授予 ✓" else "未授予（可用 Shizuku 授予）",
+            heal.lastHeal(this)?.let { "最近自愈：$it" },
+            com.runasakura.phoneagent.CrashGuard.last(this)?.let { "最近异常：" + it.substringAfter(' ').take(80) },
+        ).joinToString("\n")
+        binding.btnGrantSecure.isEnabled = !heal.hasSecurePerm(this)
+    }
 
     override fun onDestroy() {
         try { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(shizukuListener) } catch (_: Throwable) {}
