@@ -82,4 +82,10 @@
     <string name="ui_27">查看 / 清除应用经验</string>
     <string name="ui_28">本机模型（MNN，可选）</string>
     <string name="ui_29">在手机本地跑小模型，离线可用但较慢。</string>
+    <string name="shizuku_title">特权模式（Shizuku，可选）</string>
+    <string name="shizuku_desc">开启后可读取空界面树（如微信）、免弹窗截图、注入按键、执行系统命令。未运行或未授权时自动退回无障碍 + OCR，不影响正常使用。</string>
+    <string name="shizuku_toggle">Shizuku 就绪时优先使用</string>
+    <string name="shizuku_grant">请求授权</string>
+    <string name="shizuku_refresh">刷新状态</string>
+    <string name="shizuku_guide">荣耀 / MagicOS：每次重启后 Shizuku 会停止，需要在 Shizuku 应用里通过「无线调试」重新启动（开发者选项 → 无线调试 → 配对后启动）。卸载、清数据、改权限/安全设置、重启、拨号发信等命令始终需要你确认。</string>
 </resources>

@@ -41,6 +41,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.confirmAlarm.isChecked = prefs.confirmAlarm
         binding.cloudThinking.isChecked = prefs.cloudThinking
         binding.modelCheckpoint.isChecked = prefs.modelCheckpoint
+        setupShizuku()
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
@@ -123,11 +124,55 @@ class SettingsActivity : AppCompatActivity() {
             prefs.confirmAlarm = binding.confirmAlarm.isChecked
             prefs.cloudThinking = binding.cloudThinking.isChecked
             prefs.modelCheckpoint = binding.modelCheckpoint.isChecked
+            com.runasakura.phoneagent.shell.ShizukuBackend.setEnabled(this, binding.useShizuku.isChecked)
             binding.visionKey.text.toString().trim().takeIf { it.isNotEmpty() }?.let { prefs.visionApiKey = it }
             prefs.routeMode = modes[binding.routeMode.selectedItemPosition]
             Toast.makeText(this, R.string.saved, Toast.LENGTH_SHORT).show()
             finish()
         }
+    }
+
+    private val shizukuListener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { _, _ -> runOnUiThread { refreshShizuku() } }
+
+    private fun setupShizuku() {
+        binding.useShizuku.isChecked = com.runasakura.phoneagent.shell.ShizukuBackend.isEnabled(this)
+        binding.btnShizukuRefresh.setOnClickListener { refreshShizuku() }
+        binding.btnShizukuGrant.setOnClickListener {
+            val st = com.runasakura.phoneagent.shell.ShizukuBackend.status(this)
+            when (st) {
+                com.runasakura.phoneagent.shell.ShizukuStatus.READY -> Toast.makeText(this, "已授权", Toast.LENGTH_SHORT).show()
+                com.runasakura.phoneagent.shell.ShizukuStatus.NO_PERMISSION -> if (!com.runasakura.phoneagent.shell.ShizukuBackend.requestPermission())
+                    Toast.makeText(this, "之前选择了拒绝：请在 Shizuku 应用的「已授权应用」里手动允许", Toast.LENGTH_LONG).show()
+                com.runasakura.phoneagent.shell.ShizukuStatus.NOT_RUNNING -> openShizukuApp()
+                com.runasakura.phoneagent.shell.ShizukuStatus.NOT_INSTALLED -> Toast.makeText(this, "请先安装 Shizuku（GitHub RikkaApps/Shizuku 或应用商店）", Toast.LENGTH_LONG).show()
+            }
+        }
+        try { rikka.shizuku.Shizuku.addRequestPermissionResultListener(shizukuListener) } catch (_: Throwable) {}
+        refreshShizuku()
+    }
+
+    private fun openShizukuApp() {
+        packageManager.getLaunchIntentForPackage(com.runasakura.phoneagent.shell.ShizukuBackend.MANAGER_PKG)?.let { startActivity(it) }
+            ?: Toast.makeText(this, "未找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun refreshShizuku() {
+        val st = com.runasakura.phoneagent.shell.ShizukuBackend.status(this)
+        val dot = if (st == com.runasakura.phoneagent.shell.ShizukuStatus.READY) "●  " else "○  "
+        binding.shizukuStatus.text = dot + st.label
+        binding.btnShizukuGrant.text = when (st) {
+            com.runasakura.phoneagent.shell.ShizukuStatus.NOT_RUNNING -> "打开 Shizuku"
+            com.runasakura.phoneagent.shell.ShizukuStatus.READY -> "已授权"
+            else -> getString(R.string.shizuku_grant)
+        }
+        binding.btnShizukuGrant.isEnabled = st != com.runasakura.phoneagent.shell.ShizukuStatus.READY
+    }
+
+    override fun onResume() { super.onResume(); if (::binding.isInitialized) refreshShizuku() }
+
+    override fun onDestroy() {
+        try { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(shizukuListener) } catch (_: Throwable) {}
+        super.onDestroy()
     }
 
     /** Per-app experience written by the model: view, delete one app, or clear all. */

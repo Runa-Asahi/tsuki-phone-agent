@@ -47,7 +47,7 @@ abstract class ShotBase {
         bmp.eraseColor(androidx.core.content.ContextCompat.getColor(act, R.color.bg))
         v.draw(Canvas(bmp))
         val dirs = listOf(File("build/ui-shots"), File("/workspace/deliverables/ui-shots")).filter { it.mkdirs() || it.isDirectory }
-        for (d in dirs) File(d, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        for (d in dirs) File(d, "v3_$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
     /** Fill the settings form like SettingsActivity does (spinners, fields, switches) so the shot shows real content. */
     fun settingsContent(): View {
@@ -66,6 +66,8 @@ abstract class ShotBase {
         inner.findViewById<android.widget.TextView>(R.id.cloudTestResult).text = "✅ 连接正常（deepseek-chat，0.6s）"
         inner.findViewById<android.widget.CompoundButton>(R.id.confirmAlarm).isChecked = true
         inner.findViewById<android.widget.CompoundButton>(R.id.cloudShot).isChecked = true
+        inner.findViewById<android.widget.TextView>(R.id.shizukuStatus).text = "●  " + com.runasakura.phoneagent.shell.ShizukuStatus.READY.label
+        inner.findViewById<android.widget.CompoundButton>(R.id.useShizuku).isChecked = true
         return inner
     }
     private fun renderer() = ChatRenderer(act, {}, {}, {}, {}, animate = false)

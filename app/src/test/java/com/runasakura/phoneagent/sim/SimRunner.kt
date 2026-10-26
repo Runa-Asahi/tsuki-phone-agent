@@ -47,6 +47,8 @@ class Scenario(
     val w: Int = 1080, val h: Int = 2400,
     /** Fault for the n-th step request returning a 200 with this body instead of the policy (malformed output). */
     val garbage: (Int) -> String? = { null },
+    /** Shizuku backend available (a [SimShell] over the world). */
+    val shell: Boolean = false,
 )
 
 class SimRun(val result: AgentLoop.Result, val logs: List<String>, val world: SimWorld, val stepPrompts: List<JSONArray>,
@@ -56,6 +58,7 @@ object SimRunner {
     fun run(sc: Scenario): SimRun {
         val world = SimWorld(sc.apps, sc.w, sc.h).also(sc.setup)
         val phone = SimPhone(world)
+        if (sc.shell) phone.shellImpl = SimShell(world)
         val logs = ArrayList<String>(); val prompts = ArrayList<JSONArray>(); val confirms = ArrayList<String>()
         val calls = HashMap<String, Int>()
         var stepN = 0
@@ -65,7 +68,7 @@ object SimRunner {
             val sys = msgs.getJSONObject(0).optString("content")
             val last = msgs.getJSONObject(msgs.length() - 1).let { m -> m.opt("content").let { c -> if (c is JSONArray) c.getJSONObject(0).optString("text") else c.toString() } }
             val kind = when {
-                sys == SystemPrompt.SHORT -> "step"
+                sys.startsWith(SystemPrompt.SHORT) -> "step"
                 sys.contains("解析成 JSON") -> "intent"
                 sys.contains("规划器") -> "plan"
                 sys.contains("验收员") -> "judge"

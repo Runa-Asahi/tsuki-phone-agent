@@ -744,6 +744,12 @@ class AgentAccessibilityService : AccessibilityService() {
     private val shotExecutor by lazy { java.util.concurrent.Executors.newSingleThreadExecutor() }
 
     fun takeScreenshotBitmap(timeoutMs: Long = 4000): Bitmap? {
+        // Shizuku backend: screencap has no prompt and no 1-per-second a11y screenshot throttle.
+        com.runasakura.phoneagent.shell.ShizukuBackend.shellOrNull(this)?.let { sh ->
+            com.runasakura.phoneagent.shell.ShellOps.screencap(sh)?.let { png ->
+                try { android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size)?.let { return it } } catch (_: Throwable) {}
+            }
+        }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
         val latch = CountDownLatch(1)
         val ref = AtomicReference<Bitmap?>()

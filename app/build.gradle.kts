@@ -68,6 +68,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("org.json:json:20240303")
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     // Bundled (offline, no GMS) Chinese OCR for apps that hide their accessibility tree (e.g. WeChat)
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")

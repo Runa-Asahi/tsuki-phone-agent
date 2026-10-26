@@ -118,7 +118,7 @@ class ChatRenderer(
 
     private fun userBubble(u: ChatSession.Item.User) = text(u.text, 15f, R.color.user_text).apply {
         background = GradientDrawable().apply {
-            setColor(color(R.color.user_bubble)); val r = dp(20).toFloat(); val s = dp(6).toFloat()
+            setColor(color(R.color.user_bubble)); val r = dp(22).toFloat(); val s = dp(8).toFloat()
             cornerRadii = floatArrayOf(r, r, r, r, s, s, r, r)
         }
         setPadding(dp(16), dp(10), dp(16), dp(10)); maxWidth = (ctx.resources.displayMetrics.widthPixels * 0.78).toInt()

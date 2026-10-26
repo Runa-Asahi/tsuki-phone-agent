@@ -38,6 +38,8 @@ sealed class AgentAction {
     data class HumanTakeover(val reason: String) : AgentAction()
     /** The goal is ambiguous / missing information only the user has: stop and ask instead of guessing. */
     data class AskUser(val question: String) : AgentAction()
+    /** Privileged system command through the optional Shizuku backend (validated argv; see ShellCommand). */
+    data class Shell(val cmd: String) : AgentAction()
 }
 
 data class PlanStep(

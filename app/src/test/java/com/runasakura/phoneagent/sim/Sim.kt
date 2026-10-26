@@ -78,6 +78,8 @@ class SimWorld(val apps: List<SimApp>, val w: Int = 1080, val h: Int = 2400) {
 }
 
 class SimPhone(val world: SimWorld) : Phone {
+    var shellImpl: com.runasakura.phoneagent.shell.PrivilegedShell? = null
+    override fun shell() = shellImpl?.takeIf { world.flags["shizukuDead"] != true }
     var installedOverride: List<AppResolver.AppMatch>? = null
     val settingsActionWorks = false
     override fun isCurrent() = true
@@ -132,8 +134,8 @@ class SimPhone(val world: SimWorld) : Phone {
     val dev = object : Device {
         override suspend fun screen(): Screen {
         world.reads++; (world.flags["onRead"] as? (SimWorld.() -> Unit))?.invoke(world)
-        val items = world.items(); this@SimPhone.lastItems = items
-        return Screen(this@SimPhone.foregroundPackage(), world.w, world.h, items, world.source, if (world.focused != null) world.h - 900 else null, world.focused != null)
+        val items = if (world.flags["hiddenTree"] == true && world.fg != world.launcher) emptyList() else world.items(); this@SimPhone.lastItems = items
+        return Screen(this@SimPhone.foregroundPackage(), world.w, world.h, items, if (items.isEmpty()) "none" else world.source, if (world.focused != null) world.h - 900 else null, world.focused != null)
         }
         override suspend fun tap(item: ScreenItem) = world.tapAt(item.cx, item.cy)
         override suspend fun tapXY(x: Int, y: Int) = world.tapAt(x, y)
@@ -154,4 +156,38 @@ class SimPhone(val world: SimWorld) : Phone {
 
         override fun foregroundPackage() = this@SimPhone.foregroundPackage()
     }
+}
+
+/** Fake Shizuku shell over the simulated world: uiautomator dump, settings/svc, am/pm, keyevents. */
+class SimShell(val world: SimWorld) : com.runasakura.phoneagent.shell.PrivilegedShell {
+    val commands = ArrayList<String>()
+    private fun ok(s: String = "") = com.runasakura.phoneagent.shell.ShellResult(0, s.toByteArray())
+    private fun esc(s: String) = s.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;")
+    fun xml(): String = buildString {
+        append("<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation=\"0\">")
+        append("<node index=\"0\" text=\"\" class=\"android.widget.FrameLayout\" package=\"${world.fg}\" clickable=\"false\" bounds=\"[0,0][${world.w},${world.h}]\">")
+        world.current().els(world).forEach { e ->
+            val label = if (e.edit) world.fields[e.label]?.takeIf { it.isNotBlank() } ?: e.label else e.label
+            append("<node index=\"1\" text=\"${esc(label)}\" class=\"${if (e.edit) "android.widget.EditText" else "android.widget.TextView"}\" package=\"${world.fg}\" " +
+                "clickable=\"${e.onTap != null}\" bounds=\"[${e.x - e.w / 2},${e.y - e.h / 2}][${e.x + e.w / 2},${e.y + e.h / 2}]\" />")
+        }
+        append("</node></hierarchy>")
+    }
+    override fun exec(argv: List<String>, timeoutMs: Long): com.runasakura.phoneagent.shell.ShellResult {
+        val c = argv.joinToString(" "); commands += c; world.log += "sh:$c"
+        return when {
+            argv[0] == "uiautomator" -> ok("UI hierchary dumped to: ${argv.last()}")
+            argv[0] == "cat" -> ok(xml())
+            c.startsWith("svc wifi ") -> { world.flags["wifi"] = argv[2] == "enable"; ok() }
+            c.startsWith("cmd wifi set-wifi-enabled") -> { world.flags["wifi"] = argv[3] == "enabled"; ok() }
+            c == "settings get global wifi_on" -> ok(if (world.flags["wifi"] == false) "0" else "1")
+            argv[0] == "am" && argv[1] == "force-stop" -> { if (world.fg == argv[2]) world.crash(); world.flags["stopped:${argv[2]}"] = true; ok() }
+            argv[0] == "pm" && argv[1] == "uninstall" -> { world.flags["uninstalled"] = argv.last(); ok("Success") }
+            argv[0] == "pm" && argv[1] == "list" -> ok(world.apps.joinToString("\n") { "package:${it.pkg}" })
+            argv[0] == "dumpsys" -> ok((world.flags["dumpsys"] as? String).orEmpty())
+            argv[0] == "input" -> { world.log += "key:${argv.last()}"; ok() }
+            else -> com.runasakura.phoneagent.shell.ShellResult(1, ByteArray(0), "unknown")
+        }
+    }
+    override fun readClipboard(): String? = world.clipboard
 }

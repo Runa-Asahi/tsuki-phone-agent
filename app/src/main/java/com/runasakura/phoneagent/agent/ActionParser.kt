@@ -147,6 +147,9 @@ object ActionParser {
                 actionObj.optString("reason").ifBlank { "需要确认" }
             )
             "ask_user", "ask", "clarify", "question" -> AgentAction.AskUser(actionObj.optString("question").ifBlank { actionObj.optString("text") }.ifBlank { actionObj.optString("reason") }.trim())
+            "shell", "adb", "adb_shell", "run_command", "exec" -> AgentAction.Shell(
+                actionObj.optString("cmd").ifBlank { actionObj.optString("command") }.ifBlank { actionObj.optString("text") }.trim())
+            "force_stop", "kill_app", "close_app" -> AgentAction.Shell("am force-stop " + (actionObj.nullableString("package") ?: actionObj.optString("app")).trim())
             "human_takeover" -> AgentAction.HumanTakeover(
                 actionObj.optString("reason").ifBlank { "需要人工接管" }
             )

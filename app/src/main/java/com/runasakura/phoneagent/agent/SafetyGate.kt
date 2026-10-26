@@ -82,6 +82,19 @@ class SafetyGate(private val prefs: com.runasakura.phoneagent.prefs.AgentSetting
                 return if (ConfirmPolicy.isSensitive(action))
                     SafetyResult(SafetyDecision.REQUIRE_CONFIRM, action.reason)
                 else SafetyResult(SafetyDecision.ALLOW, "忽略非敏感 ask_confirm")
+            is AgentAction.Shell -> {
+                val p = com.runasakura.phoneagent.shell.ShellCommand.parse(action.cmd)
+                if (p !is com.runasakura.phoneagent.shell.ShellCommand.Parsed.Ok) return SafetyResult(SafetyDecision.ALLOW)   // rejected at execution, never run
+                com.runasakura.phoneagent.shell.ShellCommand.confirmReason(p.argv)?.let { r ->
+                    return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, r)
+                }
+                return SafetyResult(SafetyDecision.ALLOW)
+            }
+            is AgentAction.Key -> {
+                val code = com.runasakura.phoneagent.shell.ShellCommand.keyCode(action.name)
+                if (action.name !in PhoneTools.KEYS && code != null)
+                    com.runasakura.phoneagent.shell.ShellCommand.keyConfirm(code)?.let { return SafetyResult(SafetyDecision.REQUIRE_CONFIRM, it) }
+            }
             is AgentAction.HumanTakeover ->
                 return SafetyResult(SafetyDecision.BLOCK_HUMAN, action.reason)
             is AgentAction.Tap -> {

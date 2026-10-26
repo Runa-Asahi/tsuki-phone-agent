@@ -85,6 +85,10 @@ class AgentLoop(
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider() } }
             ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
         a11y.resetTaskState()
+        // Optional Shizuku backend: decided per task (user toggle + live status); null = accessibility + OCR only.
+        shellOn = a11y.shell() != null
+        if (shellOn) onLog("特权后端：Shizuku 已就绪（界面树补全/截图/按键/系统命令）")
+        val sysPrompt = SystemPrompt.forBackend(shellOn)
         // ---- Questions about the agent's own history: answer from logs (no screen work) ----
         if (SessionAnswer.aboutHistory(goal) && router.cloudReady) {
             onLog("复盘任务：根据任务历史与日志生成总结")
@@ -101,7 +105,7 @@ class AgentLoop(
             }
         }
         val history = mutableListOf<ChatMessage>()
-        history += ChatMessage("system", SystemPrompt.TEXT)
+        history += ChatMessage("system", sysPrompt)
         val steps = StepHistory().also { stepsRef = it }
         var uselessConfirms = 0
         history += ChatMessage("user", (sessionContext?.let { "（同一会话上文，仅供理解指代：$it）\n" } ?: "") + "用户目标：$goal")
@@ -120,7 +124,7 @@ class AgentLoop(
             }
         }
         if (toggleNote != null) {
-            history.clear(); history += ChatMessage("system", SystemPrompt.FOCUSED); history += ChatMessage("user", toggleNote!!)
+            history.clear(); history += ChatMessage("system", sysPrompt); history += ChatMessage("user", toggleNote!!)
         } else SettingsPages.match(goal)?.let { page ->
             onLog("快路径：直接打开「${page.label}」设置页（只打开，不改任何开关）")
             if (a11y.launchSettingsAction(page.action)) {
@@ -155,7 +159,7 @@ class AgentLoop(
         }
 
         // ---- Deterministic paths (never call the model here) ----
-        val dev = com.runasakura.phoneagent.flow.StopGuardDevice(a11y.device(onLog), isStopped)
+        val dev = com.runasakura.phoneagent.flow.StopGuardDevice(com.runasakura.phoneagent.shell.ShellAugmentedDevice(a11y.device(onLog), { if (shellOn) a11y.shell() else null }, onLog), isStopped)
         // ---- Model-first goal understanding (rules are only the fallback) ----
         val intent = if (toggleNote != null) null else {
             onLog("正在理解任务…")
@@ -253,7 +257,7 @@ class AgentLoop(
                     else left0?.let { (listOf(it) + subs.drop(known.size).map { s -> s.describe() }).joinToString("，") } ?: remaining
                 onLog("交给模型完成剩余目标：$left")
                 history.clear()
-                history += ChatMessage("system", SystemPrompt.FOCUSED)
+                history += ChatMessage("system", sysPrompt)
                 history += ChatMessage("user", "已打开「${match.label}」。剩余目标：$left（总目标：$goal）")
             } else {
                 // No app named: generic gestures/navigation on the current app (通用点击滑动)
@@ -268,7 +272,7 @@ class AgentLoop(
                     if (res != null) return res
                     onLog("确定性执行未完成，剩余交给模型（最后手段）：$left")
                     history.clear()
-                    history += ChatMessage("system", SystemPrompt.FOCUSED)
+                    history += ChatMessage("system", sysPrompt)
                     history += ChatMessage("user", "剩余目标：$left")
                 }
             }
@@ -415,7 +419,7 @@ class AgentLoop(
                 (sc.w > sc.h || sc.items.size < 6 || steps.looping || steps.recentFailures >= 2)
             val eyes = if (needEyes) {
                 val img = brainShot ?: try { a11y.screenshotJpegBase64() } catch (_: Exception) { null }
-                img?.let { router.visionPlan(listOf(ChatMessage("system", SystemPrompt.SHORT),
+                img?.let { router.visionPlan(listOf(ChatMessage("system", sysPrompt),
                     ChatMessage("user", "目标：$goal" + (cloudPlanText?.takeIf { it.isNotBlank() }?.let { "\n$it" } ?: "")),
                     ChatMessage("user", buildObserveMessage(goal, snap, step, obsNote) + "\n已附截图（屏幕 ${sc.w}x${sc.h}，坐标按此）。", it))) }
             } else null
@@ -464,7 +468,7 @@ class AgentLoop(
                 onLog("动作无效：$err —— 附错误说明重问（$tries/2）")
                 resp = planWithTimeout(
                     listOf(
-                        ChatMessage("system", SystemPrompt.SHORT),
+                        ChatMessage("system", sysPrompt),
                         ChatMessage(
                             "user",
                             "${Injection.wrap(snap.compressedText)}\n目标：$goal\n上次输出错误：$err\n" +
@@ -779,7 +783,7 @@ class AgentLoop(
 
     private fun validationError(plan: PlanStep, raw: String, sc: com.runasakura.phoneagent.flow.Screen): String? {
         if (ActionParser.hasThinkWithoutJson(raw)) return "只有思考没有 JSON"
-        ActionValidator.validate(plan.action, sc.items, sc.w, sc.h, approved = approvedAtStep == stepNow - 1)?.let { return it }
+        ActionValidator.validate(plan.action, sc.items, sc.w, sc.h, approved = approvedAtStep == stepNow - 1, shell = shellOn)?.let { return it }
         val a = plan.action
         val label = targetLabel(a, sc)
         guard.check(a, label)?.let { return it }
@@ -858,6 +862,9 @@ class AgentLoop(
         val d = SemanticDiff.compare(prev, sc.items, exact)
         val stateNote = SemanticDiff.stateChange(imeBefore, sc.imeTop, focusBefore, sc.inputFocused)
         if (!d.meaningful && stateNote != null) return "上一步：${le.third}$exp → 文字没变，但$stateNote"
+        // Actions whose effect is not on screen (system command, clipboard, media/volume keys, wait) are judged by
+        // their tool result, not by a screen diff — never mark them "ineffective" or ban them as a loop.
+        if (!d.meaningful && isOffScreen(le.first)) return "上一步：${le.third}$exp → 界面未变（此操作不改变界面，以工具结果为准）"
         return if (!d.meaningful) {
             guard.record(le.first, le.second, le.third); lastNoEffect = true
             "上一步：${le.third}$exp → 界面没有实质变化${if (exact) "" else "（只是 OCR 抖动）"}= 这个动作无效，不要再做"
@@ -1109,10 +1116,16 @@ class AgentLoop(
                     c != null
                 }
                 is AgentAction.Key -> when (action.name) {
-                    "enter" -> a11y.imeEnter().also { if (!it) lastExecError = "当前没有获得焦点的输入框，无法回车" }
+                    "enter" -> a11y.imeEnter() || (a11y.shell()?.let { com.runasakura.phoneagent.shell.ShellOps.key(it, "KEYCODE_ENTER") } ?: false)
+                        .also { if (!it) lastExecError = "当前没有获得焦点的输入框，无法回车" }
                     in PhoneTools.KEYS -> a11y.volume(action.name)
-                    else -> { lastExecError = "不支持的按键：${action.name}"; false }
+                    else -> {
+                        val sh = a11y.shell(); val code = com.runasakura.phoneagent.shell.ShellCommand.keyCode(action.name)
+                        if (sh == null || code == null) { lastExecError = "不支持的按键：${action.name}（KEYCODE 按键需 Shizuku）"; false }
+                        else com.runasakura.phoneagent.shell.ShellOps.key(sh, code).also { if (!it) lastExecError = "按键 $code 注入失败" }
+                    }
                 }
+                is AgentAction.Shell -> runShell(a11y, action)
                 is AgentAction.ScrollFind -> scrollFind(a11y, action)
                 is AgentAction.Wait -> {
                     // Sliced so 急停 is honoured within 50 ms even during a 10 s wait.
@@ -1133,6 +1146,32 @@ class AgentLoop(
         val end = System.currentTimeMillis() + ms
         while (System.currentTimeMillis() < end) { if (isStopped()) return false; Thread.sleep(minOf(50L, end - System.currentTimeMillis()).coerceAtLeast(1)) }
         return !isStopped()
+    }
+
+    private fun isOffScreen(a: AgentAction): Boolean = when (a) {
+        is AgentAction.Shell -> com.runasakura.phoneagent.shell.ShellCommand.parse(a.cmd).let { p -> p is com.runasakura.phoneagent.shell.ShellCommand.Parsed.Ok && p.argv.first() != "am" && p.argv.first() != "monkey" }
+        is AgentAction.SetClipboard, AgentAction.ReadClipboard, is AgentAction.Copy, is AgentAction.Wait -> true
+        is AgentAction.Key -> a.name != "enter"
+        else -> false
+    }
+
+    /** Shizuku backend active for this task (decided at task start; each use re-checks the live binder). */
+    private var shellOn = false
+
+    /**
+     * shell{cmd}: validated argv through the privileged backend. Output is DATA for the model (wrapped like screen
+     * content, never followed as instructions); state-changing commands were already confirmed by the SafetyGate.
+     */
+    private fun runShell(a11y: com.runasakura.phoneagent.a11y.Phone, action: AgentAction.Shell): Boolean {
+        val sh = a11y.shell() ?: run { lastExecError = "Shizuku 不可用（未运行/未授权/已关闭），请改用界面操作"; return false }
+        val p = com.runasakura.phoneagent.shell.ShellCommand.parse(action.cmd)
+        if (p !is com.runasakura.phoneagent.shell.ShellCommand.Parsed.Ok) { lastExecError = (p as com.runasakura.phoneagent.shell.ShellCommand.Parsed.Bad).why; return false }
+        val r = sh.exec(p.argv, 8000)
+        val out = (r.text.trim().ifBlank { r.err.trim() }).let { com.runasakura.phoneagent.shell.ShellOutput.compact(it) }
+        toolNote = "命令 `${p.argv.joinToString(" ").take(80)}` 退出码 ${r.code}" + if (out.isBlank()) "（无输出）" else "，输出：\n" + Injection.wrap(out)
+        if (!r.ok) lastExecError = "命令失败（退出码 ${r.code}）：${out.take(120)}"
+        if (r.ok && p.argv.firstOrNull() == "am" && p.argv.getOrNull(1) in setOf("start", "start-activity")) Thread.sleep(400)
+        return r.ok
     }
 
     /** Tool output fed into the next observation (clipboard text, scroll-find result). */

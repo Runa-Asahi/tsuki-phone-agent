@@ -11,7 +11,7 @@ object ActionValidator {
     )
 
     /** [approved] = the user just approved an ask_confirm for this commit: the next sensitive tap may proceed. */
-    fun validate(a: AgentAction, items: List<ScreenItem>, w: Int, h: Int, approved: Boolean = false): String? = when (a) {
+    fun validate(a: AgentAction, items: List<ScreenItem>, w: Int, h: Int, approved: Boolean = false, shell: Boolean = false): String? = when (a) {
         is AgentAction.Tap -> {
             val label = when {
                 !a.nodeId.isNullOrBlank() -> items.firstOrNull { it.id == a.nodeId }?.label
@@ -57,7 +57,16 @@ object ActionValidator {
         is AgentAction.Copy -> if (items.none { it.id == a.nodeId }) "copy 的 node_id ${a.nodeId} 不存在" else null
         is AgentAction.Paste -> if (!a.nodeId.isNullOrBlank() && items.none { it.id == a.nodeId }) "node_id ${a.nodeId} 不存在" else null
         is AgentAction.SetClipboard -> if (a.text.isBlank()) "set_clipboard 需要 text" else null
-        is AgentAction.Key -> if (a.name !in PhoneTools.KEYS) "不支持的按键「${a.name}」，可用：${PhoneTools.KEYS.joinToString("/")}" else null
+        is AgentAction.Key -> when {
+            a.name in PhoneTools.KEYS -> null
+            shell && com.runasakura.phoneagent.shell.ShellCommand.keyCode(a.name) != null -> null
+            shell -> "按键名无效「${a.name}」：用 enter/volume_up… 或 Android KEYCODE 名（如 MEDIA_PLAY_PAUSE）"
+            else -> "不支持的按键「${a.name}」，可用：${PhoneTools.KEYS.joinToString("/")}（KEYCODE 按键需开启 Shizuku）"
+        }
+        is AgentAction.Shell -> when {
+            !shell -> "shell 需要 Shizuku：未开启或未授权，请改用界面操作（tap/intent/open_url）"
+            else -> (com.runasakura.phoneagent.shell.ShellCommand.parse(a.cmd) as? com.runasakura.phoneagent.shell.ShellCommand.Parsed.Bad)?.why
+        }
         is AgentAction.ScrollFind -> when {
             a.text.isBlank() -> "scroll_find 需要 text"
             a.direction !in PhoneTools.DIRECTIONS -> "direction 只能是 ${PhoneTools.DIRECTIONS.joinToString("/")}"

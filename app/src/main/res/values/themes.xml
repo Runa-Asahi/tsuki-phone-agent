@@ -43,15 +43,15 @@
         <item name="contentPadding">12dp</item>
     </style>
     <!-- Settings: one outlined card per section -->
-    <style name="SectionCard" parent="Widget.Material3.CardView.Outlined">
+    <style name="SectionCard" parent="Widget.Material3.CardView.Filled">
         <item name="cardBackgroundColor">@color/card_bg</item>
-        <item name="strokeColor">@color/outline</item>
-        <item name="cardCornerRadius">18dp</item>
+        <item name="strokeWidth">0dp</item>
+        <item name="cardCornerRadius">22dp</item>
         <item name="contentPadding">16dp</item>
         <item name="android:layout_marginTop">12dp</item>
     </style>
     <style name="SectionTitle">
-        <item name="android:textSize">16sp</item><item name="android:textStyle">bold</item>
+        <item name="android:textSize">17sp</item><item name="android:fontFamily">sans-serif-medium</item><item name="android:letterSpacing">-0.01</item>
         <item name="android:textColor">@color/text_primary</item>
     </style>
     <style name="SectionDesc">
@@ -63,7 +63,10 @@
         <item name="android:layout_marginTop">8dp</item>
         <item name="boxCornerRadiusTopStart">12dp</item><item name="boxCornerRadiusTopEnd">12dp</item>
         <item name="boxCornerRadiusBottomStart">12dp</item><item name="boxCornerRadiusBottomEnd">12dp</item>
-        <item name="boxStrokeColor">@color/primary</item>
+        <item name="boxStrokeColor">@color/text_secondary</item>
+        <item name="boxStrokeWidth">0dp</item>
+        <item name="boxBackgroundColor">@color/surface_variant</item>
+        <item name="hintTextColor">@color/text_secondary</item>
     </style>
     <style name="SwitchRow" parent="Widget.Material3.CompoundButton.MaterialSwitch">
         <item name="android:layout_marginTop">6dp</item>

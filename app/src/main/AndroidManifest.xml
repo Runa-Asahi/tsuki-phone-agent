@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <queries>
+        <package android:name="moe.shizuku.privileged.api" />
         <package android:name="com.alibaba.mnnllm.android.release" />
         <package android:name="com.alibaba.mnnllm.android" />
         <intent>
@@ -77,5 +78,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="phone_agent_loop" />
         </service>
+        <!-- Optional privileged backend: Shizuku hands its binder to us through this provider. -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>

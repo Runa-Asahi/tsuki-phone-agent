@@ -26,6 +26,7 @@ object ActionDesc {
         is AgentAction.Paste -> "粘贴"
         is AgentAction.Key -> KEY_ZH[a.name] ?: "按键 ${a.name}"
         is AgentAction.ScrollFind -> "滚动查找「${a.text.take(16)}」"
+        is AgentAction.Shell -> "系统命令 ${a.cmd.take(48)}"
         else -> a.toString().take(40)
     }
 }
