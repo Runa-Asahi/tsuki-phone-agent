@@ -315,6 +315,8 @@ class AgentLoop(
 
         var step = 0
         var refocus = 0
+        // Per-task state: a reused loop must not inherit screen signatures or a pending assist from the last task.
+        recentSigs.clear(); assistJob?.cancel(); assistJob = null
         var max = prefs.maxSteps
         val base = max
         // Adaptive budget: when the cap is reached while the task is visibly progressing (new screens, no loop, no
@@ -446,6 +448,9 @@ class AgentLoop(
             val sigNow = recentSigs.lastOrNull()
             // When the brain already sees the screenshot, local vision only pre-summarises sparse web pages (no duplicate work).
             val assistWanted = router.visionSkill != null && !router.localSidelined && ((!vision && hardScreen) || sc.source == "tree+ocr")
+            // The screen moved on while the assist was still decoding: its answer would be discarded, so stop it now
+            // (native decoding stops within a token) and describe the current screen instead.
+            assistJob?.let { j -> if (!j.isCompleted && assistSig != sigNow) { j.cancel(); assistJob = null } }
             if (assistWanted && assistJob == null) {
                 val ashot = if (wantSkill) shot else try { a11y.screenshotJpegBase64(640) } catch (_: Exception) { null }
                 if (ashot != null) { assistSig = sigNow; onLog("本机看图：后台描述屏幕（不阻塞本步）")
