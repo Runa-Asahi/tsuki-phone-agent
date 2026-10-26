@@ -143,7 +143,7 @@ object TsukiOrb {
             c.drawCircle(cx, cy, r, paint); paint.shader = null
             paint.style = Paint.Style.STROKE; paint.strokeWidth = d; paint.color = k.outline; c.drawCircle(cx, cy, r, paint); paint.style = Paint.Style.FILL
             paint.color = k.accent
-            if (k.fullMoon) c.drawCircle(cx, cy, r * 0.5f, paint) else MoonSkyView.crescent(c, cx - r * 0.08f, cy, r * 0.55f, paint)
+            if (k.fullMoon) MoonSkyView.fullMoon(c, cx, cy, r * 0.56f, paint, 0.5f + 0.5f * pulse) else MoonSkyView.crescent(c, cx - r * 0.08f, cy, r * 0.55f, paint)
             // progress arc around the disk
             paint.style = Paint.Style.STROKE; paint.strokeWidth = 3 * d; paint.strokeCap = Paint.Cap.ROUND
             arc.set(cx - r - 3 * d, cy - r - 3 * d, cx + r + 3 * d, cy + r + 3 * d)

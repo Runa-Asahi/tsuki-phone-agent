@@ -141,6 +141,10 @@ class UiScreenshotTest : ShotBase() {
         bg.addView(pill, FrameLayout.LayoutParams(-2, -2).apply { topMargin = 300; leftMargin = 0 })
         save("06_overlay_pill", bg, h = 900)
     }
+    @Test fun pureMoonSky() {
+        val v = MoonSkyView(act).apply { animateMotes = false; colors = TsukiTheme.colors(TsukiTheme.Palette.PURE_MOON, false) }
+        save("08_pure_moon_sky", v, h = 700)
+    }
     @Test fun overlayOrb() {
         val bg = FrameLayout(act).apply { setBackgroundColor(0xFFE9EEF5.toInt()) }
         val o = com.runasakura.phoneagent.overlay.TsukiOrb.build(act, {}, { true }, {})

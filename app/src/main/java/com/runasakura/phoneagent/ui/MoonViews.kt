@@ -42,10 +42,8 @@ class MoonSkyView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         // halo + crescent, top right
         val cx = w * 0.84f; val cy = h * 0.09f; val r = w * 0.09f
         paint.shader = RadialGradient(cx, cy, r * 3.2f, k.glow, 0x00000000, Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r * 3.2f, paint); paint.shader = null
-        if (k.fullMoon) {   // 纯月: a pearl full moon with a soft rim
-            paint.color = 0xFFFFFFFF.toInt(); c.drawCircle(cx, cy, r, paint)
-            paint.style = Paint.Style.STROKE; paint.strokeWidth = r * 0.08f; paint.color = k.star; c.drawCircle(cx, cy, r, paint); paint.style = Paint.Style.FILL
-        } else { paint.color = k.star and 0x00FFFFFF or (0x55 shl 24); crescent(c, cx, cy, r, paint) }
+        if (k.fullMoon) fullMoon(c, cx, cy, r * 0.86f, paint, if (animateMotes) 0.5f + 0.5f * sin(t * 0.6f) else 0.5f)   // 纯月
+        else { paint.color = k.star and 0x00FFFFFF or (0x55 shl 24); crescent(c, cx, cy, r, paint) }
         // stars twinkle slowly (alpha only)
         for (s in stars) {
             val a = (0.35f + 0.65f * (0.5f + 0.5f * sin(t * 0.8f + s[3] * 6.28f))).coerceIn(0f, 1f)
@@ -83,6 +81,40 @@ class MoonSkyView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     }
 
     companion object {
+        /**
+         * 纯月's moon: a pearl disc lit from the upper left (radial gradient with limb darkening), a few feathered
+         * maria in cool silver-blue at very low alpha, an inner shadow toward the lower right for volume, a thin
+         * rim light and a two-layer halo that breathes slowly. Colours are fixed moonlight tones (not palette-tinted)
+         * so it reads as the moon on the pearl sky; [breathe] 0..1 only modulates the halo.
+         */
+        fun fullMoon(c: Canvas, cx: Float, cy: Float, r: Float, p: Paint, breathe: Float = 0.5f) {
+            p.style = Paint.Style.FILL
+            // halo: wide soft bloom + tighter corona
+            p.shader = RadialGradient(cx, cy, r * 3.4f, intArrayOf((0x30 + (0x18 * breathe).toInt() shl 24) or 0xC8D6EE, 0x14C8D6EE, 0x00C8D6EE),
+                floatArrayOf(0f, 0.45f, 1f), Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r * 3.4f, p)
+            p.shader = RadialGradient(cx, cy, r * 1.45f, intArrayOf(0x66E6EEFA, 0x00E6EEFA), floatArrayOf(0.62f, 1f), Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r * 1.45f, p)
+            // disc: highlight upper-left → pearl → cool limb
+            p.shader = RadialGradient(cx - r * 0.35f, cy - r * 0.38f, r * 1.55f, intArrayOf(0xFFFFFFFF.toInt(), 0xFFF3F6FB.toInt(), 0xFFD9E1EE.toInt(), 0xFFC3CEDF.toInt()),
+                floatArrayOf(0f, 0.38f, 0.78f, 1f), Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r, p)
+            // maria / craters, feathered, clipped to the disc
+            c.save(); val clip = Path().apply { addCircle(cx, cy, r, Path.Direction.CW) }; c.clipPath(clip)
+            for (m in MARIA) {
+                val mx = cx + m[0] * r; val my = cy + m[1] * r; val mr = m[2] * r
+                p.shader = RadialGradient(mx, my, mr, intArrayOf(((m[3] * 255).toInt() shl 24) or 0x8C9BB8, 0x008C9BB8), null, Shader.TileMode.CLAMP)
+                c.drawCircle(mx, my, mr, p)
+            }
+            // inner shadow toward the lower right gives the sphere volume
+            p.shader = RadialGradient(cx - r * 0.45f, cy - r * 0.45f, r * 2.1f, intArrayOf(0x00000000, 0x00000000, 0x2A5A6A88),
+                floatArrayOf(0f, 0.62f, 1f), Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r, p)
+            c.restore(); p.shader = null
+            // rim light
+            p.style = Paint.Style.STROKE; p.strokeWidth = maxOf(1f, r * 0.035f); p.color = 0x4DA9BCD9; c.drawCircle(cx, cy, r - p.strokeWidth / 2, p)
+            p.style = Paint.Style.FILL
+        }
+        /** x, y (fraction of r from centre), radius (fraction of r), alpha. */
+        private val MARIA = listOf(floatArrayOf(-0.28f, -0.18f, 0.30f, 0.16f), floatArrayOf(0.18f, -0.32f, 0.22f, 0.12f), floatArrayOf(0.30f, 0.12f, 0.26f, 0.14f),
+            floatArrayOf(-0.10f, 0.36f, 0.18f, 0.10f), floatArrayOf(-0.46f, 0.20f, 0.12f, 0.09f), floatArrayOf(0.05f, 0.02f, 0.08f, 0.12f))
+
         /** A crescent: a circle with an offset circle cut out. */
         fun crescent(c: Canvas, cx: Float, cy: Float, r: Float, p: Paint, cut: Float = 0.42f) {
             val path = Path().apply { addCircle(cx, cy, r, Path.Direction.CW) }
