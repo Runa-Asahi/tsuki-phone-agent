@@ -140,7 +140,7 @@ class A11yDevice(
             log("OCR 缓存命中（界面未变）")
             return ocrCache
         }
-        val (w, h) = s.screenSize()
+        var (w, h) = s.screenSize()
         val wait = 340 - (System.currentTimeMillis() - lastShotAt)
         if (wait > 0) delay(wait)
         coroutineContext.ensureActive()
@@ -149,6 +149,8 @@ class A11yDevice(
         if (bmp == null) { delay(450); bmp = withContext(Dispatchers.IO) { s.takeScreenshotBitmap() } }
         lastShotAt = System.currentTimeMillis()
         if (bmp == null) { log("截图失败（系统拒绝或频率限制）"); return null }
+        // Landscape apps (games): the screenshot is rotated; make screen coords follow the frame's orientation.
+        if ((bmp.width > bmp.height) != (w > h)) { val t = w; w = h; h = t }
         coroutineContext.ensureActive()
         val (top, bottom) = cropBands(bmp.height)
         val crop = try { android.graphics.Bitmap.createBitmap(bmp, 0, top, bmp.width, bottom - top) } catch (_: Exception) { bmp }
@@ -226,7 +228,8 @@ class A11yDevice(
             detail[band] = ocrRegion(bmp, band.first, band.second) ?: emptyList()
         }
         val merged = com.runasakura.phoneagent.ocr.OcrBands.merge(shotLines, detail)
-        val (w, h) = s.screenSize()
+        var (w, h) = s.screenSize()
+        if ((bmp.width > bmp.height) != (w > h)) { val t = w; w = h; h = t }
         val sx = w.toFloat() / bmp.width; val sy = h.toFloat() / bmp.height
         val scaled = merged.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * sx).toInt(), (it.t * sy).toInt(), (it.r * sx).toInt(), (it.b * sy).toInt()) }
         val ignore = setOf(s.getString(com.runasakura.phoneagent.R.string.fab_stop))

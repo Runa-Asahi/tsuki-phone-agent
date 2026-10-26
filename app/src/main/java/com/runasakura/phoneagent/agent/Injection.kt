@@ -31,6 +31,12 @@ object Injection {
     fun typeAllowed(text: String, goal: String): Boolean {
         val t = key(text)
         if (t.isEmpty()) return true
-        return key(goal).contains(t)
+        if (key(goal).contains(t)) return true
+        // Goals that ask the agent to WRITE something (总结/记录/写/笔记/备忘…) legitimately type model-composed text,
+        // as long as that text itself carries no injection markers. Messages to people still go through ConfirmPolicy.
+        return composeGoal(goal) && detect(text) == null
     }
+
+    private val COMPOSE = Regex("总结|记录|记下|写(一|个|篇|下|入|进|到|成|点)?|笔记|备忘|草稿|起草|编写|整理|摘要|翻译|润色|日记|计划|清单")
+    fun composeGoal(goal: String) = COMPOSE.containsMatchIn(goal)
 }

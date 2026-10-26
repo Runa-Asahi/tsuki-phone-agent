@@ -22,8 +22,20 @@ object LayoutHints {
         return (s.w / 8) to y
     }
 
+    /** 3x3 region map so a text-only model can reason about where things are (games/landscape have few labels). */
+    fun regions(s: Screen): String {
+        if (s.items.isEmpty()) return ""
+        val rn = listOf("上", "中", "下"); val cn = listOf("左", "中", "右")
+        val g = s.items.groupBy { (it.cy * 3 / maxOf(1, s.h)).coerceIn(0, 2) to (it.cx * 3 / maxOf(1, s.w)).coerceIn(0, 2) }
+        return "区域：" + g.entries.sortedWith(compareBy({ it.key.first }, { it.key.second })).joinToString("；") { (k, v) ->
+            rn[k.first] + cn[k.second] + "=" + v.take(4).joinToString("、") { it.label.take(8) } }
+    }
+
     fun describe(s: Screen): String = buildString {
-        append("布局：屏${s.w}x${s.h}，无文字的图标/图片可用 tap x,y 坐标；4列网格单元≈${s.w / 4}px 宽。")
+        val land = s.w > s.h
+        append("布局：屏${s.w}x${s.h}${if (land) "（横屏：x 范围 0..${s.w}，y 范围 0..${s.h}）" else ""}，无文字的图标/图片可用 tap x,y 坐标；4列网格单元≈${s.w / 4}px 宽。")
+        append("\n").append(regions(s))
+        if (land) append("\n横屏游戏：主按钮常是无文字或艺术字，OCR 可能读错；「开始/对战/匹配」类按钮通常在右下角，弹窗关闭按钮通常在弹窗右上角。")
         if (isGallery(s)) {
             val (x, y) = firstThumbnail(s)
             append("\n提示：这是相册/图库网格，缩略图没有文字；第一张照片约在 ($x,$y)，打开它用 {\"type\":\"tap\",\"x\":$x,\"y\":$y}。")

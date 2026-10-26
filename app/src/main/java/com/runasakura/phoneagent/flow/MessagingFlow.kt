@@ -365,6 +365,19 @@ class MessagingFlow(
                     d.scroll(true); d.afterAction(1200); s = d.screen()
                 }
                 else -> {
+                    // Lenient: exactly ONE row that contains the name (e.g. 备注「12345678王小明」) or differs by an
+                    // OCR misread → open it; the send/call confirmation shows the full name with ⚠ for the user to check.
+                    val loose = s.items.filter { it.cy > barBottom && !KeyMatch.isAny(it.label, CONTACT_SECTIONS, false) &&
+                        it.label.length <= 24 && (Text.norm(it.label).contains(Text.norm(contact)) ||
+                            com.runasakura.phoneagent.agent.KeyMatchLite.sim(Text.norm(it.label), Text.norm(contact)) >= 0.6) }
+                    if (loose.size == 1) {
+                        val row = loose[0]
+                        log("⚠ 无完全一致项，唯一相近联系人「${row.label}」，确认时请核对")
+                        containsTitle = row.label.trim().trimStart('|', '｜', ' ')
+                        d.tap(row); d.afterAction(2000)
+                        if (SearchPage.strong(d.screen())) return "点击「${row.label}」后仍停在搜索页，未进入聊天"
+                        return null
+                    }
                     val near = s.items.filter { it.cy > barBottom && it.label.contains(contact) }.take(4).joinToString("、") { it.label }
                     return "搜索结果中没有与「$contact」完全一致的联系人" + (if (near.isNotBlank()) "（相近：$near）" else "") + "，为安全起见未点击，请提供准确备注名"
                 }
@@ -454,12 +467,20 @@ class MessagingFlow(
             return Outcome(false, "用户取消通话", cancelled = true)
         }
         d.invalidateObservation()
-        d.tap(opt); d.afterAction(2500)
-        s = d.screen()
-        dump("通话页", s)
-        val inCall = s.items.any { Text.norm(it.label).let { n -> CALL_MARKERS.any { m -> n.contains(m) } } }
-        return if (inCall) { log("✓ 已进入${kind}界面"); Outcome(true, "已向「$contact」发起$kind", verified = true) }
-        else fail("已点击「$kind」，但未识别到通话界面（请在手机上查看）")
+        val before = s.items.map { it.label }.toSet()
+        d.tap(opt)
+        // The call screen can take a few seconds (camera start-up); poll leniently.
+        repeat(3) { attempt ->
+            d.afterAction(if (attempt == 0) 2500 else 1500)
+            s = d.screen()
+            dump("通话页", s)
+            if (CallScreen.isCall(s)) { log("✓ 已进入${kind}界面"); return Outcome(true, "已向「$contact」发起$kind", verified = true) }
+        }
+        if (CallScreen.leftChat(before, s)) {
+            log("界面已离开聊天页（通话页文字较少，OCR 未读到标志词）")
+            return Outcome(true, "已向「$contact」发起$kind（通话页未能读到文字，请看一眼手机）", verified = false)
+        }
+        return fail("已点击「$kind」，但未识别到通话界面（请在手机上查看）")
     }
 
     /** Known 「+」 panel cells (WeChat row 1: 相册 拍摄 视频通话 位置; row 2: 红包 转账 语音输入 …). */
@@ -756,5 +777,23 @@ class MessagingFlow(
             s = d.screen()
         }
         return if (isVoiceMode(s)) null else s
+    }
+}
+
+
+/** Lenient recognition of WeChat's voice/video call screen (OCR-only, misreads tolerated). */
+object CallScreen {
+    private val MARKERS = listOf("等待对方接受邀请", "正在呼叫", "挂断", "切到语音通话", "切换到语音", "免提", "通话中",
+        "取消", "转换摄像头", "翻转", "摄像头", "麦克风", "静音", "邀请", "呼叫", "接通", "美颜", "模糊背景")
+    fun isCall(s: Screen): Boolean = s.items.any { item ->
+        val n = Text.norm(item.label)
+        n.length <= 12 && MARKERS.any { m -> n.contains(m) || (m.length >= 3 && com.runasakura.phoneagent.agent.KeyMatchLite.sim(n, m) >= 0.6) }
+    }
+    /** The chat page (input bar, 发送/按住说话/+) is gone and most labels changed. */
+    fun leftChat(before: Set<String>, s: Screen): Boolean {
+        val chatKeys = listOf("按住说话", "发送", "表情")
+        if (s.items.any { i -> chatKeys.any { Text.norm(i.label).contains(it) } }) return false
+        val now = s.items.map { it.label }.toSet()
+        return now.isEmpty() || (now intersect before).size <= now.size / 3
     }
 }
