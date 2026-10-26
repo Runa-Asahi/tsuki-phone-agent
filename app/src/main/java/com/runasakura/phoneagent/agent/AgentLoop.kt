@@ -182,6 +182,9 @@ class AgentLoop(
                 }
                 onLog("匹配应用：${match.label} (${match.packageName}) score=${match.score}")
                 targetPkg = match.packageName; appLabel = "${match.label}（${match.packageName}）"
+                targetPkgForMemory = match.packageName
+                appMem = runCatching { AppMemory.decode(prefs.appMemory(match.packageName)) }.getOrNull()
+                appMem?.hint(goal)?.let { onLog("载入应用经验：" + it.replace("\n", " | ")) }
                 if (!com.runasakura.phoneagent.util.TaskTiming.time("启动应用") { dev.bringToFront(match.packageName, match.label) }) {
                     return Result(false, 1, "无法把「${match.label}」带到前台（前台=${dev.foregroundPackage()}）")
                 }
@@ -314,6 +317,9 @@ class AgentLoop(
             shotThisStep = brainShot != null || obsNote?.contains("视觉描述") == true
             if (brainShot != null) obsNote = listOfNotNull(obsNote, "已附当前截图：以截图为准（OCR 可能有错字/漏掉无文字按钮）；tap 坐标按屏幕 ${sc.w}x${sc.h}。").joinToString("\n")
             // Planner only for multi-step goals (short ones: the step model alone is cheaper/faster).
+            if (cloudPlanText == null) appMem?.knownPath(goal)?.let { p ->
+                cloudPlanText = "参考步骤（以往成功路线）：$p"; onLog("复用以往成功路线，跳过规划")
+            }
             if (cloudPlanText == null && router.mode != com.runasakura.phoneagent.prefs.AgentPreferences.ROUTE_LOCAL_ONLY && router.cloudReady) {
                 cloudPlanText = router.cloudPlan(goal, snap.compressedText, appLabel, memory.text())?.let { st ->
                     onLog("云端规划（本机按此执行）：" + st.joinToString(" → ")); "参考步骤（云端规划）：" + st.joinToString("；")
@@ -322,7 +328,7 @@ class AgentLoop(
             // ---- Reflect like a desktop agent: progress check every 6 steps / on loops, then re-plan ----
             if (router.cloudReady && step > 1 && (step % 6 == 0 || loopStreak == 2)) {
                 val v = verify(dev, goal)
-                if (v != null && v.first) return Result(true, step, "目标已达成（验收：${v.second}）")
+                if (v != null && v.first) { saveAppMemory(goal, true, steps.progress()); return Result(true, step, "目标已达成（验收：${v.second}）") }
                 if (v != null) {
                     onLog("反思：未达成（${v.second}），重新规划路线")
                     router.cloudPlan("$goal\n（已尝试：${steps.progress()}；未达成原因：${v.second}。请给出一条不同的路线）", snap.compressedText, appLabel,
@@ -474,6 +480,7 @@ class AgentLoop(
                         history += ChatMessage("user", "验收未通过：${v.second}。请继续完成目标，不要输出 done。")
                         continue
                     }
+                    saveAppMemory(goal, true, steps.progress())
                     return Result(true, step, action.summary.ifBlank { "完成" } + (v?.let { "（已验收）" } ?: ""))
                 }
                 is AgentAction.Fail -> {
@@ -695,6 +702,19 @@ class AgentLoop(
     private var appLabel: String? = null
     private var lastExpect: String? = null
     private val memory = TaskMemory()
+    private var appMem: AppMemory? = null
+
+    /** Persist what this task learned about the app (facts, useless actions, and the path on success). */
+    private fun saveAppMemory(goal: String, success: Boolean, path: String) {
+        val pkg = targetPkgForMemory ?: return
+        val facts = memory.all() + guard.deadLabels().map { "「$it」点了没反应" }
+        if (facts.isEmpty() && !success) return
+        runCatching {
+            val m = (appMem ?: AppMemory(emptyList(), emptyList())).merge(facts, if (success) goal else null, path.takeIf { success })
+            prefs.setAppMemory(pkg, m.encode())
+        }
+    }
+    private var targetPkgForMemory: String? = null
     private var modelSteps = 0
 
     private fun targetLabel(a: AgentAction, sc: com.runasakura.phoneagent.flow.Screen): String? = when (a) {
@@ -843,6 +863,7 @@ class AgentLoop(
             stepsRef?.progress()?.takeIf { it.isNotBlank() }?.let { appendLine(it) }
 
             lastScreen?.let { appendLine(LayoutHints.describe(it)) }
+            appMem?.hint(goal)?.let { appendLine(it) }
             memory.text()?.let { appendLine("本任务已知：$it") }
             guard.summary()?.let { appendLine(it) }
             stepsRef?.lastFailure()?.let { appendLine("⚠ 上一步没有执行成功：$it。不要重复，换一种方式（用坐标 x,y、别的元素、滑动或返回）。") }

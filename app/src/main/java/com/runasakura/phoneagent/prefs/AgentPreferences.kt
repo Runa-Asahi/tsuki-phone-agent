@@ -91,6 +91,11 @@ class AgentPreferences(context: Context) {
         get() = sp.getString("vision_local_model", "") ?: ""
         set(v) = sp.edit().putString("vision_local_model", v.trim()).apply()
     /** Confirm before creating an alarm (default ON; user can turn it off). */
+    /** Per-app learned memory (see AppMemory); plain UI facts only. */
+    fun appMemory(pkg: String): String? = sp.getString("appmem_$pkg", null)
+    fun setAppMemory(pkg: String, v: String) = sp.edit().putString("appmem_$pkg", v.take(4000)).apply()
+    fun clearAppMemory() { val e = sp.edit(); sp.all.keys.filter { it.startsWith("appmem_") }.forEach { e.remove(it) }; e.apply() }
+
     var confirmAlarm: Boolean
         get() = sp.getBoolean("confirm_alarm", true)
         set(v) = sp.edit().putBoolean("confirm_alarm", v).apply()

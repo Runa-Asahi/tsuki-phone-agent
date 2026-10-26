@@ -101,6 +101,7 @@ class NoEffectGuard {
     }
 
     val size get() = dead.size
+    fun deadLabels(): List<String> = dead.map { it.key }.filter { it.startsWith("t:") }.map { it.drop(2) }.distinct()
 
     fun summary(): String? = if (dead.isEmpty()) null else "已证实无效（不要再做）：" + dead.values.toList().takeLast(6).joinToString("；")
 }
