@@ -49,7 +49,12 @@ object TsukiOrb {
             label.text = t; orb.step = stepOf(t); orb.paused = t.startsWith("已暂停")
             orb.contentDescription = "Tsuki：$t。点按展开，长按急停"
         }
-        fun expand(open: Boolean) { panel.visibility = if (open) View.VISIBLE else View.GONE }
+        private val collapse = Runnable { expand(false) }
+        /** The panel folds back after 6 s so it never covers the app the agent is working in for long. */
+        fun expand(open: Boolean) {
+            panel.visibility = if (open) View.VISIBLE else View.GONE
+            root.removeCallbacks(collapse); if (open) root.postDelayed(collapse, 6000)
+        }
         val expanded get() = panel.visibility == View.VISIBLE
     }
 

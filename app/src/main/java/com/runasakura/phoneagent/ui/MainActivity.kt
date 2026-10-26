@@ -140,7 +140,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderPhase() {
         val ph = ChatSession.phase
-        val c = ContextCompat.getColor(this, when (ph) {
+        val c = TsukiTheme.color(this, when (ph) {
             ChatSession.Phase.IDLE -> R.color.text_tertiary
             ChatSession.Phase.CONFIRM, ChatSession.Phase.PAUSED -> R.color.warn_amber
             else -> R.color.primary

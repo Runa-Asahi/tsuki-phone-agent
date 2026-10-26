@@ -156,18 +156,18 @@ object OverlayPill {
         val box = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(px(10), px(5), px(5), px(5))
-            background = android.graphics.drawable.GradientDrawable().apply { setColor(0xE6111113.toInt()); cornerRadius = 999f * d }
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(com.runasakura.phoneagent.ui.TsukiTheme.current(context).skyTop and 0x00FFFFFF or (0xEE shl 24)); cornerRadius = 999f * d }
             elevation = 6 * d
         }
         val dot = View(context).apply { background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(0xFF5BD68A.toInt()) } }
         box.addView(dot, LinearLayout.LayoutParams(px(8), px(8)))
         val lbl = TextView(context).apply {
-            textSize = 12f; setTextColor(android.graphics.Color.WHITE); maxWidth = px(150); maxLines = 1
+            textSize = 12f; setTextColor(com.runasakura.phoneagent.ui.TsukiTheme.current(context).onSurface); maxWidth = px(150); maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END; text = "运行中"
         }
         box.addView(lbl, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { marginStart = px(8); marginEnd = px(8) })
         fun circle(icon: Int, bg: Int, desc: String, click: (ImageView) -> Unit) = ImageView(context).apply {
-            setImageResource(icon); imageTintList = android.content.res.ColorStateList.valueOf(android.graphics.Color.WHITE)
+            setImageResource(icon); imageTintList = android.content.res.ColorStateList.valueOf(if (bg == 0x33FFFFFF) com.runasakura.phoneagent.ui.TsukiTheme.current(context).onSurface else android.graphics.Color.WHITE)
             setPadding(px(7), px(7), px(7), px(7)); contentDescription = desc
             background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(bg) }
             setOnClickListener { click(this) }
@@ -175,7 +175,7 @@ object OverlayPill {
         if (onPause != null) box.addView(circle(R.drawable.ic_pause, 0x33FFFFFF, "暂停") { v ->
             val paused = onPause.invoke(); v.setImageResource(if (paused) R.drawable.ic_play else R.drawable.ic_pause); v.contentDescription = if (paused) "继续" else "暂停"
         }, LinearLayout.LayoutParams(px(30), px(30)))
-        box.addView(circle(R.drawable.ic_stop, 0xFFDC2626.toInt(), context.getString(R.string.fab_stop)) { onStop() },
+        box.addView(circle(R.drawable.ic_stop, com.runasakura.phoneagent.ui.TsukiTheme.current(context).crimson, context.getString(R.string.fab_stop)) { onStop() },
             LinearLayout.LayoutParams(px(30), px(30)).apply { marginStart = px(6) })
         return box to lbl
     }
