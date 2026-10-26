@@ -62,6 +62,8 @@ class A11yDevice(
         s.windows.orEmpty().filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
     } catch (_: Exception) { emptyList() }
 
+    override suspend fun openUrl(url: String): Boolean = s.openUri(url, foregroundPackage().takeIf { it.isNotBlank() }).also { if (it) actionGen++ }
+
     override fun foregroundPackage(): String {
         val ws = appWindows()
         val w = ws.firstOrNull { it.isActive || it.isFocused } ?: ws.firstOrNull()

@@ -232,6 +232,10 @@ class SubgoalExecutor(
 
     suspend fun open(target: String): Boolean {
         onLog("子目标：进入「$target」")
+        // A web address is opened directly (VIEW intent in the current browser) instead of being searched for as text.
+        WebAddress.normalize(target)?.let { url ->
+            if (d.openUrl(url)) { d.afterAction(2500); onLog("✓ 直接打开网址：$url"); return true }
+        }
         for (i in 0..3) {
             val s = d.screen()
             if (s.isEmpty()) { onLog("✗ 界面为空（树/OCR 都读不到）"); return false }

@@ -51,6 +51,8 @@ interface Device {
     suspend fun invalidateObservation()
     /** Package of the foreground app window ("" = unknown). */
     fun foregroundPackage(): String = ""
+    /** Open a web address in the foreground app (a browser) via VIEW intent; false when unsupported. */
+    suspend fun openUrl(url: String): Boolean = false
 }
 
 object Text {
@@ -142,6 +144,7 @@ class StopGuardDevice(private val d: Device, private val stopped: () -> Boolean)
     private fun check() { if (stopped()) throw StopRequested() }
     override suspend fun screen(): Screen { check(); return d.screen() }
     override suspend fun refineScreen(): Screen { check(); return d.refineScreen() }
+    override suspend fun openUrl(url: String): Boolean { check(); return d.openUrl(url) }
     override suspend fun tap(item: ScreenItem): Boolean { check(); return d.tap(item) }
     override suspend fun tapXY(x: Int, y: Int): Boolean { check(); return d.tapXY(x, y) }
     override suspend fun longPress(item: ScreenItem): Boolean { check(); return d.longPress(item) }

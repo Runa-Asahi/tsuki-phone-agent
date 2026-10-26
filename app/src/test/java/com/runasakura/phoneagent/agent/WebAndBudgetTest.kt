@@ -32,3 +32,14 @@ class WebAndBudgetTest {
         assertEquals(1.0, StepBudget.jaccard(results, results), 0.0)
     }
 }
+
+class WebAddressTest {
+    @Test fun urlSyntaxOnly() {
+        assertEquals("https://meimodu.com", WebAddress.normalize("meimodu.com"))
+        assertEquals("https://a.b.co/x?y=1", WebAddress.normalize("「a.b.co/x?y=1」"))
+        assertEquals("http://x.org", WebAddress.normalize("http://x.org"))
+        assertNull(WebAddress.normalize("设置"))
+        assertNull(WebAddress.normalize("韩国 h漫 网站"))
+        assertNull(WebAddress.normalize("v1.2"))
+    }
+}
