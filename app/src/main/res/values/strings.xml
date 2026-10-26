@@ -83,7 +83,7 @@
     <string name="ui_28">本机模型（MNN，可选）</string>
     <string name="ui_29">在手机本地跑小模型，离线可用但较慢。</string>
     <string name="shizuku_title">特权模式（Shizuku，可选）</string>
-    <string name="shizuku_desc">开启后可读取空界面树（如微信）、免弹窗截图、注入按键、执行系统命令。未运行或未授权时自动退回无障碍 + OCR，不影响正常使用。</string>
+    <string name="shizuku_desc">与无障碍同时使用：无障碍负责点击和读界面，Shizuku 负责按键注入、系统命令、发现应用直达入口和授予自愈权限。为避免断开无障碍，无障碍在线时不会运行 uiautomator；空界面（游戏/微信）改用 OCR 和色块识别。未运行或未授权时自动退回无障碍 + OCR。</string>
     <string name="shizuku_toggle">Shizuku 就绪时优先使用</string>
     <string name="shizuku_grant">请求授权</string>
     <string name="shizuku_refresh">刷新状态</string>

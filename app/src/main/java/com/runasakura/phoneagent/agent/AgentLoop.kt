@@ -72,13 +72,15 @@ class AgentLoop(
             Corrections.fromGoal(goal)?.let { facts += it }
             Corrections.fromOutcome(r.summary, effective.lastOrNull() ?: lastAttempt)?.let { facts += it }
             if (r.success) {
-                if (effective.size >= 2) { m = m.learnSkill(goal, effective); onLog("技能沉淀：" + Skill.normalize(effective).joinToString(" → ")) }
+                if (Skill.learnable(effective)) { m = m.learnSkill(goal, effective); onLog("技能沉淀：" + Skill.normalize(effective).joinToString(" → ")) }
             } else {
                 val cause = FailureCause.attribute(r.summary, lastFailError, stepsRef?.looping == true, r.needsUser)
                 onLog("失败归因：${cause.zh}")
                 FailureCause.lesson(cause, goal, lastAttempt)?.let { facts += it }
                 if (skill != null && cause !in setOf(FailureCause.Kind.USER_STOP, FailureCause.Kind.NEEDS_USER, FailureCause.Kind.USER_DECLINED)) m = m.penalizeSkill(goal)
             }
+            // Evidence-based, app-agnostic habit: Back did nothing here → next time prefer on-screen close/back.
+            if (guard.backDead()) facts += "（本应用实测）系统返回键无效：用界面上的返回/关闭按钮或角落图标"
             if (facts.isNotEmpty()) m = m.merge(facts, null, null)
             prefs.setAppMemory(pkg, m.encode())
         }
@@ -117,7 +119,7 @@ class AgentLoop(
         a11y.resetTaskState()
         // Optional Shizuku backend: decided per task (user toggle + live status); null = accessibility + OCR only.
         shellOn = a11y.shell() != null
-        if (shellOn) onLog("特权后端：Shizuku 已就绪（界面树补全/截图/按键/系统命令）")
+        if (shellOn) onLog("特权后端：Shizuku 已就绪（按键/系统命令/直达入口发现；无障碍在线时不运行 uiautomator）")
         val sysPrompt = SystemPrompt.forBackend(shellOn)
         // ---- Questions about the agent's own history: answer from logs (no screen work) ----
         if (SessionAnswer.aboutHistory(goal) && router.cloudReady) {
@@ -1322,6 +1324,12 @@ class AgentLoop(
                         else "已安装应用（名称=包名）：" + apps.take(15).joinToString("；") { "${it.first}=${it.second}" }
                     true
                 }
+                is AgentAction.Shortcuts -> {
+                    val pkg = if (action.app.contains('.') && !action.app.contains(' ')) action.app
+                        else a11y.listApps(action.app).firstOrNull()?.second ?: action.app
+                    toolNote = DeepLinks.describe(pkg, a11y.shortcuts(pkg), shellOn)
+                    true
+                }
                 is AgentAction.ScrollFind -> scrollFind(a11y, action)
                 is AgentAction.Wait -> {
                     // Sliced so 急停 is honoured within 50 ms even during a 10 s wait.
@@ -1346,7 +1354,7 @@ class AgentLoop(
 
     private fun isOffScreen(a: AgentAction): Boolean = when (a) {
         is AgentAction.Shell -> com.runasakura.phoneagent.shell.ShellCommand.parse(a.cmd).let { p -> p is com.runasakura.phoneagent.shell.ShellCommand.Parsed.Ok && p.argv.first() != "am" && p.argv.first() != "monkey" }
-        is AgentAction.SetClipboard, AgentAction.ReadClipboard, is AgentAction.Copy, is AgentAction.Wait, is AgentAction.ListApps -> true
+        is AgentAction.SetClipboard, AgentAction.ReadClipboard, is AgentAction.Copy, is AgentAction.Wait, is AgentAction.ListApps, is AgentAction.Shortcuts -> true
         is AgentAction.Key -> a.name != "enter"
         else -> false
     }

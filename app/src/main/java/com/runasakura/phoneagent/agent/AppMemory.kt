@@ -30,7 +30,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
     /** Record a successful trajectory as a skill (same goal → confirmed; a shorter variant replaces a longer one). */
     fun learnSkill(goal: String, steps: List<String>, now: Long = System.currentTimeMillis()): AppMemory {
         val clean = Skill.normalize(steps)
-        if (clean.size < 2) return this
+        if (!Skill.learnable(clean)) return this
         val ss = ArrayList(expire(now).skillEntries)
         val i = ss.indexOfFirst { Skill.decode(it.text)?.let { k -> Similarity.score(k.goal, goal) >= 0.8 } == true }
         val text = Skill(goal.take(60), clean).encode()

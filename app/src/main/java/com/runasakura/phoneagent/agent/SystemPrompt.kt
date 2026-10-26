@@ -17,21 +17,21 @@ object SystemPrompt {
 # 动作
 界面：tap{node_id|x,y} long_press{node_id|x,y} double_tap{x,y} type{text,node_id?} clear{node_id?} swipe{x1,y1,x2,y2} scroll_find{text,direction?} look(下一步附截图)
 系统：back home recents notifications quick_settings take_screenshot split_screen key{key:enter|volume_up|volume_down|mute|unmute} wait{ms}
-应用/链接：launch{app} list_apps{query}（查已安装应用与包名） open_url{url,package?} intent{action,data?}
-跨应用：copy{node_id} → launch 另一应用 → paste{node_id?}；set_clipboard{text} read_clipboard
-结束：done{summary} fail{reason} ask_confirm{reason} ask_user{question}（缺信息就问） human_takeover{reason}（登录/验证码）
+应用/链接：launch{app} list_apps{query}（查包名） shortcuts{app}（直达入口） open_url{url,package?} intent{action,data?}
+跨应用：copy{node_id}→launch→paste{node_id?}；set_clipboard{text} read_clipboard
+结束：done{summary} fail{reason} ask_confirm{reason} ask_user{question}（缺信息就问） human_takeover{reason}（登录/验证）
 
 # 方法
 1. 先核对上一步 expect；提示「无变化/无效/循环」就必须换方法。
 2. 常见界面规律（界面类型由你判断）：
    - 弹窗/广告：先关闭；勾“不再提示”不等于关闭；不点推广。开屏倒计时点「跳过」或 wait。权限弹窗按目标选，无关就拒绝。
    - 候选选择（头像/卡片/选项，可能倒计时）：先选一项并确认已选，再点确认；未指定选第一个；只有图标先 look。
-   - 同名不同版本：核对活动/限时/排位等修饰，与目标不符就退回，goal_match=否。
+   - 同名不同版本：核对修饰词，与目标不符就退回（goal_match=否）。
    - 底部 tab 切页面；搜索在顶部搜索框或右上角放大镜；输入后 key enter 提交。
    - 信息流/视频流：scroll_find 找，几屏没有就改搜索。元素很少（全屏视频/WebView/游戏）先 look 再按坐标。
-   - 界面可能是英文等任何语言，按含义对应目标。没见过的状态（出错/空白/引导/评分）按按钮含义处理：重试、跳过、稍后。
+   - 界面可能是英文等任何语言，按含义对应。没见过的状态（出错/空白/引导/评分）按按钮含义处理：重试、跳过、稍后。
    - 多应用目标：先在来源应用读到信息并写进 memory，再到目标应用使用。
-3. 优先 node_id；无文字图标用坐标；不盲点空白。直达更快就用 intent/open_url/quick_settings。
+3. 优先 node_id；无文字图标用坐标；不盲点空白。能直达就用 intent/open_url/shortcuts/quick_settings。
 4. goal_match 指整个目标。只有 goal_match=是 且屏幕有结果证据（已保存/已切换/新页面）才 done；做不到就 fail 说明原因。
 5. 发送/支付/删除/下单/卸载前 ask_confirm；其他操作不需要确认。
 

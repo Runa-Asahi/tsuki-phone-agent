@@ -18,7 +18,7 @@ object ActionDesc {
         is AgentAction.Wait -> "等待${a.ms}ms"
         AgentAction.Back -> "返回"; AgentAction.Home -> "桌面"; AgentAction.Recents -> "最近任务"
         is AgentAction.Global -> GLOBAL_ZH[a.name] ?: "系统面板 ${a.name}"
-        is AgentAction.OpenUri -> "打开链接 ${a.uri.take(40)}"
+        is AgentAction.OpenUri -> "打开链接 ${a.uri.take(90)}"
         is AgentAction.Intent -> "打开系统页 ${a.action.substringAfterLast('.')}"
         is AgentAction.SetClipboard -> "复制「${a.text.take(16)}」到剪贴板"
         AgentAction.ReadClipboard -> "读取剪贴板"
@@ -28,6 +28,7 @@ object ActionDesc {
         is AgentAction.ScrollFind -> "滚动查找「${a.text.take(16)}」"
         is AgentAction.Shell -> "系统命令 ${a.cmd.take(48)}"
         is AgentAction.ListApps -> "查找已安装应用「${a.query.take(16)}」"
+        is AgentAction.Shortcuts -> "查找「${a.app.take(24)}」的直达入口"
         else -> a.toString().take(40)
     }
 }

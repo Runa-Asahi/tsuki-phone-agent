@@ -66,7 +66,7 @@ class AgentForegroundService : Service() {
         com.runasakura.phoneagent.util.TaskTiming.reset()
         if (com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() == null &&
             !com.runasakura.phoneagent.a11y.AgentAccessibilityService.isEnabledInSettings(this)) {
-            log("无障碍服务未连接（更新 APK 后需在系统设置里重新打开本服务）")
+            log("无障碍服务未开启：系统设置里本应用的无障碍开关是关闭的（可能被系统省电清理或手动关闭；安装新版本后也需要重新打开）")
             broadcastStatus("stopped", "无障碍服务未开启：请到系统设置→辅助功能→已安装的服务中重新打开 Phone Agent")
             // Toast from service context
             android.os.Handler(android.os.Looper.getMainLooper()).post {

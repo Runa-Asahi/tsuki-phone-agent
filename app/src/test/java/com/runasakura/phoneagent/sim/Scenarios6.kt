@@ -31,4 +31,24 @@ object Scenarios6 {
             }
         },
         done = { it.screenName() == "match" })
+
+    /**
+     * Runtime shortcut discovery: the target page is several screens deep; the app's own intent filters expose a
+     * deep link. The scripted model asks for the app's shortcuts once and uses one if the tool lists it.
+     */
+    const val DEEP = "com.sim.tickets"
+    fun ticketApp() = SimApp(DEEP, "票务", "home", mapOf(
+        "home" to SimScreen("home") { listOf(SimEl("首页", 540, 200), SimEl("我的", 800, 2300) { go("me") }) },
+        "me" to SimScreen("me") { listOf(SimEl("订单中心", 540, 600) { go("orders") }) },
+        "orders" to SimScreen("orders") { listOf(SimEl("全部订单", 540, 300), SimEl("待出行", 540, 500) { go("upcoming") }) },
+        "upcoming" to SimScreen("upcoming") { listOf(SimEl("待出行订单", 540, 200), SimEl("G123 上海→北京", 540, 500)) },
+    ))
+    val deepLink = Scenario("运行时发现深链直达", "打开票务，查看待出行订单", listOf(ticketApp()), maxSteps = 6,
+        setup = { flags["links:$DEEP"] = mapOf<String, SimWorld.() -> Unit>("tickets://orders/upcoming" to { launch(DEEP); go("upcoming") }) },
+        policy = { o, w -> when {
+            w.screenName() == "upcoming" -> step("""{"type":"done","summary":"已打开待出行订单"}""", "是")
+            o.note("tickets://orders/upcoming") -> step("""{"type":"open_url","url":"tickets://orders/upcoming","package":"$DEEP"}""")
+            w.flags["asked"] != true -> { w.flags["asked"] = true; step("""{"type":"shortcuts","app":"$DEEP"}""") }
+            else -> step("""{"type":"fail","reason":"没有直达入口"}""") } },
+        done = { it.screenName() == "upcoming" })
 }

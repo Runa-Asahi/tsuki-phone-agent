@@ -135,7 +135,10 @@ class SimPhone(val world: SimWorld) : Phone {
         1 -> back(); 2 -> home()
         else -> false
     }
+    override fun shortcuts(pkg: String) = com.runasakura.phoneagent.agent.DeepLinks.Info(
+        (world.flags["links:$pkg"] as? Map<*, *>)?.keys?.map { it.toString() }.orEmpty(), emptyList())
     override fun openUri(uri: String, pkg: String?): Boolean {
+        world.apps.forEach { app -> ((world.flags["links:${app.pkg}"] as? Map<*, *>)?.get(uri) as? (SimWorld.() -> Unit))?.let { world.log += "deeplink:$uri"; it.invoke(world); return true } }
         val b = world.flags["browserPkg"] as? String ?: return false
         world.flags["url"] = uri; world.launch(b); return world.fg == b
     }

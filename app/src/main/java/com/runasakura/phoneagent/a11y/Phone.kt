@@ -53,6 +53,8 @@ interface Phone {
     fun shell(): com.runasakura.phoneagent.shell.PrivilegedShell? = null
     /** Launchable apps (label to package) whose label or package contains [query] (all when blank). */
     fun listApps(query: String): List<Pair<String, String>> = emptyList()
+    /** Runtime-discovered direct entries of [pkg] (no per-app tables): deep-link URIs + exported page classes. */
+    fun shortcuts(pkg: String): com.runasakura.phoneagent.agent.DeepLinks.Info = com.runasakura.phoneagent.agent.DeepLinks.Info(emptyList(), emptyList())
 }
 
 /** The phone through the live AccessibilityService. */
@@ -78,6 +80,16 @@ class ServicePhone(private val s: AgentAccessibilityService) : Phone {
     override fun isSettingsForeground(pkg: String) = s.isSettingsForeground(pkg)
     override fun setAlarm(hour: Int, minute: Int, label: String) = s.setAlarm(hour, minute, label)
     override fun shell() = com.runasakura.phoneagent.shell.ShizukuBackend.shellOrNull(s)
+    override fun shortcuts(pkg: String): com.runasakura.phoneagent.agent.DeepLinks.Info {
+        val pages = try {
+            @Suppress("DEPRECATION")
+            s.packageManager.getPackageInfo(pkg, android.content.pm.PackageManager.GET_ACTIVITIES).activities.orEmpty()
+                .filter { it.exported }.map { it.name }
+        } catch (_: Exception) { emptyList() }
+        // Deep-link schemes live in intent filters; only the package dump exposes them (Shizuku, not UiAutomation).
+        val dump = shell()?.let { sh -> runCatching { sh.exec(listOf("dumpsys", "package", pkg), 6000).let { r -> if (r.ok) String(r.out) else "" } }.getOrDefault("") }.orEmpty()
+        return com.runasakura.phoneagent.agent.DeepLinks.Info(com.runasakura.phoneagent.agent.DeepLinks.parseDumpsys(dump), pages)
+    }
     override fun listApps(query: String): List<Pair<String, String>> = try {
         val pm = s.packageManager
         pm.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)

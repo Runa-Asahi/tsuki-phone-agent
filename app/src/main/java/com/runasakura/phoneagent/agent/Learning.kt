@@ -60,6 +60,11 @@ data class Skill(val goal: String, val steps: List<String>, val conf: Int = 1) {
         private val TARGET = Regex("「([^」]{1,24})」")
         private val NOISE = Regex("^(等待|看图|look|读取剪贴板|查找已安装应用)")
 
+        /** A step that jumps straight to a page (runtime-discovered deep link / exported page start). */
+        fun isDirect(s: String) = s.startsWith("打开链接 ") || s.startsWith("系统命令 am start")
+        /** Worth remembering as a macro: a multi-step route, or any route that used a direct entry. */
+        fun learnable(steps: List<String>) = steps.size >= 2 || steps.any { isDirect(it) }
+
         fun same(a: String, b: String) = Similarity.norm(a) == Similarity.norm(b) || Similarity.score(a, b) >= 0.9
 
         fun decode(text: String): Skill? {
@@ -77,7 +82,8 @@ data class Skill(val goal: String, val steps: List<String>, val conf: Int = 1) {
                 if (out.lastOrNull()?.let { same(it, s) } == true) continue
                 // "X → 返回" is a detour that was undone: neither step belongs to the route.
                 if (BACK.matches(s) && out.isNotEmpty()) { out.removeAt(out.lastIndex); continue }
-                out += s.take(40)
+                // Direct entries (deep link / page start) are replayable only verbatim — keep them whole.
+                out += if (isDirect(s)) s.take(100) else s.take(40)
             }
             return out.take(12)
         }

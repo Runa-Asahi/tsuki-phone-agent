@@ -16,8 +16,9 @@ class SimBench {
 
     @Test fun bench() {
         val list: List<Pair<String, Scenario>> = Scenarios.all.map { "S1" to it } + Scenarios2.all.map { "S2" to it } +
-            HeldOut.all.map { "HO" to it.first } + listOf("S6" to Scenarios6.blindGame)
+            HeldOut.all.map { "HO" to it.first } + listOf("S6" to Scenarios6.blindGame, "S6" to Scenarios6.deepLink)
         var ok = 0; var runs = 0; var steps = 0L; var calls = 0L; var tok = 0L; var cached = 0L; var lat = 0.0; var allCalls = 0L; var taskLat = 0.0
+        val warmSeen = ArrayList<String>(); var warmCached = 0L
         val per = StringBuilder(); val kinds = sortedMapOf<String, Int>()
         for ((tag, sc) in list) {
             val r = try { SimRunner.run(sc) } catch (e: Throwable) { per.append("$tag ${sc.name} CRASH ${e.javaClass.simpleName}\n"); continue }
@@ -32,6 +33,10 @@ class SimBench {
                 for (prev in seen) { var j = 0; val m = minOf(t.length, prev.length); while (j < m && t[j] == prev[j]) j++; if (j > k) k = j }
                 val hit = (LlmRouter.approxTokens(t.substring(0, k)) / 64) * 64L
                 scTok += total; scCached += minOf(hit, total); seen += t
+                // Warm: the provider also remembers earlier tasks (same system prompt / task preamble).
+                var kw = k
+                for (prev in warmSeen.takeLast(40)) { var j = 0; val m = minOf(t.length, prev.length); while (j < m && t[j] == prev[j]) j++; if (j > kw) kw = j }
+                warmCached += minOf((LlmRouter.approxTokens(t.substring(0, kw)) / 64) * 64L, total); warmSeen += t
             }
             calls += r.stepPrompts.size; tok += scTok; cached += scCached
             // Serial (blocking) non-step calls: intent, judge, checkpoint, and plans that ran before a step
@@ -44,7 +49,7 @@ class SimBench {
             per.append("$tag ${sc.name} ok=${r.result.success} steps=${r.result.steps} calls=${r.stepPrompts.size} tok=$scTok hit=${if (scTok > 0) scCached * 100 / scTok else 0}%\n")
         }
         val out = "RUNS=$runs OK=$ok MODEL_CALLS=$calls STEPS=$steps AVG_PROMPT_TOK_PER_CALL=${tok / maxOf(calls, 1)} " +
-            "CACHE_HIT=${if (tok > 0) cached * 1000 / tok / 10.0 else 0.0}% SIM_LATENCY_PER_CALL_MS=${(lat / maxOf(calls, 1)).toInt()} " +
+            "CACHE_HIT=${if (tok > 0) cached * 1000 / tok / 10.0 else 0.0}% CACHE_HIT_WARM=${if (tok > 0) warmCached * 1000 / tok / 10.0 else 0.0}% SIM_LATENCY_PER_CALL_MS=${(lat / maxOf(calls, 1)).toInt()} " +
             "TOTAL_TOK=$tok ALL_MODEL_CALLS=$allCalls SIM_TASK_LATENCY_AVG_MS=${(taskLat / maxOf(runs, 1)).toInt()} KINDS=$kinds\n" + per
         java.io.File(System.getProperty("java.io.tmpdir"), "sim_bench.txt").writeText(out)
     }

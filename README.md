@@ -21,7 +21,7 @@
 |---|---|
 | 通用操作 | 任意应用里的点按 / 长按 / 双击 / 输入 / 滑动 / `scroll_find` / 返回 / 桌面 / 通知栏 / 快捷设置 / 分屏 |
 | 直达工具 | `launch`、`list_apps`（查已安装应用）、`open_url`、`intent`、剪贴板 `copy/paste`、`key enter` |
-| 读屏 | 无障碍节点树 → 端侧 ML Kit 中文 OCR（离线）→ 截图看图（可选）→ Shizuku `uiautomator` 补全空树；多来源合并 |
+| 读屏 | 无障碍节点树 → 端侧 ML Kit 中文 OCR（离线）→ 截图看图（可选）→ 横屏原分辨率分块 OCR + 色块/角落图标候选（无文字按钮可点）；树/OCR/色块并行。无障碍在线时绝不运行 `uiautomator`（它会让系统断开无障碍） |
 | 看图 | `deepseek-flash` 可以直接看截图（需要在设置里允许）；也可以用本机 MNN VL 或云端 VL 作为看图辅助 |
 | 模型 | 本机 MNN Chat（OpenAI 兼容）或云端 DeepSeek / OpenAI 兼容；**只用你选的模型**，不会自动切换 |
 | 安全 | ConfirmPolicy：发送 / 通话 / 支付 / 下单 / 卸载 / 闹钟前必须确认；提示注入防护；急停 |
@@ -39,7 +39,7 @@ flowchart LR
     subgraph Eyes[读屏]
       T[无障碍树] --> M[屏幕元素合并]
       O[ML Kit OCR] --> M
-      Z[Shizuku uiautomator] --> M
+      Z[色块/角落图标候选] --> M
       P[截图] -.可选.-> V[看图]
     end
     M --> L
@@ -65,7 +65,7 @@ flowchart LR
 6. **Shizuku（可选，推荐）**：
    - 安装 Shizuku → 开发者选项 → **无线调试** → 在 Shizuku 里配对并启动。
    - MagicOS **每次重启后 Shizuku 都会停止**，需要回到 Shizuku 用无线调试重新启动。
-   - 本应用 设置 → 特权模式（Shizuku，可选）→ 请求授权 → 打开开关。之后会得到：空界面树补全、更稳的截图与输入，以及 `shell` 工具（危险命令始终需要确认）。
+   - 本应用 设置 → 特权模式（Shizuku，可选）→ 请求授权 → 打开开关。之后会得到：按键注入、`shell` 工具（危险命令始终需要确认）、`shortcuts` 运行时发现应用深链/直达页面。所有 Shizuku 命令都会带时间和调用方记录在诊断日志里。
 7. **无障碍自愈**：Shizuku 就绪时，在 设置 → 后台保活（荣耀/MagicOS）→ 「用 Shizuku 授予自愈权限」点一次，授予 `WRITE_SECURE_SETTINGS`。之后服务被系统关掉时会自动重新开启，即使 Shizuku 没有运行、手机重启后也一样。
    - 也可以用 adb：`adb shell pm grant com.runasakura.phoneagent android.permission.WRITE_SECURE_SETTINGS`
 8. 打开应用 → 右上角菜单 → **自检**，全部通过后再下任务。

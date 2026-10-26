@@ -42,6 +42,8 @@ sealed class AgentAction {
     data class Shell(val cmd: String) : AgentAction()
     /** Discover installed apps (label + package) matching [query] — for launch / deep links into unknown apps. */
     data class ListApps(val query: String = "") : AgentAction()
+    /** Discover an app's direct entries at runtime (deep-link schemes, exported pages); the model decides use. */
+    data class Shortcuts(val app: String) : AgentAction()
 }
 
 data class PlanStep(
