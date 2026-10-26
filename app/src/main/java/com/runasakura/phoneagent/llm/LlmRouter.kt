@@ -21,16 +21,12 @@ class LlmRouter(
 
     val mode: String get() = modeOf()
 
-    /**
-     * Set when local MNN stalls or is unreachable while a cloud fallback exists: the rest of THIS task
-     * goes straight to the cloud instead of paying a 15 s stall on every step. Reset per task (new router).
-     */
     /** Local is skipped until this time after a stall/unreachable (cooldown, then retried — never the whole task). */
     @Volatile var localCooldownUntil = 0L
     var now: () -> Long = { System.currentTimeMillis() }
     val localSidelined: Boolean get() = now() < localCooldownUntil
     private fun sideline(why: String) { localCooldownUntil = now() + RoutePolicy.LOCAL_COOLDOWN_MS; log("$why，${RoutePolicy.LOCAL_COOLDOWN_MS / 1000}s 内改用云端，之后自动重试本机") }
-    private var hedgeLosses = 0
+    @Volatile private var hedgeLosses = 0
     /** Last successful local latency: drives the hedge delay. */
     @Volatile var lastLocalMs: Long? = null
 
@@ -203,7 +199,7 @@ class LlmRouter(
         else if (early != null) { record("本机", early, messages); log("本机失败（${early.error}），本步用云端")
             if (early.errorCode == "UNAVAILABLE" || early.errorCode == "NOT_CONFIGURED" || early.error?.let { e -> listOf("refused", "connect", "unreachable").any { e.contains(it, true) } } == true) sideline("本机不可用") }
         else log("本机 ${head / 1000.0}s 未返回：并行请求云端，谁先给出有效结果用谁")
-        val cl = async { c.chat(messages, 0.0) }
+        val cl = async { c.chat(messages, temperature) }
         val winner = kotlinx.coroutines.selects.select<Pair<String, LlmResponse>> {
             if (early == null) l.onAwait { "local" to it }
             cl.onAwait { "cloud" to it }
@@ -222,7 +218,8 @@ class LlmRouter(
         }
         l.cancel()
         if (early == null && who == "cloud") {
-            record("本机", LlmResponse("", local.name, now() - t0, "hedged"), messages)
+            // A lost race is not a local failure: it is only logged, so the stats keep real local errors meaningful.
+            log("本机落后（${now() - t0}ms 时云端已返回），本机已取消")
             // Losing the race costs the head start on every step: after two losses in a row, cool down.
             if (++hedgeLosses >= 2) { hedgeLosses = 0; sideline("本机连续两次慢于云端") }
         }

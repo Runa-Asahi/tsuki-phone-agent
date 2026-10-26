@@ -1,5 +1,6 @@
 package com.runasakura.phoneagent.a11y
 
+import com.runasakura.phoneagent.agent.WebAddress
 import com.runasakura.phoneagent.util.TaskTiming
 import android.app.ActivityOptions
 import android.app.PendingIntent
@@ -62,7 +63,13 @@ class A11yDevice(
         s.windows.orEmpty().filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
     } catch (_: Exception) { emptyList() }
 
-    override suspend fun openUrl(url: String): Boolean = s.openUri(url, foregroundPackage().takeIf { it.isNotBlank() }).also { if (it) actionGen++ }
+    /** Only when the foreground app itself is a web browser (it resolves an https VIEW intent); a file name such as
+     *  "settings.json" in a file manager therefore never becomes a web visit and falls back to text matching. */
+    override suspend fun openUrl(url: String): Boolean {
+        val fg = foregroundPackage().takeIf { it.isNotBlank() } ?: return false
+        if (!WebAddress.isBrowser(s.packageManager, fg)) return false
+        return s.openUri(url, fg).also { if (it) actionGen++ }
+    }
 
     override fun foregroundPackage(): String {
         val ws = appWindows()
