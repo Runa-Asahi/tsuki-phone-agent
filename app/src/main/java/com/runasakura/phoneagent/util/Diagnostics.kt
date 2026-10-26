@@ -34,7 +34,7 @@ object Diagnostics {
     }
 
     @Synchronized fun export(appVersion: String, a11yInfo: String): String = buildString {
-        appendLine("=== Phone Agent 诊断日志 ===")
+        appendLine("=== Tsuki 诊断日志 ===")
         appendLine("版本: $appVersion  设备: ${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
         appendLine("模型: $model")
         appendLine("无障碍: $a11yInfo")

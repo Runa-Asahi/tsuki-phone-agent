@@ -23,9 +23,9 @@ class Round3MatrixTest {
     }
 
     @Test fun alarmIntent() {
-        assertEquals(QuickIntents.Alarm(7, 0, "Phone Agent"), QuickIntents.alarm("设个明天早上7点的闹钟"))
-        assertEquals(QuickIntents.Alarm(19, 30, "Phone Agent"), QuickIntents.alarm("帮我定一个晚上七点半的闹钟"))
-        assertEquals(QuickIntents.Alarm(6, 15, "Phone Agent"), QuickIntents.alarm("设置6:15闹钟"))
+        assertEquals(QuickIntents.Alarm(7, 0, "Tsuki"), QuickIntents.alarm("设个明天早上7点的闹钟"))
+        assertEquals(QuickIntents.Alarm(19, 30, "Tsuki"), QuickIntents.alarm("帮我定一个晚上七点半的闹钟"))
+        assertEquals(QuickIntents.Alarm(6, 15, "Tsuki"), QuickIntents.alarm("设置6:15闹钟"))
         assertNull(QuickIntents.alarm("打开时钟"))
     }
 

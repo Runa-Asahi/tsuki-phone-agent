@@ -4,14 +4,14 @@
   <img src="branding/tsuki_readme.webp" width="150" alt="Tsuki" />
 </p>
 
-# 荣耀手机 Agent · Tsuki
+# Tsuki · 荣耀 PPG-AN00 上的手机助手
 
 一个**在手机本机运行**的安卓操作 Agent：用一句中文（或英文）说出目标，助手 **Tsuki（月）** 会读屏、思考，再一步步点按、输入、滑动来完成任务，并实时展示每一步。主要面向 **荣耀 PPG-AN00 / MagicOS 10（Android 16）**，其他 Android 8+ 手机同样可以用。
 
 - 包名：`com.runasakura.phoneagent`（debug 版为 `.debug`）· 许可：Apache-2.0
 - 开发分支：`feat/mvp-agent`（不直接改 `main`）· 当前版本：**0.8.0-mvp**
 
-> Tsuki 是助手的形象：银色长发、编发头带、黑色缎带、红瞳、月牙。应用名称保持「荣耀手机 Agent」。
+> Tsuki 是助手的形象：银色长发、编发头带、黑色缎带、红瞳、月牙。应用名称统一为「Tsuki」（包名不变，升级安装不丢权限）。
 
 ---
 

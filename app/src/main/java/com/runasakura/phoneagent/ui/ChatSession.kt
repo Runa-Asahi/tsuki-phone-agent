@@ -120,7 +120,7 @@ object ChatSession {
                 closeStep(now, ok || msg.substringAfter("): ", msg).startsWith(ASK_MARK))   // a question is not a failed step
                 (items.lastOrNull { it is Item.Confirm && it.answer == null } as? Item.Confirm)?.answer = false
                 val summary = msg.substringAfter("): ", msg)
-                lastSummary = summary.replace(ASK_MARK, "Agent 提问：")
+                lastSummary = summary.replace(ASK_MARK, "Tsuki 提问：")
                 val ask = summary.startsWith(ASK_MARK)
                 items += Item.Result(nextId++, ok, summary.removePrefix(ASK_MARK).trim(), if (ok || ask) null else FriendlyErrors.explain(summary), lastGoal.orEmpty(), ask)
                 running = false; phase = Phase.IDLE; finished = true
@@ -168,7 +168,7 @@ object ActionText {
 /** Friendly Chinese explanations + what to do next. */
 object FriendlyErrors {
     private val RULES = listOf(
-        "无障碍" to "无障碍服务没连上：到 设置→辅助功能→已安装的服务 里重新打开 Phone Agent，再点「重试」。",
+        "无障碍" to "无障碍服务没连上：到 设置→辅助功能→已安装的服务 里重新打开 Tsuki，再点「重试」。",
         "云端未就绪" to "云端模型还没配置好：到右上角设置里选服务商、填 Key，并点「测试连接」。",
         "LLM 不可用" to "模型暂时不可用：检查网络或 Key；用本机模型时请把 MNN Chat 放到前台。",
         "超时" to "这一步太慢超时了：网络或模型较慢，可以直接点「重试」。",

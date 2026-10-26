@@ -21,7 +21,7 @@ object QuickIntents {
         val mm = m.groupValues[3].removeSuffix("分").let { when (it) { "" -> 0; "半" -> 30; "一刻" -> 15; "三刻" -> 45; else -> num(it) ?: return null } }
         when (m.groupValues[1]) { "下午", "晚上" -> if (h < 12) h += 12; "中午" -> if (h < 11) h += 12 }
         if (h !in 0..23 || mm !in 0..59) return null
-        return Alarm(h, mm, "Phone Agent")
+        return Alarm(h, mm, "Tsuki")
     }
 
     /** 「打开蓝牙」「关闭WLAN」: a toggle, not just opening the page. Returns (page keyword, on). */

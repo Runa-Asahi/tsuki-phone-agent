@@ -228,7 +228,7 @@ class AgentLoop(
                 val h = intent.hour!!; val m = intent.minute ?: 0
                 if (prefs.confirmAlarm && !onConfirm("设置闹钟确认\n时间：%02d:%02d\n由系统时钟创建。（可在设置里关闭此确认）".format(h, m)))
                     return Result(false, 0, "用户取消设置闹钟")
-                if (a11y.setAlarm(h, m, "Phone Agent")) return Result(true, 1, "已设置 %02d:%02d 的闹钟（由系统时钟创建）".format(h, m))
+                if (a11y.setAlarm(h, m, "Tsuki")) return Result(true, 1, "已设置 %02d:%02d 的闹钟（由系统时钟创建）".format(h, m))
                 onLog("时钟 Intent 失败，交给模型"); goal = "打开时钟，新建%02d:%02d的闹钟".format(h, m)
             }
             "app", "other" -> IntentParser.canonicalGoal(intent)?.let { if (it != goal) { onLog("按意图改写：$it"); goal = it } }
