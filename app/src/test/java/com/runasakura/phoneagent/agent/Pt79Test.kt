@@ -71,4 +71,9 @@ class Pt79Test {
         assertTrue(p, p.startsWith("弹窗先点关闭再操作") && p.contains("未验证"))
         assertNull(AppMemory(emptyList(), emptyList()).patternsFor("x", now))
     }
+    @Test fun parseRerank() {
+        assertEquals(listOf(2, 0), LlmRouter.parseRerank("{\"ids\":[2,0,2,7]}", 3))
+        assertEquals(emptyList<Int>(), LlmRouter.parseRerank("{\"ids\":[]}", 3))
+        assertNull(LlmRouter.parseRerank("no", 3))
+    }
 }

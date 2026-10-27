@@ -121,6 +121,16 @@
             <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/confirmAlarm" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_25" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="@string/ui_26" />
             <com.google.android.material.button.MaterialButton android:id="@+id/btnAppMemory" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/ui_27" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:textSize="15sp" android:textColor="@color/text_primary" android:accessibilityHeading="true" android:text="@string/sem_title" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:textSize="12sp" android:textColor="@color/text_tertiary" android:text="@string/sem_desc" />
+            <TextView android:id="@+id/semStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/semProgress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:visibility="gone" android:max="1000" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnSemDownload" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/sem_download" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnSemDelete" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_delete" />
+            </LinearLayout>
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/semOn" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/sem_on" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/llmRerank" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/sem_rerank" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
         <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">

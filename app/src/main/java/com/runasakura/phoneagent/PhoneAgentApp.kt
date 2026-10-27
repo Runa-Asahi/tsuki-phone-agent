@@ -17,6 +17,8 @@ class PhoneAgentApp : Application() {
         val heavy = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND || level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
         if (heavy && com.runasakura.phoneagent.llm.EmbeddedMnn.state == com.runasakura.phoneagent.llm.EmbeddedMnn.State.READY &&
             !com.runasakura.phoneagent.service.AgentForegroundService.isRunning()) com.runasakura.phoneagent.llm.EmbeddedMnn.release()
+        // The embedder (~250 MB) reloads in ~1 s; drop it off the main thread (it may be mid-encode).
+        if (heavy && !com.runasakura.phoneagent.service.AgentForegroundService.isRunning()) Thread { com.runasakura.phoneagent.llm.TextEmbedder.release() }.start()
     }
 
     override fun onCreate() {

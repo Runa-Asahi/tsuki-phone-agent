@@ -47,7 +47,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.modelCheckpoint.isChecked = prefs.modelCheckpoint
         // Status cards (Shizuku binder, a11y/secure settings, model folders) load after the first frame and off the
         // main thread, so opening Settings paints immediately instead of stalling on IPC and file walks.
-        binding.root.post { if (!isFinishing) { setupShizuku(); setupKeepAlive(); setupLocalModel(); firstStatusDone = true } }
+        binding.root.post { if (!isFinishing) { setupShizuku(); setupKeepAlive(); setupLocalModel(); setupSemantic(); firstStatusDone = true } }
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
@@ -305,7 +305,9 @@ class SettingsActivity : AppCompatActivity() {
             setOnClickListener { prefs.localEngine = id; refreshLocal() } })
         // One tap: start (or cancel) the recommended ModelScope download. No confirmation dialog.
         binding.btnLocalDownload.setOnClickListener {
-            if (com.runasakura.phoneagent.service.ModelDownloadService.state.value.running) com.runasakura.phoneagent.service.ModelDownloadService.cancel(this)
+            val dl = com.runasakura.phoneagent.service.ModelDownloadService.state.value
+            if (dl.running && dl.embed) binding.localStatus.text = "正在下载语义检索模型，完成后再下载本机大模型"
+            else if (dl.running) com.runasakura.phoneagent.service.ModelDownloadService.cancel(this)
             else {
                 binding.localStatus.text = "开始从魔塔社区下载 ${com.runasakura.phoneagent.llm.ModelStore.DEFAULT_LABEL}…"
                 com.runasakura.phoneagent.service.ModelDownloadService.download(this)
@@ -337,6 +339,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             com.runasakura.phoneagent.service.ModelDownloadService.state.collect { st ->
+                if (st.embed) { semState(st); return@collect }
                 binding.localProgress.visibility = if (st.running) android.view.View.VISIBLE else android.view.View.GONE
                 if (st.total > 0) binding.localProgress.setProgressCompat((st.done * 1000 / st.total).toInt(), true) else binding.localProgress.isIndeterminate = st.running
                 binding.btnLocalDownload.text = if (st.running) "取消下载" else getString(R.string.local_download)
@@ -345,6 +348,54 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
         refreshLocal()
+    }
+
+    // ---- Semantic retrieval model (bge-large-zh via MNN, ~217 MB) ----
+    private fun setupSemantic() {
+        val E = com.runasakura.phoneagent.llm.TextEmbedder
+        binding.semOn.isChecked = E.enabled(this)
+        binding.llmRerank.isChecked = E.llmRerank(this)
+        binding.semOn.setOnCheckedChangeListener { _, on -> offMain({ E.setEnabled(this, on); if (on) E.attach(this) }) { refreshSemantic() } }
+        binding.llmRerank.setOnCheckedChangeListener { _, on -> E.setLlmRerank(this, on); com.runasakura.phoneagent.agent.Relevance.llmRerank = on }
+        binding.btnSemDownload.setOnClickListener {
+            val st = com.runasakura.phoneagent.service.ModelDownloadService.state.value
+            when {
+                st.running && st.embed -> com.runasakura.phoneagent.service.ModelDownloadService.cancel(this)
+                st.running -> binding.semStatus.text = "正在下载本机大模型，完成后再下载语义模型"
+                else -> { binding.semStatus.text = "开始从魔塔社区下载 ${E.LABEL}…"; com.runasakura.phoneagent.service.ModelDownloadService.downloadEmbedder(this) }
+            }
+        }
+        binding.btnSemDelete.setOnClickListener {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setMessage("删除语义检索模型和已保存的经验向量？经验本身不会删除，检索会回到按字面相似度。")
+                .setPositiveButton("删除") { _, _ -> offMain({ E.delete(this) }) { refreshSemantic() } }.setNegativeButton("取消", null).show()
+        }
+        refreshSemantic()
+    }
+
+    private fun semState(st: com.runasakura.phoneagent.service.ModelDownloadService.State) {
+        binding.semProgress.visibility = if (st.running) View.VISIBLE else View.GONE
+        if (st.total > 0) binding.semProgress.setProgressCompat((st.done * 1000 / st.total).toInt(), true) else binding.semProgress.isIndeterminate = st.running
+        binding.btnSemDownload.text = if (st.running) "取消下载" else getString(R.string.sem_download)
+        if (st.running) binding.semStatus.text = "${st.msg} · ${st.done / 1_000_000}/${st.total / 1_000_000} MB"
+        else refreshSemantic(st.msg.takeIf { it.isNotBlank() })
+    }
+
+    private fun refreshSemantic(msg: String? = null) = offMain({
+        val E = com.runasakura.phoneagent.llm.TextEmbedder
+        val inst = E.installed(this)
+        val idx = if (inst && E.enabled(this)) E.attach(this) else null
+        Triple(inst, if (inst) E.sizeMb(this) else 0L, idx?.size() ?: 0)
+    }) { (inst, mb, vecs) ->
+        val running = com.runasakura.phoneagent.service.ModelDownloadService.state.value.let { it.running && it.embed }
+        binding.btnSemDownload.visibility = if (!inst || running) View.VISIBLE else View.GONE
+        binding.btnSemDelete.visibility = if (inst && !running) View.VISIBLE else View.GONE
+        binding.semOn.isEnabled = inst
+        val line = when {
+            !inst -> "未安装：现在按字面相似度检索经验"
+            !binding.semOn.isChecked -> "已安装（$mb MB），已关闭：按字面相似度检索"
+            else -> "已启用：${com.runasakura.phoneagent.llm.TextEmbedder.LABEL.substringBefore('（')} · 本机 CPU · 已缓存 $vecs 条经验向量"
+        }
+        binding.semStatus.text = listOfNotNull(msg, line).joinToString("\n")
     }
 
     private fun refreshLocal(keepMsg: Boolean = false) {

@@ -49,6 +49,7 @@ class LearningActivity : AppCompatActivity() {
         list.removeAllViews(); list.addView(note("读取中…"))
         lifecycleScope.launch {
             val buckets = withContext(Dispatchers.IO) {
+                runCatching { com.runasakura.phoneagent.llm.TextEmbedder.attach(this@LearningActivity) }
                 prefs.allAppMemory().map { (k, v) ->
                     val pkg = k.removePrefix("appmem_"); val m = AppMemory.decode(v)
                     val label = if (pkg == AppMemory.GLOBAL) "通用界面经验（跨应用）" else runCatching {
@@ -64,6 +65,7 @@ class LearningActivity : AppCompatActivity() {
     private fun render(buckets: List<Bucket>) {
         list.removeAllViews()
         val total = buckets.sumOf { it.rows.size }; val verified = buckets.sumOf { b -> b.rows.count { it.conf >= 2 } }
+        list.addView(note("检索方式：" + retrievalMode()))
         list.addView(note(if (total == 0) "还没有学到经验。每次任务结束后，Tsuki 会根据这次的证据记下可复用的经验；成功时验证被用到的经验，失败时降低它们的可信度，过期或从未被验证的会自动淘汰。"
             else "共 $total 条，其中 $verified 条已被后续任务验证。「待验证」只出现过一次，10 天内没被再次证实会自动淘汰；点一条可删除。"))
         for (b in buckets) {
@@ -118,6 +120,8 @@ class LearningActivity : AppCompatActivity() {
         }
     }
 
+    private fun retrievalMode() = com.runasakura.phoneagent.agent.Relevance.mode() +
+        if (com.runasakura.phoneagent.llm.TextEmbedder.llmRerank(this)) " + 云端 AI 重排" else ""
     private fun ago(ms: Long): String { val d = ms / 86_400_000; val h = ms / 3_600_000
         return when { d >= 1 -> "$d 天前"; h >= 1 -> "$h 小时前"; else -> "刚刚" } }
     private fun note(t: String) = TextView(this).apply { text = t; textSize = 13f; setTextColor(col(R.color.text_secondary)); setPadding(0, dp(8), 0, dp(4)) }

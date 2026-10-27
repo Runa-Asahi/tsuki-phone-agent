@@ -3,6 +3,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <atomic>
+#include <cmath>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -11,6 +12,7 @@
 
 using MNN::Transformer::Llm;
 using MNN::Transformer::ChatMessages;
+using MNN::Transformer::Embedding;
 
 #include "tsuki_core.hpp"
 
@@ -62,6 +64,45 @@ JNIEXPORT void JNICALL Java_com_runasakura_phoneagent_llm_EmbeddedMnn_nativeRele
     auto* s = reinterpret_cast<Session*>(h); if (!s) return;
     s->cancel = true;
     { std::lock_guard<std::mutex> g(s->lock); if (s->llm) Llm::destroy(s->llm); s->llm = nullptr; }
+    delete s;
+}
+
+
+// ---- Text embedding (semantic retrieval of learned lessons). MNN's Embedding engine (BERT-style bge / gte, Qwen3
+// embedding exports); output is pooled [1, dim], L2-normalised here so cosine == dot product.
+struct EmbSession { Embedding* e = nullptr; std::mutex lock; };
+
+JNIEXPORT jlong JNICALL Java_com_runasakura_phoneagent_llm_TextEmbedder_nativeLoad(JNIEnv* env, jclass, jstring config, jstring extra) {
+    Embedding* e = Embedding::createEmbedding(str(env, config), false);
+    if (!e) return 0;
+    auto ex = str(env, extra);
+    if (!ex.empty()) e->set_config(ex);
+    if (!e->load()) { Llm::destroy(e); return 0; }
+    auto* s = new EmbSession(); s->e = e;
+    return reinterpret_cast<jlong>(s);
+}
+
+JNIEXPORT jfloatArray JNICALL Java_com_runasakura_phoneagent_llm_TextEmbedder_nativeEmbed(JNIEnv* env, jclass, jlong h, jstring text) {
+    auto* s = reinterpret_cast<EmbSession*>(h);
+    if (!s || !s->e) return nullptr;
+    std::lock_guard<std::mutex> g(s->lock);
+    auto v = s->e->txt_embedding(str(env, text));
+    if (v == nullptr) return nullptr;
+    auto info = v->getInfo();
+    const float* p = v->readMap<float>();
+    if (!info || !p || info->size <= 0) return nullptr;
+    std::vector<float> out(p, p + info->size);
+    double n = 0; for (float x : out) n += (double) x * x;
+    n = n > 0 ? 1.0 / std::sqrt(n) : 0.0;
+    for (auto& x : out) x = (float) (x * n);
+    jfloatArray arr = env->NewFloatArray((jsize) out.size());
+    env->SetFloatArrayRegion(arr, 0, (jsize) out.size(), out.data());
+    return arr;
+}
+
+JNIEXPORT void JNICALL Java_com_runasakura_phoneagent_llm_TextEmbedder_nativeRelease(JNIEnv*, jclass, jlong h) {
+    auto* s = reinterpret_cast<EmbSession*>(h); if (!s) return;
+    { std::lock_guard<std::mutex> g(s->lock); if (s->e) Llm::destroy(s->e); s->e = nullptr; }
     delete s;
 }
 

@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 
 /** Foreground download / import of an on-device model (1.5 GB) that survives leaving Settings. Resumable. */
 class ModelDownloadService : Service() {
-    data class State(val running: Boolean, val done: Long = 0, val total: Long = 0, val msg: String = "")
+    data class State(val running: Boolean, val done: Long = 0, val total: Long = 0, val msg: String = "", val embed: Boolean = false)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var job: Job? = null
 
@@ -32,26 +32,30 @@ class ModelDownloadService : Service() {
         val tree = intent?.getStringExtra(EXTRA_TREE)?.let(Uri::parse)
         val adopt = intent?.getStringExtra(EXTRA_ADOPT)
         val repo = intent?.getStringExtra(EXTRA_REPO) ?: ModelStore.DEFAULT_REPO
+        val embed = intent?.getBooleanExtra(EXTRA_EMBED, false) == true
         job = scope.launch {
-            state.value = State(true, msg = when { adopt != null -> "正在使用已有模型…"; tree != null -> "导入中…"; else -> "从魔塔社区下载…" })
+            state.value = State(true, embed = embed, msg = when { adopt != null -> "正在使用已有模型…"; tree != null -> "导入中…"; embed -> "从魔塔社区下载语义检索模型…"; else -> "从魔塔社区下载…" })
             try {
                 val cb: (ModelStore.Progress) -> Unit = { p ->
                     val speed = if (p.bps > 0) " · ${p.bps / 1_000_000} MB/s" else ""
                     val eta = if (p.bps > 0 && p.total > p.done) " · 约 ${(p.total - p.done) / p.bps}s" else ""
                     val msg = "${p.file}$speed$eta"
-                    state.value = State(true, p.done, p.total, msg)
+                    state.value = State(true, p.done, p.total, msg, embed)
                     startFg(msg, p.done, p.total)
                 }
                 val d = when {
                     adopt != null -> com.runasakura.phoneagent.llm.ModelSources.pending?.let { c ->
                         com.runasakura.phoneagent.llm.ModelSources.adopt(this@ModelDownloadService, c, cb) } ?: error("没有待导入的模型")
                     tree != null -> ModelStore.import(this@ModelDownloadService, tree, cb)
-                    else -> ModelStore.download(this@ModelDownloadService, repo, cb)
+                    embed -> ModelStore.download(this@ModelDownloadService, com.runasakura.phoneagent.llm.TextEmbedder.REPO,
+                        com.runasakura.phoneagent.llm.TextEmbedder.dir(this@ModelDownloadService), selectWhenDone = false, onProgress = cb)
+                    else -> ModelStore.download(this@ModelDownloadService, repo, onProgress = cb)
                 }
-                state.value = State(false, msg = "完成：${d.name}（${ModelStore.sizeOf(d) / 1_000_000} MB）")
-                com.runasakura.phoneagent.llm.LocalWarmup.kick(applicationContext)
+                state.value = State(false, msg = "完成：${d.name}（${ModelStore.sizeOf(d) / 1_000_000} MB）", embed = embed)
+                if (embed) com.runasakura.phoneagent.llm.TextEmbedder.attach(applicationContext)
+                else com.runasakura.phoneagent.llm.LocalWarmup.kick(applicationContext)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Throwable) { state.value = State(false, msg = "失败：${e.message}（再点一次可续传）") }
+            catch (e: Throwable) { state.value = State(false, msg = "失败：${e.message}（再点一次可续传）", embed = embed) }
             finally { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() }
         }
         return START_NOT_STICKY
@@ -72,11 +76,12 @@ class ModelDownloadService : Service() {
 
     companion object {
         private const val ID = 4311
-        const val EXTRA_TREE = "tree"; const val EXTRA_REPO = "repo"; const val EXTRA_ADOPT = "adopt"; const val ACTION_CANCEL = "cancel"
+        const val EXTRA_TREE = "tree"; const val EXTRA_REPO = "repo"; const val EXTRA_ADOPT = "adopt"; const val EXTRA_EMBED = "embed"; const val ACTION_CANCEL = "cancel"
         val state = MutableStateFlow(State(false))
         fun download(ctx: Context) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java))
         fun import(ctx: Context, tree: Uri) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_TREE, tree.toString()))
         fun adopt(ctx: Context, c: com.runasakura.phoneagent.llm.ModelSources.Candidate) = run { com.runasakura.phoneagent.llm.ModelSources.pending = c }.let { ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_ADOPT, c.label)) }
+        fun downloadEmbedder(ctx: Context) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_EMBED, true))
         fun cancel(ctx: Context) = ctx.startService(Intent(ctx, ModelDownloadService::class.java).setAction(ACTION_CANCEL))
     }
 }

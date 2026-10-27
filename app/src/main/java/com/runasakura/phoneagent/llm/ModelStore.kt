@@ -111,12 +111,13 @@ object ModelStore {
     }
 
     /** Resumable download (HTTP Range on <file>.part); every file is sha256-checked before it is renamed into place. */
-    suspend fun download(ctx: Context, repo: String = DEFAULT_REPO, onProgress: (Progress) -> Unit): File = withContext(Dispatchers.IO) {
+    suspend fun download(ctx: Context, repo: String = DEFAULT_REPO, into: File = dirFor(ctx, repo), selectWhenDone: Boolean = true,
+                         onProgress: (Progress) -> Unit): File = withContext(Dispatchers.IO) {
         val list = http.newCall(Request.Builder().url("${api(repo)}/files?Revision=master&Recursive=true").build()).execute().use {
             check(it.isSuccessful) { "获取文件列表失败 HTTP ${it.code}（公开模型无需登录；若持续失败请检查网络）" }; parseFiles(it.body!!.string())
         }
-        check(list.any { it.path == "config.json" }) { "这个仓库不是 MNN LLM 模型（缺少 config.json）" }
-        val dir = dirFor(ctx, repo).apply { mkdirs() }
+        check(list.any { it.path == "config.json" }) { "这个仓库不是 MNN 模型（缺少 config.json）" }
+        val dir = into.apply { mkdirs() }
         val total = list.sumOf { it.size }
         val canon = dir.canonicalPath + File.separator
         check(list.all { File(dir, it.path).canonicalPath.startsWith(canon) }) { "文件列表含非法路径" }
@@ -171,7 +172,7 @@ object ModelStore {
             check(part.renameTo(out)) { "无法写入 ${f.path}" }
             onProgress(Progress(done, total, f.path))
         }
-        select(ctx, dir); dir
+        if (selectWhenDone) select(ctx, dir); dir
     }
 
     /** Import a folder picked with ACTION_OPEN_DOCUMENT_TREE (e.g. a model copied out of MNN Chat). */

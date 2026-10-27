@@ -81,6 +81,11 @@
     <string name="ui_26">发送消息、通话、支付、删除、卸载、下单始终需要确认，不能关闭。</string>
     <string name="ui_27">学习记录（查看 / 整理 / 删除经验）</string>
     <string name="learning_title">学习记录</string>
+    <string name="sem_title">语义检索</string>
+    <string name="sem_desc">用本机小模型理解经验的意思（例如「改闹钟」能找到「时钟应用新建闹钟」），中英文都可。没装时按字面相似度检索。向量只算一次并保存在本机，不上传。</string>
+    <string name="sem_download">下载语义模型（约 217 MB）</string>
+    <string name="sem_on">使用语义检索</string>
+    <string name="sem_rerank">云端 AI 重排经验（每个任务多一次云端调用）</string>
     <string name="ui_28">本机模型（MNN，可选）</string>
     <string name="ui_29">在手机本地跑小模型，离线可用但较慢。</string>
     <string name="shizuku_title">特权模式（Shizuku，可选）</string>

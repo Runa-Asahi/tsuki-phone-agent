@@ -104,10 +104,14 @@ class AgentLoop(
             if (m.factEntries.size < before) onLog("经验整理：AI 合并重复经验 $before → ${m.factEntries.size} 条（保留验证次数）")
         }
         prefs.setAppMemory(pkg, m.encode())
+        var g2: AppMemory? = null
         lesson?.patterns?.takeIf { it.isNotEmpty() }?.let { ps ->
             val g = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)) }.getOrNull() ?: AppMemory.EMPTY
-            prefs.setAppMemory(AppMemory.GLOBAL, g.merge(ps, null, null).encode())
+            g2 = g.merge(ps, null, null); prefs.setAppMemory(AppMemory.GLOBAL, g2!!.encode())
         }
+        // Encode the new lessons now (vectors persisted) so the next task scores them without any inference.
+        Relevance.index?.let { idx -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { idx.prepare(null, m.retrievalTexts() + g2?.retrievalTexts().orEmpty(), 3_000) } } }
         if (lesson == null) { onLog(when {
             r.success -> "经验沉淀：记录本次路线（未经模型整理）"
             reusedPath -> "失败：已降低复用路线的可信度"
@@ -118,7 +122,10 @@ class AgentLoop(
     private suspend fun runTask(goalIn: String): Result {
         var goal = GoalRewrite.normalize(goalIn)
         if (goal != goalIn) onLog("目标规范化：$goal")
-        globalPatterns = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)).patternsFor(goal, max = 3) }.getOrNull()
+        Relevance.clearBoost(); retrievalLogged = false
+        val globalMem = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)) }.getOrNull()
+        prepareRetrieval(goal, globalMem)
+        globalPatterns = runCatching { globalMem?.patternsFor(goal, max = 3) }.getOrNull()
         globalPatterns?.let { onLog("载入通用经验：$it") }
         var a11y = phoneProvider()
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider() } }
@@ -267,6 +274,7 @@ class AgentLoop(
                 targetPkg = match.packageName; appLabel = "${match.label}（${match.packageName}）"; taskApps += match.packageName
                 targetPkgForMemory = match.packageName
                 appMem = runCatching { AppMemory.decode(prefs.appMemory(match.packageName)) }.getOrNull()
+                appMem?.let { prepareRetrieval(goal, it); rerankLessons(goal, it) }
                 appMem?.hint(goal)?.let { onLog("载入应用经验：" + it.replace("\n", " | ")) }
                 skill = appMem?.skillFor(goal)?.also { onLog("载入技能（${it.steps.size} 步，已验证${it.conf}次）：" + it.steps.joinToString(" → ")) }
                 if (!com.runasakura.phoneagent.util.TaskTiming.time("启动应用") { dev.bringToFront(match.packageName, match.label) }) {
@@ -1020,6 +1028,29 @@ class AgentLoop(
         local = if (router.visionSkill != null && !router.skillSidelined) router.visionSkillSource else com.runasakura.phoneagent.llm.VisionChoice.Source.NONE,
         localModel = router.visionSkillLabel) +
         (if (router.visionReady && prefs.allowCloudScreenshot) "；另配看图辅助模型" else "")
+    /**
+     * Fill the semantic cache for [goal] + [mem]'s lessons (off the main thread, 1.5 s budget). Scoring itself never
+     * runs inference, so a slow or missing embedder only means the bigram fallback for what is not cached yet.
+     */
+    private suspend fun prepareRetrieval(goal: String, mem: AppMemory?) {
+        val idx = Relevance.index ?: return
+        val texts = mem?.retrievalTexts().orEmpty()
+        val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { idx.prepare(goal, texts, 1_500) }.getOrDefault(0) }
+        if (!retrievalLogged || n > 0) { retrievalLogged = true
+            onLog("经验检索：${Relevance.mode()}" + if (n > 0) "（新编码 $n 条，${idx.lastPrepareMs}ms）" else "") }
+    }
+    private var retrievalLogged = false
+
+    /** Optional (setting) cloud rerank of the top lessons; its order becomes a per-goal boost on top of retrieval. */
+    private suspend fun rerankLessons(goal: String, mem: AppMemory) {
+        if (!Relevance.llmRerank || !router.cloudReady || mem.factEntries.size < 6) return
+        val now = System.currentTimeMillis()
+        val cands = mem.factEntries.sortedByDescending { mem.score(it, goal, now) }.take(10).map { it.text }
+        val order = router.rerankLessons(goal, cands) ?: return
+        Relevance.setBoost(goal, Relevance.boostsFrom(cands, order))
+        onLog("经验重排：云端从 ${cands.size} 条里选出 ${order.size} 条最相关的")
+    }
+
     /** Relevant cross-app strategies for this goal (learned into the GLOBAL bucket), loaded once per task. */
     private var globalPatterns: String? = null
     private var emptyLooks = 0

@@ -46,6 +46,9 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
         AppMemory(factEntries, pathEntries, expire(now).skillEntries.mapNotNull { e ->
             if (Skill.decode(e.text)?.let { Similarity.score(it.goal, goal) >= Skill.MIN_SIM } == true) e.copy(conf = e.conf - 2).takeIf { it.conf > 0 } else e })
 
+    /** Texts the semantic index should have vectors for (lessons + route goals). */
+    fun retrievalTexts(): List<String> = factEntries.map { it.text } + pathEntries.map { goalOf(it) }
+
     private fun goalOf(p: Entry) = p.text.substringBefore("=>")
     private fun routeOf(p: Entry) = p.text.substringAfter("=>")
 
@@ -54,7 +57,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
      * memory shows the few entries that matter for THIS goal instead of the globally most-confirmed ones.
      */
     fun score(e: Entry, goal: String, now: Long): Double {
-        val rel = Similarity.score(e.text, goal)
+        val rel = Relevance.score(e.text, goal)
         val ageDays = if (e.ts == 0L) 30.0 else (now - e.ts) / 86_400_000.0
         return rel * 8 + minOf(e.conf, 4) * 0.25 - ageDays / 30.0
     }
@@ -63,7 +66,8 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
     fun hint(goal: String, now: Long = System.currentTimeMillis(), maxFacts: Int = 5): String? {
         val live = expire(now)
         val fs = live.factEntries.sortedByDescending { score(it, goal, now) }.take(maxFacts).map { it.text + if (it.conf < 2) "（未验证）" else "" }
-        val p = live.pathEntries.filter { Similarity.score(goalOf(it), goal) >= 0.6 }.maxByOrNull { it.conf }
+        // Routes: semantic match allowed for the advisory hint (the planner-skipping [knownPath] stays strict bigram).
+        val p = live.pathEntries.filter { Relevance.score(goalOf(it), goal) >= 0.6 }.maxByOrNull { it.conf }
         val parts = listOfNotNull(
             fs.takeIf { it.isNotEmpty() }?.joinToString("；")?.let { "此应用以往经验：$it" },
             p?.let { "以往成功路线（同类目标，${if (it.conf >= 2) "已验证${it.conf}次" else "仅成功过1次，仅供参考"}）：${routeOf(it)}" })
@@ -112,7 +116,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
      */
     fun confirmShown(goal: String, now: Long = System.currentTimeMillis(), maxFacts: Int = 5): AppMemory {
         val live = expire(now)
-        val shown = live.factEntries.sortedByDescending { score(it, goal, now) }.take(maxFacts).filter { Similarity.score(it.text, goal) >= RELEVANT }.toSet()
+        val shown = live.factEntries.sortedByDescending { score(it, goal, now) }.take(maxFacts).filter { Relevance.relevant(it.text, goal, RELEVANT) }.toSet()
         if (shown.isEmpty()) return live
         return AppMemory(live.factEntries.map { if (it in shown) it.copy(conf = minOf(MAX_CONF, it.conf + 1), ts = now) else it }, live.pathEntries, live.skillEntries)
     }
@@ -146,7 +150,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
 
     /** Cross-app strategies relevant to [goal] (from the [GLOBAL] bucket), for the prompt. */
     fun patternsFor(goal: String, now: Long = System.currentTimeMillis(), max: Int = 2): String? =
-        expire(now).factEntries.map { it to (Similarity.score(it.text, goal) + minOf(it.conf, 4) * 0.05) }.sortedByDescending { it.second }
+        expire(now).factEntries.map { it to (Relevance.score(it.text, goal) + minOf(it.conf, 4) * 0.05) }.sortedByDescending { it.second }
             .take(max).map { it.first }.takeIf { it.isNotEmpty() }?.joinToString("；") { it.text + if (it.conf < 2) "（未验证）" else "" }
 
     /** A reused route that ended in failure loses confidence (removed at 0). */
