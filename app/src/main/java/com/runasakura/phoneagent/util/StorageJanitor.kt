@@ -16,8 +16,8 @@ import java.io.File
  */
 object StorageJanitor {
     const val STALE_PART_MS = 3L * 86_400_000
-    data class Usage(val models: Long, val embedModel: Long, val vectors: Long, val mmapCache: Long, val temp: Long, val partial: Long) {
-        val total get() = models + embedModel + vectors + mmapCache + temp + partial
+    data class Usage(val models: Long, val embedModel: Long, val vectors: Long, val mmapCache: Long, val temp: Long, val partial: Long, val asrModel: Long = 0) {
+        val total get() = models + embedModel + vectors + mmapCache + temp + partial + asrModel
     }
     data class Plan(val delete: List<File>, val bytes: Long)
 
@@ -26,10 +26,11 @@ object StorageJanitor {
 
     fun usage(ctx: Context): Usage {
         val models = ModelStore.root(ctx); val embedRoot = File(ctx.filesDir, "embed")
-        val partial = parts(models).sumOf { it.length() } + parts(embedRoot).sumOf { it.length() }
+        val asrRoot = com.runasakura.phoneagent.voice.LocalAsr.root(ctx)
+        val partial = parts(models).sumOf { it.length() } + parts(embedRoot).sumOf { it.length() } + parts(asrRoot).sumOf { it.length() }
         val vectors = embedRoot.listFiles()?.filter { it.isFile && it.name.startsWith("vectors_") }?.sumOf { it.length() } ?: 0L
         return Usage(size(models) - parts(models).sumOf { it.length() }, size(TextEmbedder.dir(ctx)) - parts(embedRoot).sumOf { it.length() },
-            vectors, size(File(ctx.cacheDir, "mnn_mmap")), temps(ctx).sumOf { it.length() }, partial)
+            vectors, size(File(ctx.cacheDir, "mnn_mmap")), temps(ctx).sumOf { it.length() }, partial, size(asrRoot) - parts(asrRoot).sumOf { it.length() })
     }
 
     private fun temps(ctx: Context): List<File> = ctx.cacheDir.listFiles()?.filter { it.isFile && (it.name.startsWith("mnn_img_") || it.name.endsWith(".tmp")) }.orEmpty() +
@@ -52,14 +53,14 @@ object StorageJanitor {
         return Plan(out, out.sumOf { size(it) })
     }
 
-    private fun emptyModelDirs(ctx: Context): List<File> = (ModelStore.root(ctx).listFiles().orEmpty().toList() + File(ctx.filesDir, "embed").listFiles().orEmpty())
+    private fun emptyModelDirs(ctx: Context): List<File> = (ModelStore.root(ctx).listFiles().orEmpty().toList() + File(ctx.filesDir, "embed").listFiles().orEmpty() + com.runasakura.phoneagent.voice.LocalAsr.root(ctx).listFiles().orEmpty())
         .filter { d -> d.isDirectory && d.walk().none { it.isFile } }
 
     fun clean(ctx: Context, manual: Boolean): Long {
         val downloading = com.runasakura.phoneagent.service.ModelDownloadService.state.value.running
         val loaded = EmbeddedMnn.loadedDir != null || TextEmbedder.loaded || com.runasakura.phoneagent.service.AgentForegroundService.isRunning()
         val embedRoot = File(ctx.filesDir, "embed")
-        val p = plan(temps(ctx), (parts(ModelStore.root(ctx)) + parts(embedRoot)).toList(), emptyModelDirs(ctx), File(ctx.cacheDir, "mnn_mmap").takeIf { it.exists() },
+        val p = plan(temps(ctx), (parts(ModelStore.root(ctx)) + parts(embedRoot) + parts(com.runasakura.phoneagent.voice.LocalAsr.root(ctx))).toList(), emptyModelDirs(ctx), File(ctx.cacheDir, "mnn_mmap").takeIf { it.exists() },
             embedRoot.listFiles()?.filter { it.isFile && it.name.startsWith("vectors_") }.orEmpty(),
             System.currentTimeMillis(), downloading, manual, loaded)
         if (manual && p.delete.any { it.name.startsWith("vectors_") }) { TextEmbedder.release(); com.runasakura.phoneagent.agent.Relevance.index = null }

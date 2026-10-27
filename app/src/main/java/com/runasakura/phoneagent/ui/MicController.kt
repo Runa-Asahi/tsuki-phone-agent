@@ -41,7 +41,7 @@ class MicController(
     @SuppressLint("ClickableViewAccessibility")
     fun bind() {
         val longMs = ViewConfiguration.getLongPressTimeout().toLong()
-        val holdStart = Runnable { hold = true; btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); if (!voice.listening) begin() }
+        val holdStart = Runnable { hold = true; voice.endpointStops = false; btn.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); if (!voice.listening) begin() }
         btn.setOnTouchListener { v, e ->
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> { hold = false; v.postDelayed(holdStart, longMs) }
@@ -49,7 +49,7 @@ class MicController(
                     v.removeCallbacks(holdStart)
                     if (hold) voice.stop()                       // hold-to-talk released
                     else if (voice.listening) voice.stop()       // second tap ends
-                    else { v.performClick(); begin() }          // tap starts
+                    else { v.performClick(); voice.endpointStops = true; begin() }          // tap starts
                 }
                 MotionEvent.ACTION_CANCEL -> { v.removeCallbacks(holdStart); if (hold) voice.stop() }
             }
@@ -59,11 +59,28 @@ class MicController(
 
     private fun begin() {
         if (!VoiceInput.hasMicPermission(act)) { startOnGrant = true; perm.launch(android.Manifest.permission.RECORD_AUDIO); return }
+        if (!com.runasakura.phoneagent.voice.LocalAsr.installed(act) && offerLocal()) return
         when (VoiceInput.fallback(act)) {
             VoiceInput.Fallback.NONE -> { base = input.text?.toString().orEmpty(); voice.start() }
             VoiceInput.Fallback.RECOGNIZER_ACTIVITY -> runCatching { sysPage.launch(VoiceInput.intent()) }.onFailure { keyboardVoice() }
             VoiceInput.Fallback.KEYBOARD_VOICE -> keyboardVoice()
         }
+    }
+
+    /**
+     * The bundled offline engine is not downloaded yet: when the ROM has no recogniser, offer the one-tap 25 MB
+     * download (the composer then works offline). Returns true when the dialog/progress took over.
+     */
+    private fun offerLocal(): Boolean {
+        val st = com.runasakura.phoneagent.service.ModelDownloadService.state.value
+        if (st.running && st.asr) { toast("本地语音模型下载中：${st.done * 100 / st.total.coerceAtLeast(1)}%"); return true }
+        if (VoiceInput.available(act)) return false
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(act)
+            .setTitle(R.string.asr_offer_title).setMessage(R.string.asr_offer_msg)
+            .setPositiveButton(R.string.asr_download) { _, _ -> com.runasakura.phoneagent.service.ModelDownloadService.downloadAsr(act); toast("开始下载本地语音模型，完成后再点麦克风即可") }
+            .setNeutralButton(R.string.asr_use_keyboard) { _, _ -> keyboardVoice() }
+            .setNegativeButton(android.R.string.cancel, null).show()
+        return true
     }
 
     /** No recogniser on this ROM (common without Google services): the IME's voice key is the working path. */

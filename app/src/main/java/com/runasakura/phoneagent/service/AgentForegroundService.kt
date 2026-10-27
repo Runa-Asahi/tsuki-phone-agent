@@ -47,6 +47,11 @@ class AgentForegroundService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_PAUSE -> { togglePause(); return START_NOT_STICKY }
+            ACTION_MIC_READY -> {
+                // Mic granted mid-task: re-type the FGS (now with MICROPHONE) and start the orb listening.
+                if (isRunning()) { startForegroundTyped(buildNotification(lastStatus.ifBlank { "运行中" }, running = true)); orbVoice() }
+                return START_NOT_STICKY
+            }
             ACTION_START -> {
                 val goal = intent.getStringExtra(EXTRA_GOAL).orEmpty()
                 sessionContext = intent.getStringExtra(EXTRA_CONTEXT)
@@ -314,11 +319,21 @@ class AgentForegroundService : Service() {
     private fun orbVoice() {
         val ov = overlay
         if (!com.runasakura.phoneagent.voice.VoiceInput.hasMicPermission(this)) {
-            android.widget.Toast.makeText(this, "请先在 Tsuki 输入框旁点一次麦克风授权录音", android.widget.Toast.LENGTH_LONG).show(); return
+            // Ask right here, mid-task; MicPermissionActivity sends ACTION_MIC_READY back on grant.
+            runCatching { startActivity(Intent(this, com.runasakura.phoneagent.ui.MicPermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION)) }
+                .onFailure { ov?.setProgress("🎤 请在 Tsuki 里允许麦克风权限") }
+            return
         }
         if (!com.runasakura.phoneagent.voice.VoiceInput.available(this)) {
-            android.widget.Toast.makeText(this, "本机没有系统语音识别服务，悬浮球语音不可用（可在 Tsuki 输入框用输入法语音键）", android.widget.Toast.LENGTH_LONG).show(); return
+            val st = ModelDownloadService.state.value
+            if (st.running && st.asr) { ov?.setProgress("🎤 本地语音模型下载中 ${st.done * 100 / st.total.coerceAtLeast(1)}%"); return }
+            // No system recogniser on this ROM: fetch the bundled engine's 25 MB model now; the orb works when it lands.
+            runCatching { ModelDownloadService.downloadAsr(this) }
+            ov?.setProgress("🎤 正在下载本地语音模型（25 MB），完成后再点麦克风"); return
         }
+        // A task started before mic was granted holds a specialUse-only FGS: re-type it so background recording works.
+        if (android.os.Build.VERSION.SDK_INT >= 30 && (foregroundServiceType and android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) == 0)
+            runCatching { startForegroundTyped(buildNotification(lastStatus.ifBlank { "运行中" }, running = true)) }
         orbListener?.let { if (it.listening) { it.stop(); return } }
         val v = orbListener ?: com.runasakura.phoneagent.voice.VoiceInput(this, object : com.runasakura.phoneagent.voice.VoiceInput.Listener {
             override fun onListening(on: Boolean) { if (on) ov?.setProgress("🎤 正在听…再点麦克风结束") }
@@ -372,7 +387,9 @@ class AgentForegroundService : Service() {
             .build()
     }
 
+    @Volatile private var lastStatus = ""
     private fun updateNotification(text: String) {
+        lastStatus = text
         val mgr = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
         mgr.notify(NOTIF_ID, buildNotification(text, true))
     }
@@ -401,6 +418,7 @@ class AgentForegroundService : Service() {
         if (job?.isActive == true) { stopReason = stopReason ?: "服务被系统结束"; log("停止原因：$stopReason") }
         running = false
         orbListener?.destroy(); orbListener = null   // onDestroy runs on main
+        runCatching { com.runasakura.phoneagent.voice.LocalAsr.release() }
         stopFlag.set(true)
         job?.cancel()
         scope.cancel()
@@ -418,6 +436,7 @@ class AgentForegroundService : Service() {
         const val ACTION_STOP = "com.runasakura.phoneagent.STOP"
         const val EXTRA_REASON = "stop_reason"
         const val ACTION_PAUSE = "com.runasakura.phoneagent.PAUSE"
+        const val ACTION_MIC_READY = "com.runasakura.phoneagent.MIC_READY"
         const val EXTRA_CONTEXT = "context"
         const val ACTION_STATUS = "com.runasakura.phoneagent.STATUS"
         const val ACTION_CONFIRM_RESULT = "com.runasakura.phoneagent.CONFIRM_RESULT"

@@ -11,8 +11,8 @@ android {
         applicationId = "com.runasakura.phoneagent"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "0.13.0-mvp"
+        versionCode = 24
+        versionName = "0.14.0-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // On-device LLM (MNN) is arm64 only; 16 KB page aligned for Android 15+/16.
@@ -52,6 +52,8 @@ android {
     packaging {
         jniLibs {
             useLegacyPackaging = false
+            // sherpa-onnx (offline ASR): only the JNI lib + onnxruntime are loaded; the C/C++ API libs are unused.
+            excludes += listOf("**/libsherpa-onnx-c-api.so", "**/libsherpa-onnx-cxx-api.so")
         }
     }
 }
@@ -73,6 +75,8 @@ dependencies {
     implementation("dev.rikka.shizuku:provider:13.1.5")
     // Bundled (offline, no GMS) Chinese OCR for apps that hide their accessibility tree (e.g. WeChat)
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    // Bundled offline streaming ASR (k2-fsa sherpa-onnx 2.0.1, Apache-2.0); model downloaded on demand from ModelScope.
+    implementation(files("libs/sherpa-onnx-2.0.1.aar"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("junit:junit:4.13.2")
     // JVM UI rendering (no device): screenshot tests of the chat / settings / overlay views.

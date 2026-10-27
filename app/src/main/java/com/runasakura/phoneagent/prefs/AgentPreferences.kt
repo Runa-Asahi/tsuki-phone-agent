@@ -6,29 +6,35 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 class AgentPreferences(context: Context) : AgentSettings {
+    private val context = context.applicationContext ?: context
     private val sp: SharedPreferences =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** API keys only — never written to the plain prefs file or the diagnostic log. */
-    private val secure: SharedPreferences = try {
-        val master = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        EncryptedSharedPreferences.create(
-            context, PREFS_SECURE, master,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (_: Exception) {
-        // Emulators / missing StrongBox: fall back to private prefs (still MODE_PRIVATE).
-        context.getSharedPreferences(PREFS_SECURE_FALLBACK, Context.MODE_PRIVATE)
-    }
-
-    init {
+    /**
+     * API keys only — never written to the plain prefs file or the diagnostic log. Lazy: creating the Keystore-backed
+     * store costs 50–200 ms, so it is built on a background thread at app start ([warmSecure]), not on the main thread.
+     */
+    private val secure: SharedPreferences by lazy {
+        val s = try {
+            val master = MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            EncryptedSharedPreferences.create(
+                context, PREFS_SECURE, master,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (_: Exception) {
+            // Emulators / missing StrongBox: fall back to private prefs (still MODE_PRIVATE).
+            context.getSharedPreferences(PREFS_SECURE_FALLBACK, Context.MODE_PRIVATE)
+        }
         // Pass R moved keys to the encrypted store; carry over a key saved in the plain file.
         sp.getString(KEY_CLOUD_KEY, null)?.takeIf { it.isNotBlank() }?.let { old ->
-            if (secure.getString(KEY_CLOUD_KEY, "").isNullOrBlank()) secure.edit().putString(KEY_CLOUD_KEY, old).apply()
+            if (s.getString(KEY_CLOUD_KEY, "").isNullOrBlank()) s.edit().putString(KEY_CLOUD_KEY, old).apply()
             sp.edit().remove(KEY_CLOUD_KEY).apply()
         }
+        s
     }
+    /** Build the encrypted store off the main thread (called from Application.onCreate's worker). */
+    fun warmSecure() { secure }
 
     var mnnBaseUrl: String
         get() = sp.getString(KEY_MNN_URL, DEFAULT_MNN_URL) ?: DEFAULT_MNN_URL
@@ -117,6 +123,11 @@ class AgentPreferences(context: Context) : AgentSettings {
     var voiceAutoSend: Boolean
         get() = sp.getBoolean("voice_auto_send", false)
         set(v) = sp.edit().putBoolean("voice_auto_send", v).apply()
+
+    /** Voice engine: "local" = bundled sherpa-onnx (default when installed), "system" = the ROM's SpeechRecognizer. */
+    var voiceEngine: String
+        get() = sp.getString("voice_engine", "local") ?: "local"
+        set(v) = sp.edit().putString("voice_engine", v).apply()
 
     override var deepThink: Boolean
         get() = sp.getBoolean("deep_think", true)

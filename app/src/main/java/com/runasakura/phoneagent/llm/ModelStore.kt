@@ -117,6 +117,12 @@ object ModelStore {
             check(it.isSuccessful) { "获取文件列表失败 HTTP ${it.code}（公开模型无需登录；若持续失败请检查网络）" }; parseFiles(it.body!!.string())
         }
         check(list.any { it.path == "config.json" }) { "这个仓库不是 MNN 模型（缺少 config.json）" }
+        fetchFiles(repo, list, into, onProgress)
+        if (selectWhenDone) select(ctx, into); into
+    }
+
+    /** Resumable, sha256-checked download of exactly [list] from ModelScope [repo] into [into] (shared by LLM and ASR models). */
+    suspend fun fetchFiles(repo: String, list: List<RemoteFile>, into: File, onProgress: (Progress) -> Unit): File = withContext(Dispatchers.IO) {
         val dir = into.apply { mkdirs() }
         val total = list.sumOf { it.size }
         val canon = dir.canonicalPath + File.separator
@@ -172,7 +178,7 @@ object ModelStore {
             check(part.renameTo(out)) { "无法写入 ${f.path}" }
             onProgress(Progress(done, total, f.path))
         }
-        if (selectWhenDone) select(ctx, dir); dir
+        dir
     }
 
     /**

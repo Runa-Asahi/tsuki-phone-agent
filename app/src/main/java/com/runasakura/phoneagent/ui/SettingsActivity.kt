@@ -67,7 +67,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.deepThink.setOnCheckedChangeListener { _, on -> prefs.deepThink = on }
         binding.voiceAutoSend.isChecked = prefs.voiceAutoSend
         binding.voiceAutoSend.setOnCheckedChangeListener { _, on -> prefs.voiceAutoSend = on }
-        binding.voiceEngine.text = getString(R.string.voice_auto_send_desc) + "\n本机语音通道：" + com.runasakura.phoneagent.voice.VoiceInput.describe(this)
+        setupAsr()
         binding.btnTestCloud.setOnClickListener {
             val url = binding.cloudUrl.text.toString().trim(); val key = binding.cloudKey.text.toString().trim()
             val model = binding.cloudModel.text.toString().trim().ifBlank { CloudProviders.byId(CloudProviders.effectiveProvider(prefs.cloudProvider, url, key)).model }
@@ -346,6 +346,7 @@ class SettingsActivity : AppCompatActivity() {
         lifecycleScope.launch {
             com.runasakura.phoneagent.service.ModelDownloadService.state.collect { st ->
                 if (st.embed) { semState(st); return@collect }
+                if (st.asr) { asrState(st); return@collect }
                 binding.localProgress.visibility = if (st.running) android.view.View.VISIBLE else android.view.View.GONE
                 if (st.total > 0) binding.localProgress.setProgressCompat((st.done * 1000 / st.total).toInt(), true) else binding.localProgress.isIndeterminate = st.running
                 binding.btnLocalDownload.text = if (st.running) "取消下载" else getString(R.string.local_download)
@@ -354,6 +355,50 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
         refreshLocal()
+    }
+
+    // ---- Bundled offline ASR (sherpa-onnx zh-14M, ~25 MB) ----
+    private fun setupAsr() {
+        val A = com.runasakura.phoneagent.voice.LocalAsr
+        binding.voicePreferSystem.isChecked = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs.voiceEngine == "system"
+        binding.voicePreferSystem.setOnCheckedChangeListener { _, on -> com.runasakura.phoneagent.PhoneAgentApp.instance.prefs.voiceEngine = if (on) "system" else "local"; refreshAsr() }
+        binding.btnAsrDownload.setOnClickListener {
+            val st = com.runasakura.phoneagent.service.ModelDownloadService.state.value
+            when {
+                st.running && st.asr -> com.runasakura.phoneagent.service.ModelDownloadService.cancel(this)
+                st.running -> binding.asrStatus.text = "正在下载其他模型，完成后再下载语音模型"
+                else -> { binding.asrStatus.text = "开始从魔塔社区下载语音模型…"; com.runasakura.phoneagent.service.ModelDownloadService.downloadAsr(this) }
+            }
+        }
+        binding.btnAsrDelete.setOnClickListener {
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setMessage("删除本地语音模型（约 25 MB）？之后可重新下载；没有系统识别服务时语音输入会改走输入法语音键。")
+                .setPositiveButton("删除") { _, _ -> offMain({ A.delete(this) }) { refreshAsr(); refreshStorage() } }.setNegativeButton("取消", null).show()
+        }
+        refreshAsr()
+    }
+
+    private fun asrState(st: com.runasakura.phoneagent.service.ModelDownloadService.State) {
+        binding.asrProgress.visibility = if (st.running) View.VISIBLE else View.GONE
+        if (st.total > 0) binding.asrProgress.setProgressCompat((st.done * 1000 / st.total).toInt(), true) else binding.asrProgress.isIndeterminate = st.running
+        binding.btnAsrDownload.text = if (st.running) "取消下载" else getString(R.string.asr_download)
+        if (st.running) binding.asrStatus.text = "${st.msg} · ${st.done / 1_000_000}/${st.total / 1_000_000} MB"
+        else { refreshAsr(st.msg.takeIf { it.isNotBlank() }); refreshStorage() }
+    }
+
+    private fun refreshAsr(msg: String? = null) = offMain({
+        val A = com.runasakura.phoneagent.voice.LocalAsr
+        Triple(A.installed(this), A.partialBytes(this), com.runasakura.phoneagent.voice.VoiceInput.describe(this))
+    }) { (inst, part, route) ->
+        val running = com.runasakura.phoneagent.service.ModelDownloadService.state.value.let { it.running && it.asr }
+        binding.btnAsrDownload.visibility = if (!inst || running) View.VISIBLE else View.GONE
+        binding.btnAsrDelete.visibility = if (inst && !running) View.VISIBLE else View.GONE
+        val line = when {
+            inst -> "已安装（${com.runasakura.phoneagent.voice.LocalAsr.TOTAL_BYTES / 1_000_000} MB）"
+            part > 0 && !running -> "已下载 ${part / 1_000_000} MB，点下载继续（断点续传）"
+            else -> "未安装"
+        }
+        binding.asrStatus.text = listOfNotNull(msg, line, "当前语音通道：$route").joinToString("\n")
+        binding.voiceEngine.text = getString(R.string.voice_auto_send_desc)
     }
 
     // ---- Storage usage + one-tap cleanup (sizes are computed off the main thread) ----
@@ -372,7 +417,7 @@ class SettingsActivity : AppCompatActivity() {
     private fun refreshStorage(msg: String? = null) = offMain({ com.runasakura.phoneagent.util.StorageJanitor.usage(this) to
         com.runasakura.phoneagent.llm.ModelStore.installed(this).size }) { (u, nModels) ->
         val J = com.runasakura.phoneagent.util.StorageJanitor
-        val parts = listOfNotNull("本机大模型 ${J.mb(u.models)}" + if (nModels > 1) "（$nModels 个，不用的可在上方删除）" else "", "语义模型 ${J.mb(u.embedModel)}".takeIf { u.embedModel > 0 },
+        val parts = listOfNotNull("本机大模型 ${J.mb(u.models)}" + if (nModels > 1) "（$nModels 个，不用的可在上方删除）" else "", "语义模型 ${J.mb(u.embedModel)}".takeIf { u.embedModel > 0 }, "语音模型 ${J.mb(u.asrModel)}".takeIf { u.asrModel > 0 },
             "经验向量 ${J.mb(u.vectors)}".takeIf { u.vectors > 0 }, "模型加载缓存 ${J.mb(u.mmapCache)}".takeIf { u.mmapCache > 0 },
             "中断的下载 ${J.mb(u.partial)}".takeIf { u.partial > 0 }, "临时文件 ${J.mb(u.temp)}".takeIf { u.temp > 0 })
         binding.storageNow.text = listOfNotNull(msg, "共 ${J.mb(u.total)}：" + parts.joinToString(" · ")).joinToString("\n")

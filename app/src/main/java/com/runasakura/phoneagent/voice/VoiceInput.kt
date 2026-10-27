@@ -12,8 +12,8 @@ import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
 
 /**
- * Voice input over the system [SpeechRecognizer] (no bundled ASR, nothing leaves the device unless the
- * recogniser the ROM provides does so). Detection is explicit because MagicOS / phones without Google services often
+ * Voice input: the bundled offline [LocalAsr] (sherpa-onnx) when its model is installed, else the system
+ * [SpeechRecognizer] (optional; the user may also prefer it in Settings). Detection is explicit because MagicOS / phones without Google services often
  * have NO recognition service: callers then fall back to [Fallback.RECOGNIZER_ACTIVITY] (a voice-assistant app that
  * handles RecognizerIntent) or [Fallback.KEYBOARD_VOICE] (the input method's own voice key, e.g. 百度/讯飞/搜狗/荣耀输入法).
  *
@@ -36,10 +36,20 @@ class VoiceInput(private val ctx: Context, private val l: Listener) {
     /** Prefer the private on-device recogniser; flips off for the session when it can't do Chinese. */
     private var onDevice = true
 
+    private var local: LocalAsr.Session? = null
+    /** Tap mode stops by itself after a pause; hold-to-talk keeps listening until [stop]. */
+    var endpointStops = true
+
     /** Starts listening; returns false (with [Listener.onError]) when no recogniser can be used. */
     fun start(): Boolean {
         if (listening) return true
         if (!hasMicPermission(ctx)) { l.onError("需要麦克风权限"); return false }
+        if (useLocal(ctx)) {
+            cancelled = false
+            val wrap = object : Listener by l { override fun onListening(on: Boolean) { listening = on; l.onListening(on) } }
+            listening = true
+            return LocalAsr.Session(ctx, wrap, endpointStops).also { local = it }.start()
+        }
         val r = sr ?: create(ctx, onDevice)?.also { sr = it } ?: run { l.onError("本机没有可用的系统语音识别服务"); return false }
         lastPartial = ""; cancelled = false
         r.setRecognitionListener(object : RecognitionListener {
@@ -73,10 +83,10 @@ class VoiceInput(private val ctx: Context, private val l: Listener) {
     }
 
     /** Stop listening and deliver what was heard (hold-to-talk release / second tap). */
-    fun stop() { runCatching { sr?.stopListening() } }
+    fun stop() { local?.stop(); runCatching { sr?.stopListening() } }
     @Volatile private var cancelled = false
-    fun cancel() { cancelled = true; runCatching { sr?.cancel() }; if (listening) { listening = false; l.onListening(false) } }
-    fun destroy() { runCatching { sr?.destroy() }; sr = null; listening = false }
+    fun cancel() { cancelled = true; local?.cancel(); runCatching { sr?.cancel() }; if (listening) { listening = false; l.onListening(false) } }
+    fun destroy() { local?.cancel(); local = null; runCatching { sr?.destroy() }; sr = null; listening = false }
 
     private fun best(b: Bundle?): String? = b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
 
@@ -91,7 +101,11 @@ class VoiceInput(private val ctx: Context, private val l: Listener) {
 
         fun onDeviceAvailable(ctx: Context) = Build.VERSION.SDK_INT >= 33 && runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrDefault(false)
         fun systemAvailable(ctx: Context) = runCatching { SpeechRecognizer.isRecognitionAvailable(ctx) }.getOrDefault(false)
-        fun available(ctx: Context) = onDeviceAvailable(ctx) || systemAvailable(ctx)
+        /** Pure choice: bundled engine unless the user picked the system one and it exists (or no model yet). */
+        fun pickLocal(localInstalled: Boolean, pref: String, systemOk: Boolean) = localInstalled && (pref != "system" || !systemOk)
+        fun useLocal(ctx: Context) = pickLocal(LocalAsr.installed(ctx),
+            runCatching { com.runasakura.phoneagent.PhoneAgentApp.instance.prefs.voiceEngine }.getOrDefault("local"), onDeviceAvailable(ctx) || systemAvailable(ctx))
+        fun available(ctx: Context) = LocalAsr.installed(ctx) || onDeviceAvailable(ctx) || systemAvailable(ctx)
 
         /** On-device recogniser first (offline, private), else the default system one. */
         private fun create(ctx: Context, preferOnDevice: Boolean): SpeechRecognizer? = runCatching {
@@ -119,6 +133,7 @@ class VoiceInput(private val ctx: Context, private val l: Listener) {
 
         /** One line for settings/self-test: which path voice input will use on this phone. */
         fun describe(ctx: Context): String = when {
+            useLocal(ctx) -> "Tsuki 本地离线识别（sherpa-onnx，音频不出手机）"
             onDeviceAvailable(ctx) -> "系统离线识别（本机）"
             systemAvailable(ctx) -> "系统语音识别（" + services(ctx).joinToString("、").ifBlank { "默认服务" } + "）"
             fallback(ctx) == Fallback.RECOGNIZER_ACTIVITY -> "语音助手识别页（无后台识别服务）"

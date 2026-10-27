@@ -69,6 +69,13 @@
             android:theme="@style/Theme.HonorPhoneAgent.Translucent" />
 
         <activity
+            android:name=".ui.MicPermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.HonorPhoneAgent.Translucent" />
+        <activity
             android:name=".ui.TeachActivity"
             android:exported="false"
             android:parentActivityName=".ui.MainActivity"
