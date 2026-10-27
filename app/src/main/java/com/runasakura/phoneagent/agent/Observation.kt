@@ -130,7 +130,7 @@ class NoEffectGuard {
     fun check(a: AgentAction, label: String?): String? {
         val k = key(a, label) ?: return null
         val hit = dead.entries.firstOrNull { (dk, _) ->
-            dk == k || (dk.startsWith("t:") && k.startsWith("t:") && KeyMatchLite.sim(dk.drop(2), k.drop(2)) >= 0.6)
+            ThinkMode.sameKey(dk, k) || (dk.startsWith("t:") && k.startsWith("t:") && KeyMatchLite.sim(dk.drop(2), k.drop(2)) >= 0.6)
         } ?: return null
         return "「${hit.value}」之前做过且界面没有实质变化，禁止重复；换一个元素/位置/方式"
     }

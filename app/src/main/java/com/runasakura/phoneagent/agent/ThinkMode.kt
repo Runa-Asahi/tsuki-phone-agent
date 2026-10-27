@@ -54,6 +54,20 @@ object ThinkMode {
         else -> null
     }
 
+    /**
+     * Same target? Labels compare exactly; coordinate keys ("c:bx,by", 40 px buckets) also match the 8 neighbouring
+     * buckets, so a retap 20–50 px away from a proven no-op (model jitter) is still caught.
+     */
+    fun sameKey(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (!a.startsWith("c:") || !b.startsWith("c:")) return false
+        val (ax, ay) = a.drop(2).split(',').map { it.toIntOrNull() ?: return false }
+        val (bx, by) = b.drop(2).split(',').map { it.toIntOrNull() ?: return false }
+        return kotlin.math.abs(ax - bx) <= 1 && kotlin.math.abs(ay - by) <= 1
+    }
+
+    fun banned(key: String?, blacklist: Collection<String>) = key != null && blacklist.any { sameKey(it, key) }
+
     fun onReject(s: State) { s.rejectStreak++ }
     fun onAccepted(s: State) { s.rejectStreak = 0 }
 

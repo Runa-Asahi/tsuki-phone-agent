@@ -37,6 +37,7 @@ data class Recipe(
                 if (t != null) append(if (screenLabels.any { Similarity.score(it, t) >= 0.8 || it.contains(t) }) "（目标在当前屏幕）" else "（当前屏幕未见「$t」）")
             }
             if (tips.isNotEmpty()) append("；注意：" + tips.joinToString("；"))
+            append("（优先按此流程，以当前屏幕为准；某步无效就换法，不死磕）")
         }
     }
 

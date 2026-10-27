@@ -42,7 +42,34 @@ object OcrEngine {
         android.util.Log.i(TAG, "warm-up ${System.currentTimeMillis() - t0}ms")
     }
 
-    suspend fun recognizeLines(bmp: Bitmap, yOffset: Int = 0): List<OcrLine>? =
+    /** Live status for the home-screen pill: engine readiness and real recognition latency (not a fixed label). */
+    @Volatile var lastMs = -1L; private set
+    @Volatile var avgMs = -1L; private set
+    @Volatile var reads = 0; private set
+    @Volatile var lastFailed = false; private set
+    val isReady get() = warmed
+
+    /** e.g. 「就绪 · 230ms」/「预热中」/「识别失败」. Pure formatting — unit-tested. */
+    fun statusText(ready: Boolean = warmed, avg: Long = avgMs, failed: Boolean = lastFailed): String = when {
+        failed -> "识别失败"
+        !ready -> "待预热"
+        avg > 0 -> "就绪 · ${avg}ms"
+        else -> "就绪"
+    }
+
+    private fun record(ms: Long, ok: Boolean) {
+        lastFailed = !ok
+        if (!ok) return
+        lastMs = ms; reads++
+        avgMs = if (avgMs < 0) ms else (avgMs * 3 + ms) / 4   // EMA: recent speed, not first cold read
+    }
+
+    suspend fun recognizeLines(bmp: Bitmap, yOffset: Int = 0): List<OcrLine>? {
+        val t0 = System.currentTimeMillis()
+        return recognizeRaw(bmp, yOffset).also { if (warmed) record(System.currentTimeMillis() - t0, it != null) }
+    }
+
+    private suspend fun recognizeRaw(bmp: Bitmap, yOffset: Int): List<OcrLine>? =
         suspendCancellableCoroutine { cont ->
             try {
                 recognizer.process(InputImage.fromBitmap(bmp, 0))

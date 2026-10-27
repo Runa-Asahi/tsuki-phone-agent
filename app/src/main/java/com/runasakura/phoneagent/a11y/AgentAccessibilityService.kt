@@ -136,7 +136,9 @@ class AgentAccessibilityService : AccessibilityService() {
 
     /** JPEG base64 of the screen, downscaled (for VL models). */
     fun screenshotJpegBase64(maxSide: Int = 896, marks: List<com.runasakura.phoneagent.screen.ScreenItem>? = null, screenW: Int = 0, screenH: Int = 0): String? {
-        val bmp = takeScreenshotBitmap() ?: return null
+        val reused = frameProvider?.invoke()
+        if (reused != null) Log.d(TAG, "screenshot: reused OCR frame (no second capture)")
+        val bmp = reused ?: takeScreenshotBitmap() ?: return null
         val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height)
         var scaled = if (scale < 1f) Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
         if (!marks.isNullOrEmpty() && screenW > 0) runCatching {
@@ -159,8 +161,17 @@ class AgentAccessibilityService : AccessibilityService() {
         }
         val os = java.io.ByteArrayOutputStream()
         scaled.compress(Bitmap.CompressFormat.JPEG, 70, os)
+        // Free both frames now (full-res ARGB ≈ 10–14 MB); previously left to GC every look.
+        if (scaled !== bmp && !scaled.isRecycled) scaled.recycle()
+        if (!bmp.isRecycled) bmp.recycle()
         return android.util.Base64.encodeToString(os.toByteArray(), android.util.Base64.NO_WRAP)
     }
+
+    /** Set by the active [A11yDevice]: a copy of the frame OCR just read (null when stale). */
+    @Volatile var frameProvider: (() -> Bitmap?)? = null
+    /** Set right before the agent acts: frames captured earlier must never be reused as "the current screen". */
+    @Volatile var frameBarrier = 0L
+    fun dropFrame() { frameBarrier = System.currentTimeMillis() }
 
     /** Fallback text entry: clipboard + ACTION_PASTE on the node. */
     fun pasteText(node: AccessibilityNodeInfo, text: String): Boolean = try {
@@ -755,9 +766,17 @@ class AgentAccessibilityService : AccessibilityService() {
 
     private val shotExecutor by lazy { java.util.concurrent.Executors.newSingleThreadExecutor() }
 
+    @Volatile private var rawCapBroken = false
+
     fun takeScreenshotBitmap(timeoutMs: Long = 4000): Bitmap? {
         // Shizuku backend: screencap has no prompt and no 1-per-second a11y screenshot throttle.
         com.runasakura.phoneagent.shell.ShizukuBackend.shellOrNull(this)?.let { sh ->
+            if (!rawCapBroken) {
+                val raw = com.runasakura.phoneagent.shell.ShellOps.screencapRaw(sh)
+                val b = raw?.let { runCatching { com.runasakura.phoneagent.shell.RawFrame.toBitmap(it) }.getOrNull() }
+                if (b != null) return b
+                rawCapBroken = true; Log.i(TAG, "raw screencap not usable on this ROM, using PNG")
+            }
             com.runasakura.phoneagent.shell.ShellOps.screencap(sh)?.let { png ->
                 try { android.graphics.BitmapFactory.decodeByteArray(png, 0, png.size)?.let { return it } } catch (_: Throwable) {}
             }

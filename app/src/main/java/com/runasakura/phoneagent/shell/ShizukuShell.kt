@@ -117,4 +117,37 @@ object ShellOps {
 
     /** PNG via screencap (no MediaProjection / a11y-screenshot throttle). */
     fun screencap(sh: PrivilegedShell): ByteArray? = sh.exec(listOf("screencap", "-p"), 6000).takeIf { it.ok && it.out.size > 1000 }?.out
+
+    /**
+     * Raw RGBA screencap (no `-p`): skips the device-side PNG encode + our PNG decode (~300–500 ms on a 1080p+
+     * panel). Null when the header is not understood → caller falls back to [screencap].
+     */
+    fun screencapRaw(sh: PrivilegedShell): ByteArray? = sh.exec(listOf("screencap"), 6000).takeIf { it.ok && it.out.size > 1000 }?.out
+}
+
+/** Parses `screencap` raw output: [w][h][format] (+[colorspace] on Android 12+) little-endian ints, then RGBA_8888. */
+object RawFrame {
+    data class Header(val w: Int, val h: Int, val offset: Int)
+    private fun le(b: ByteArray, i: Int) = (b[i].toInt() and 0xff) or ((b[i + 1].toInt() and 0xff) shl 8) or
+        ((b[i + 2].toInt() and 0xff) shl 16) or ((b[i + 3].toInt() and 0xff) shl 24)
+
+    fun header(b: ByteArray): Header? {
+        if (b.size < 16) return null
+        val w = le(b, 0); val h = le(b, 4); val fmt = le(b, 8)
+        if (w !in 64..8192 || h !in 64..8192 || fmt != 1) return null   // 1 = RGBA_8888
+        val px = w.toLong() * h * 4
+        return when (b.size.toLong()) {
+            16 + px -> Header(w, h, 16)
+            12 + px -> Header(w, h, 12)
+            else -> null
+        }
+    }
+
+    fun toBitmap(b: ByteArray): android.graphics.Bitmap? {
+        val hd = header(b) ?: return null
+        val bmp = android.graphics.Bitmap.createBitmap(hd.w, hd.h, android.graphics.Bitmap.Config.ARGB_8888)
+        // ARGB_8888 is stored as RGBA bytes in memory, matching screencap's RGBA_8888 layout.
+        bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(b, hd.offset, hd.w * hd.h * 4))
+        return bmp
+    }
 }

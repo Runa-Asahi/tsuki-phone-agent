@@ -49,6 +49,8 @@ class A11yDevice(
     private var actionGen = 0
     private var ocrCacheGen = -1
 
+    init { s.frameProvider = { freshFrameCopy() } }
+
     private fun invalidateOcr(reason: String = "") {
         if (ocrCache != null) {
             ocrCache = null; ocrCacheGen = -1
@@ -282,10 +284,23 @@ class A11yDevice(
     private var shotGen = -1; private var shotEvent = -1L
     private var refined: Screen? = null
 
-    private fun keepShot(bmp: android.graphics.Bitmap, lines: List<com.runasakura.phoneagent.ocr.OcrLine>, top: Int, bottom: Int, pkg: String) {
+    private var shotAt = 0L
+    private val shotLock = Any()
+
+    private fun keepShot(bmp: android.graphics.Bitmap, lines: List<com.runasakura.phoneagent.ocr.OcrLine>, top: Int, bottom: Int, pkg: String) = synchronized(shotLock) {
         shotBmp?.let { if (it !== bmp && !it.isRecycled) it.recycle() }
         shotBmp = bmp; shotLines = lines; shotTop = top; shotBottom = bottom; shotPkg = pkg
-        shotGen = actionGen; shotEvent = s.lastEventAt; refined = null
+        shotGen = actionGen; shotEvent = s.lastEventAt; refined = null; shotAt = System.currentTimeMillis()
+    }
+
+    /**
+     * The frame OCR just read, if no action happened since and it is fresh (≤1.5 s): lets a look/screenshot in the
+     * same step reuse it instead of a second screencap (~300–600 ms + a11y 1/s throttle). Caller owns the copy.
+     */
+    fun freshFrameCopy(): android.graphics.Bitmap? = synchronized(shotLock) {
+        val b = shotBmp ?: return null
+        if (b.isRecycled || shotGen != actionGen || shotAt <= s.frameBarrier || System.currentTimeMillis() - shotAt > FRESH_FRAME_MS) return null
+        runCatching { b.copy(android.graphics.Bitmap.Config.ARGB_8888, false) }.getOrNull()
     }
 
     /**
@@ -617,7 +632,10 @@ class A11yDevice(
         return false
     }
 
-    companion object { private const val TAG = "A11yDevice" }
+    companion object {
+        const val FRESH_FRAME_MS = 1500L
+        private const val TAG = "A11yDevice"
+    }
 }
 
 /** Two-frame stability check: read up to [extra] more frames until two consecutive ones agree. */

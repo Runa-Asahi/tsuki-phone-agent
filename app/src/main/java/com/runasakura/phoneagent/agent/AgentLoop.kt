@@ -951,13 +951,12 @@ class AgentLoop(
         if (content.isBlank()) {
             onLog("LLM content: <empty>")
         } else {
-            onLog("LLM content: ${content.take(800)}")
-            if (content.length > 800) onLog("…(content truncated, len=${content.length})")
+            onLog("LLM content: ${content.take(500)}" + if (content.length > 500) "…(len=${content.length})" else "")
         }
-        resp.rawBody?.let { raw ->
-            // Keep short: choices[0].message often enough; full body for parse debug
-            onLog("LLM raw: ${raw.take(600)}")
-            if (raw.length > 600) onLog("…(raw truncated, len=${raw.length})")
+        // Raw HTTP body only when there is no usable content (debugging a broken response); it used to be logged
+        // every step (≈600 chars × steps of log I/O and broadcast churn) while duplicating `content`.
+        if (content.isBlank() || resp.error != null) resp.rawBody?.let { raw ->
+            onLog("LLM raw: ${raw.take(600)}" + if (raw.length > 600) "…(len=${raw.length})" else "")
         }
     }
 
@@ -1018,7 +1017,7 @@ class AgentLoop(
             val sparse = sc.source.startsWith("ocr") || sc.items.count { !it.label.startsWith("〔") } <= 2
             // Blacklisted by ThinkMode / NoEffectGuard: refuse even if near an element.
             val key = ThinkMode.actionKey(a, null)
-            if (key != null && key in think.blacklist) return "坐标(${a.x},${a.y})已在禁止列表（先前点过无效），请换位置或 look 后按截图选关闭钮/其他入口"
+            if (ThinkMode.banned(key, think.blacklist)) return "坐标(${a.x},${a.y})已在禁止列表（先前点过无效），请换位置或 look 后按截图选关闭钮/其他入口"
             if (!shotThisStep && !near && !LayoutHints.isGallery(sc)) {
                 // tree=0 games / splash / any-tap-to-continue: blank taps are legitimate. Allow when the screen is
                 // sparse OR we already attached a shot this step OR vision is off (exploratory). Cap attempts.
@@ -1405,6 +1404,7 @@ class AgentLoop(
         action: AgentAction,
         @Suppress("UNUSED_PARAMETER") snap: UiSnapshot
     ): Boolean {
+        AgentAccessibilityService.require()?.dropFrame()   // the kept OCR frame is "before" from here on
         return try {
             when (action) {
                 is AgentAction.Launch -> {
