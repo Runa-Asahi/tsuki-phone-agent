@@ -93,7 +93,8 @@ class ChatRenderer(
     }
 
     /** Drop cached item views (after a palette switch every bubble is rebuilt in the new colours). */
-    fun reset(list: LinearLayout) { views.clear(); list.removeAllViews() }
+    fun reset(list: LinearLayout) { views.clear(); pill = null; list.removeAllViews() }
+    private var pill: Pair<ChatSession.Phase, View>? = null
 
     fun render(list: LinearLayout, items: List<ChatSession.Item>, phase: ChatSession.Phase,
                recent: List<Pair<String, Boolean>>, suggestions: List<String>, setup: List<SetupItem> = emptyList(), hour: Int = 20) {
@@ -110,11 +111,14 @@ class ChatRenderer(
             }
             views[it.id] = sig to v; wanted += v
         }
-        if (phase != ChatSession.Phase.IDLE) wanted += livePill(phase)
+        if (phase != ChatSession.Phase.IDLE) wanted += (pill?.takeIf { it.first == phase }?.second ?: livePill(phase).also { pill = phase to it })
         val keep = items.map { it.id }.toSet(); views.keys.retainAll(keep)
-        // Re-attach in order, reusing views.
-        list.removeAllViews()
-        wanted.forEach { (it.parent as? ViewGroup)?.removeView(it); list.addView(it) }
+        // Diff against what is attached: keep the unchanged prefix, re-attach only from the first difference
+        // (a running task usually appends or updates the last row, so this avoids relayout of the whole list).
+        var same = 0
+        while (same < wanted.size && same < list.childCount && list.getChildAt(same) === wanted[same]) same++
+        if (same < list.childCount) list.removeViews(same, list.childCount - same)
+        for (i in same until wanted.size) { val v = wanted[i]; (v.parent as? ViewGroup)?.removeView(v); list.addView(v) }
     }
 
     private fun build(item: ChatSession.Item, lastStep: Boolean): View = when (item) {
@@ -163,7 +167,13 @@ class ChatRenderer(
         if (!lastStep) rail.addView(View(ctx).apply { setBackgroundColor(color(R.color.outline)) }, LinearLayout.LayoutParams(dp(2), 0, 1f).apply { topMargin = dp(2) })
         row.addView(rail, LinearLayout.LayoutParams(dp(28), ViewGroup.LayoutParams.MATCH_PARENT).apply { topMargin = dp(8) })
         if (s.state == ChatSession.State.RUNNING && motion) ObjectAnimator.ofFloat(b, View.ALPHA, 1f, 0.45f).apply {
-            duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE; start() }
+            duration = 700; repeatMode = ValueAnimator.REVERSE; repeatCount = ValueAnimator.INFINITE
+            // An infinite animator keeps running (and holds the view) after the row is replaced: tie it to attachment.
+            b.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) { if (!isStarted) start() }
+                override fun onViewDetachedFromWindow(v: View) { cancel(); v.alpha = 1f }
+            })
+            if (b.isAttachedToWindow) start() }
 
         val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), dp(10), 0, dp(10)) }
         val head = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }

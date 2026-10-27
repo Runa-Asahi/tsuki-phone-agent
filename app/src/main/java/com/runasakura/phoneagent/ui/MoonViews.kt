@@ -32,18 +32,46 @@ class MoonSkyView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
-    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) { shader = null }
+    override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) { shader = null; halo.shader = null }
+
+    /**
+     * Halo + moon never change between frames: drawn once into a small cached sprite around the moon (it used to
+     * allocate gradients and a Path boolean op every frame). The sky gradient shader is cached too. Rebuilt on
+     * size/palette change; a sprite, not a full-screen layer, so it costs ~1–2 MB instead of ~10 MB.
+     */
+    private var layer: android.graphics.Bitmap? = null
+    private var layerKey: Any? = null
+    private val halo = Paint(Paint.ANTI_ALIAS_FLAG)
+    private var haloR = -1f
+    private fun moonSprite(w: Int, k: TsukiTheme.Colors): android.graphics.Bitmap? {
+        val key = w to k
+        if (layerKey == key) layer?.let { return it }
+        layer = null; layerKey = null   // no recycle(): a display list may still reference it; GC frees it
+        val r = w * 0.09f; val half = r * 3.4f; val side = (half * 2).toInt().coerceAtLeast(1)
+        val b = runCatching { android.graphics.Bitmap.createBitmap(side, side, android.graphics.Bitmap.Config.ARGB_8888) }.getOrNull() ?: return null
+        val c = Canvas(b); val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.shader = RadialGradient(half, half, r * 3.2f, k.glow, 0x00000000, Shader.TileMode.CLAMP); c.drawCircle(half, half, r * 3.2f, p); p.shader = null
+        if (k.fullMoon) fullMoon(c, half, half, r * 0.86f, p, 0.5f)   // 纯月 (its breathing halo is drawn per frame)
+        else { p.color = k.star and 0x00FFFFFF or (0x55 shl 24); crescent(c, half, half, r, p) }
+        layer = b; layerKey = key; return b
+    }
+
+    override fun onDetachedFromWindow() { super.onDetachedFromWindow(); layer = null; layerKey = null; last = 0L }
+    override fun onWindowVisibilityChanged(visibility: Int) { super.onWindowVisibilityChanged(visibility); if (visibility == VISIBLE) invalidate() else last = 0L }
 
     override fun onDraw(c: Canvas) {
         val w = width.toFloat(); val h = height.toFloat(); if (w <= 0 || h <= 0) return
         val k = colors
         if (shader == null) shader = LinearGradient(0f, 0f, 0f, h, k.skyTop, k.skyBottom, Shader.TileMode.CLAMP)
         paint.shader = shader; c.drawRect(0f, 0f, w, h, paint); paint.shader = null
-        // halo + crescent, top right
         val cx = w * 0.84f; val cy = h * 0.09f; val r = w * 0.09f
-        paint.shader = RadialGradient(cx, cy, r * 3.2f, k.glow, 0x00000000, Shader.TileMode.CLAMP); c.drawCircle(cx, cy, r * 3.2f, paint); paint.shader = null
-        if (k.fullMoon) fullMoon(c, cx, cy, r * 0.86f, paint, if (animateMotes) 0.5f + 0.5f * sin(t * 0.6f) else 0.5f)   // 纯月
-        else { paint.color = k.star and 0x00FFFFFF or (0x55 shl 24); crescent(c, cx, cy, r, paint) }
+        val sprite = moonSprite(width, k)
+        if (sprite != null) c.drawBitmap(sprite, cx - sprite.width / 2f, cy - sprite.height / 2f, null)
+        else if (k.fullMoon) fullMoon(c, cx, cy, r * 0.86f, paint, 0.5f) else { paint.color = k.star and 0x00FFFFFF or (0x55 shl 24); crescent(c, cx, cy, r, paint) }
+        if (k.fullMoon && animateMotes) {
+            if (halo.shader == null || haloR != r) { haloR = r; halo.shader = RadialGradient(cx, cy, r * 3.0f, intArrayOf(0x30C8D6EE, 0x00C8D6EE), null, Shader.TileMode.CLAMP) }
+            halo.alpha = (255 * (0.5f + 0.5f * sin(t * 0.6f))).toInt(); c.drawCircle(cx, cy, r * 3.0f, halo)
+        }
         // stars twinkle slowly (alpha only)
         for (s in stars) {
             val a = (0.35f + 0.65f * (0.5f + 0.5f * sin(t * 0.8f + s[3] * 6.28f))).coerceIn(0f, 1f)
@@ -76,9 +104,9 @@ class MoonSkyView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
                 c.drawCircle(x, y * h, m[2] * d, paint)
             }
         }
-        if (animateMotes && isShown) {
+        if (animateMotes && isShown && windowVisibility == VISIBLE) {
             val now = System.nanoTime(); if (last != 0L) t += ((now - last) / 1e9f).coerceAtMost(0.1f); last = now
-            postInvalidateDelayed(33)
+            postInvalidateDelayed(TsukiTheme.frameMs(context))
         } else last = 0L
     }
 
@@ -148,6 +176,6 @@ class MoonPhaseView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
         val rx = r * kotlin.math.abs(k)
         path.arcTo(cx - rx, cy - r, cx + rx, cy + r, if (waxing) 90f else -90f, if (k > 0) 180f else -180f, false)
         c.drawPath(path, p)
-        if (running && isShown) { frame++; postInvalidateDelayed(60) }
+        if (running && isShown && windowVisibility == VISIBLE) { frame++; postInvalidateDelayed(if (TsukiTheme.lowPower(context)) 120 else 60) }
     }
 }

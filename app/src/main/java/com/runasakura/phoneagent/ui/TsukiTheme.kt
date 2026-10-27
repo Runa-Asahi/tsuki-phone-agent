@@ -128,6 +128,21 @@ object TsukiTheme {
         a.window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(k.bg))
     }
 
+    /**
+     * Battery saver on → animations run at a lower frame rate. Cached for 5 s: PowerManager.isPowerSaveMode is a
+     * binder call and views ask every frame.
+     */
+    fun lowPower(ctx: Context): Boolean {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - powerAt > 5_000) { powerAt = now
+            powerSave = runCatching { (ctx.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isPowerSaveMode }.getOrDefault(false) }
+        return powerSave
+    }
+    @Volatile private var powerAt = -10_000L
+    @Volatile private var powerSave = false
+    /** Frame interval for ambient animations: ~30 fps normally, ~12 fps on battery saver. */
+    fun frameMs(ctx: Context): Long = if (lowPower(ctx)) 80L else 33L
+
     /** "Reduce motion": system animator scale 0 (developer option / accessibility 'remove animations'). */
     fun reduceMotion(ctx: Context): Boolean =
         runCatching { Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f }.getOrDefault(false)

@@ -80,7 +80,8 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
-        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) { com.runasakura.phoneagent.ocr.OcrEngine.warmUp() }
+        // OCR warm-up after the first frames (it loads ML Kit; competing with startup made the first scroll stutter).
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) { kotlinx.coroutines.delay(1500); com.runasakura.phoneagent.ocr.OcrEngine.warmUp() }
         ContextCompat.registerReceiver(
             this, statusReceiver, IntentFilter(AgentForegroundService.ACTION_STATUS), ContextCompat.RECEIVER_NOT_EXPORTED
         )
@@ -391,7 +392,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderChat() {
         val atBottom = !binding.scrollChat.canScrollVertically(1)
-        val recent = TaskHistory.load(this).take(3).map { it.goal to it.ok }
+        val recent = if (ChatSession.snapshot().isEmpty()) TaskHistory.load(this).take(3).map { it.goal to it.ok } else emptyList()
         renderer.render(binding.chatList, ChatSession.snapshot(), ChatSession.phase, recent, SUGGESTIONS,
             if (ChatSession.snapshot().isEmpty()) setupItems() else emptyList(), java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
         renderPhase()

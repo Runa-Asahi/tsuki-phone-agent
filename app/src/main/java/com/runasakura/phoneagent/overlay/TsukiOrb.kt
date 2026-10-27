@@ -156,7 +156,7 @@ object TsukiOrb {
                 paint.color = 0xFFFFFFFF.toInt(); paint.textSize = 10 * d; paint.textAlign = Paint.Align.CENTER; paint.isFakeBoldText = true
                 c.drawText(if (s > 99) "99" else "$s", bx, by + 3.5f * d, paint)
             }
-            if (motion && !paused && isShown) { t += 0.033f; postInvalidateDelayed(33) }
+            if (motion && !paused && isShown) { val ms = com.runasakura.phoneagent.ui.TsukiTheme.frameMs(context); t += ms / 1000f; postInvalidateDelayed(ms) }
         }
     }
 }

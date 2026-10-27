@@ -21,7 +21,13 @@ object TaskHistory {
 
     fun prepend(list: List<Entry>, e: Entry): List<Entry> = (listOf(e) + list).take(MAX)
 
-    fun load(ctx: Context) = decode(ctx.getSharedPreferences(PREF, 0).getString(KEY, null))
+    // Memo: the chat re-renders up to ~8×/s while a task runs; re-parse only when the stored string changed.
+    @Volatile private var memo: Pair<String?, List<Entry>>? = null
+    fun load(ctx: Context): List<Entry> {
+        val raw = ctx.getSharedPreferences(PREF, 0).getString(KEY, null)
+        memo?.let { if (it.first === raw || it.first == raw) return it.second }
+        return decode(raw).also { memo = raw to it }
+    }
     fun add(ctx: Context, goal: String, ok: Boolean, summary: String) {
         if (goal.isBlank()) return
         val p = ctx.getSharedPreferences(PREF, 0)
