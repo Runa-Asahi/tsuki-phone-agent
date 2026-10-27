@@ -153,6 +153,11 @@ class A11yDevice(
 
     private var ocrFingerprint: IntArray? = null
     private var lastShotLines: List<com.runasakura.phoneagent.ocr.OcrLine>? = null
+    // Region-incremental OCR state (crop coordinates, full resolution).
+    private var deltaGrid: IntArray? = null
+    private var deltaLines: List<com.runasakura.phoneagent.ocr.OcrLine>? = null
+    private var deltaKey = ""
+    private var deltaChain = 0
 
     private suspend fun ocrScreen(pkg: String): Screen? {
         // Reuse OCR until a new accessibility event (UI change) arrives
@@ -163,8 +168,15 @@ class A11yDevice(
             return ocrCache
         }
         var (w, h) = s.screenSize()
-        val wait = 340 - (System.currentTimeMillis() - lastShotAt)
-        if (wait > 0) delay(wait)
+        // Adaptive: no wait with Shizuku screencap; a11y API only for its rate limit; plus a short settle if the UI is moving.
+        var wait = com.runasakura.phoneagent.ocr.CapturePacing.waitMs(System.currentTimeMillis(), lastShotAt, s.lastEventAt, s.shotThrottled())
+        var settled = 0L
+        while (wait > 0 && settled < com.runasakura.phoneagent.ocr.CapturePacing.MAX_SETTLE_MS + com.runasakura.phoneagent.ocr.CapturePacing.A11Y_GAP_MS) {
+            delay(wait); settled += wait
+            wait = com.runasakura.phoneagent.ocr.CapturePacing.waitMs(System.currentTimeMillis(), lastShotAt, s.lastEventAt, s.shotThrottled())
+                .coerceAtMost(com.runasakura.phoneagent.ocr.CapturePacing.MAX_SETTLE_MS + com.runasakura.phoneagent.ocr.CapturePacing.A11Y_GAP_MS - settled)
+        }
+        if (settled > 0) TaskTiming.add("截图前等待", settled)
         coroutineContext.ensureActive()
         val t0 = System.currentTimeMillis()
         var bmp = withContext(Dispatchers.IO) { s.takeScreenshotBitmap() }
@@ -203,17 +215,55 @@ class A11yDevice(
         // Landscape (games/video): text is tiny relative to the long side → keep far more pixels.
         val cap = if (crop.width > crop.height) 1600 else 960
         val scaleDown = if (longSide > cap) cap.toFloat() / longSide else 1f
-        val small = if (scaleDown < 0.99f) {
+        fun makeSmall() = if (scaleDown < 0.99f) {
             android.graphics.Bitmap.createScaledBitmap(
                 crop, (crop.width * scaleDown).toInt().coerceAtLeast(1),
                 (crop.height * scaleDown).toInt().coerceAtLeast(1), true
             )
         } else crop
-        // Mild contrast stretch helps dark-mode WeChat (pure Kotlin, no ColorMatrix GPU needed)
-        val ready = enhanceContrast(small)
-        var lines = try { TaskTiming.time("OCR识别") { OcrEngine.recognizeLines(ready, 0) } } finally {
-            // Free intermediates promptly (each full-res ARGB frame is ~14 MB on PPG-AN00).
-            for (b in listOf(ready, small)) if (b !== bmp && b !== crop && !b.isRecycled) b.recycle()
+        // Region-incremental OCR (portrait): re-read only the bands whose pixels changed since the last frame of the
+        // same app/layout, reuse the other lines. Landscape keeps the full + native-tile pass.
+        val grid = if (landscape) null else try {
+            val cw = crop.width
+            com.runasakura.phoneagent.ocr.OcrDelta.grid(cw, crop.height) { y, row -> crop.getPixels(row, 0, cw, 0, y, cw, 1) }
+        } catch (_: Throwable) { null }
+        val dKey = "$pkg|${crop.width}x${crop.height}|$top|$scaleDown"
+        val plan = if (grid == null) com.runasakura.phoneagent.ocr.OcrDelta.Plan.Full
+            else com.runasakura.phoneagent.ocr.OcrDelta.plan(deltaGrid.takeIf { deltaKey == dKey }, grid, deltaLines.takeIf { deltaKey == dKey }, crop.height, deltaChain)
+        val inv = if (scaleDown < 0.99f) 1f / scaleDown else 1f
+        var mode = "全屏"
+        // Lines in crop coordinates (full resolution).
+        var cropLines: List<com.runasakura.phoneagent.ocr.OcrLine>? = null
+        if (plan is com.runasakura.phoneagent.ocr.OcrDelta.Plan.Same) { cropLines = deltaLines; mode = "像素未变·复用" }
+        else if (plan is com.runasakura.phoneagent.ocr.OcrDelta.Plan.Partial) {
+            val fresh = ArrayList<com.runasakura.phoneagent.ocr.OcrLine>(); var ok = true
+            val tPart = System.currentTimeMillis()
+            run {
+                for (bd in plan.bands) {
+                    coroutineContext.ensureActive()
+                    val part = try { android.graphics.Bitmap.createBitmap(crop, 0, bd[0], crop.width, bd[1] - bd[0]) } catch (_: Exception) { ok = false; break }
+                    val ps = if (scaleDown < 0.99f) android.graphics.Bitmap.createScaledBitmap(part, (part.width * scaleDown).toInt().coerceAtLeast(1),
+                        (part.height * scaleDown).toInt().coerceAtLeast(1), true) else part
+                    val pr = enhanceContrast(ps)
+                    val res = try { OcrEngine.recognizeLines(pr, 0) } finally { for (x in listOf(pr, ps, part)) if (x !== crop && !x.isRecycled) x.recycle() }
+                    if (res == null) { ok = false; break }
+                    res.forEach { fresh += com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * inv).toInt(), (it.t * inv).toInt() + bd[0], (it.r * inv).toInt(), (it.b * inv).toInt() + bd[0]) }
+                }
+            }
+            TaskTiming.add("OCR识别", System.currentTimeMillis() - tPart)
+            if (ok) { cropLines = com.runasakura.phoneagent.ocr.OcrDelta.merge(deltaLines.orEmpty(), fresh, plan.bands)
+                mode = "增量 ${plan.bands.size} 段 ${(plan.fraction * 100).toInt()}%" }
+        }
+        val incremental = cropLines != null
+        var lines: List<com.runasakura.phoneagent.ocr.OcrLine>? = null
+        if (!incremental) {
+            // Mild contrast stretch helps dark-mode WeChat (pure Kotlin, no ColorMatrix GPU needed)
+            val small = makeSmall()
+            val ready = enhanceContrast(small)
+            lines = try { TaskTiming.time("OCR识别") { OcrEngine.recognizeLines(ready, 0) } } finally {
+                // Free intermediates promptly (each full-res ARGB frame is ~14 MB on PPG-AN00).
+                for (b in listOf(ready, small)) if (b !== bmp && b !== crop && !b.isRecycled) b.recycle()
+            }
         }
         // Landscape: the downscaled pass misses text; add native-resolution tiles (aspect kept) and merge.
         if (landscape && lines != null && scaleDown < 0.99f) {
@@ -231,16 +281,17 @@ class A11yDevice(
             log("OCR 横屏原分辨率分块：整体 ${global.size} + 分块 ${tiles.size} → ${merged.size} 行")
             lines = merged.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * scaleDown).toInt(), (it.t * scaleDown).toInt(), (it.r * scaleDown).toInt(), (it.b * scaleDown).toInt()) }
         }
+        if (!incremental && lines != null) cropLines = lines.map {
+            com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * inv).toInt(), (it.t * inv).toInt(), (it.r * inv).toInt(), (it.b * inv).toInt()) }
         // Visual candidates (colour blocks / corner icons) from a small thumbnail: text-free buttons become tappable items.
         val blobsThumb = blobsJob.await()
+        val swd = (crop.width * scaleDown).toInt(); val sht = (crop.height * scaleDown).toInt()
         if (crop !== bmp && !crop.isRecycled) crop.recycle()
-        val bw = bmp.width; val bh = bmp.height; val swd = small.width; val sht = small.height
-        if (lines == null) { bmp.recycle(); return null }
-        val inv = if (scaleDown < 0.99f) 1f / scaleDown else 1f
-        val globalBmp = lines.map {
-            com.runasakura.phoneagent.ocr.OcrLine(it.text, (it.l * inv).toInt(), (it.t * inv).toInt() + off,
-                (it.r * inv).toInt(), (it.b * inv).toInt() + off)
-        }
+        val bw = bmp.width; val bh = bmp.height
+        if (cropLines == null) { bmp.recycle(); deltaGrid = null; deltaLines = null; return null }
+        if (grid != null) { deltaGrid = grid; deltaLines = cropLines; deltaKey = dKey; deltaChain = if (incremental) deltaChain + 1 else 0 }
+        else { deltaGrid = null; deltaLines = null }
+        val globalBmp = cropLines.map { com.runasakura.phoneagent.ocr.OcrLine(it.text, it.l, it.t + off, it.r, it.b + off) }
         // Detail bands are NOT run here (speed): flows call refineScreen() only when a key target is missing.
         keepShot(bmp, globalBmp, top, bottom, pkg); lastShotLines = globalBmp
         val detail = emptyMap<Pair<Int, Int>, List<com.runasakura.phoneagent.ocr.OcrLine>>()
@@ -254,7 +305,7 @@ class A11yDevice(
             scaled, (top * sy).toInt(), (bottom * sy).toInt() + 1, ignore, overlayExclude()
         )
         val ms = System.currentTimeMillis() - t0
-        log("OCR ${ms}ms（截图${bw}x${bh}→识别${swd}x${sht}${if (landscape && scaleDown < 0.99f) "+原分辨率分块" else ""}）文字=${items.size}")
+        log("OCR ${ms}ms·$mode（截图${bw}x${bh}→识别${swd}x${sht}${if (landscape && scaleDown < 0.99f) "+原分辨率分块" else ""}）文字=${items.size}")
         val visual = blobsThumb?.let { (bl, k) ->
             // thumbnail coords → bitmap coords (+crop offset) → screen coords
             val shifted = bl.map { it.copy(t = it.t + (off / k).toInt(), b = it.b + (off / k).toInt()) }

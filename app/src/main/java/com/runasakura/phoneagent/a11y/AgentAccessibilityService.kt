@@ -768,6 +768,9 @@ class AgentAccessibilityService : AccessibilityService() {
 
     @Volatile private var rawCapBroken = false
 
+    /** True when shots go through the rate-limited accessibility API (no Shizuku screencap). */
+    fun shotThrottled(): Boolean = com.runasakura.phoneagent.shell.ShizukuBackend.shellOrNull(this) == null
+
     fun takeScreenshotBitmap(timeoutMs: Long = 4000): Bitmap? {
         // Shizuku backend: screencap has no prompt and no 1-per-second a11y screenshot throttle.
         com.runasakura.phoneagent.shell.ShizukuBackend.shellOrNull(this)?.let { sh ->
