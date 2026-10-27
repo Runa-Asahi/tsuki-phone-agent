@@ -113,6 +113,11 @@ class AgentPreferences(context: Context) : AgentSettings {
         get() = sp.getBoolean("model_checkpoint", false)
         set(v) = sp.edit().putBoolean("model_checkpoint", v).apply()
 
+    /** Voice input: send the task automatically once the transcript is final (default off: review first). */
+    var voiceAutoSend: Boolean
+        get() = sp.getBoolean("voice_auto_send", false)
+        set(v) = sp.edit().putBoolean("voice_auto_send", v).apply()
+
     override var deepThink: Boolean
         get() = sp.getBoolean("deep_think", true)
         set(v) = sp.edit().putBoolean("deep_think", v).apply()

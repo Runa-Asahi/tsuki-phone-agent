@@ -103,6 +103,11 @@
                     android:maxLines="5" android:importantForAutofill="no" android:inputType="textMultiLine" />
             </com.google.android.material.textfield.TextInputLayout>
             <ImageButton
+                android:id="@+id/btnMic"
+                android:layout_width="44dp" android:layout_height="44dp" android:layout_marginEnd="6dp" android:layout_marginBottom="2dp"
+                android:background="@drawable/bg_round_primary" android:src="@drawable/ic_mic"
+                android:padding="12dp" android:scaleType="fitCenter" android:contentDescription="@string/voice_input" android:tooltipText="@string/voice_input" />
+            <ImageButton
                 android:id="@+id/btnStart"
                 android:layout_width="48dp" android:layout_height="48dp"
                 android:background="@drawable/bg_round_primary" android:src="@drawable/ic_send"

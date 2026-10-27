@@ -54,11 +54,30 @@ class AgentForegroundService : Service() {
                     stopSelf()
                     return START_NOT_STICKY
                 }
-                startForeground(NOTIF_ID, buildNotification("准备中…", running = true))
+                startForegroundTyped(buildNotification("准备中…", running = true))
                 begin(goal)
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Explicit FGS types: the manifest declares specialUse|microphone, and on API 34+ an untyped startForeground()
+     * claims every declared type — microphone without RECORD_AUDIO granted would crash. Mic is added only when the
+     * user granted it, so the orb's voice button can listen while another app is in front.
+     */
+    private fun startForegroundTyped(n: Notification) {
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            var t = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            if (com.runasakura.phoneagent.voice.VoiceInput.hasMicPermission(this)) t = t or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            try { startForeground(NOTIF_ID, n, t) } catch (e: Exception) {
+                Log.w(TAG, "typed FGS failed (${e.message}), special-use only")
+                startForeground(NOTIF_ID, n, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            }
+        } else if (android.os.Build.VERSION.SDK_INT >= 29) {
+            startForeground(NOTIF_ID, n, if (com.runasakura.phoneagent.voice.VoiceInput.hasMicPermission(this))
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+        } else startForeground(NOTIF_ID, n)
     }
 
     private fun begin(goal: String) {
@@ -105,7 +124,7 @@ class AgentForegroundService : Service() {
             } else {
                 startActivity(android.content.Intent(this, com.runasakura.phoneagent.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
             }
-        }).also { it.show() }
+        }, { orbVoice() }).also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         // Local engine: embedded MNN inside Tsuki (default; runs in this foreground-service process) or MNN Chat's API.
         val embedded = prefs.localEngine == AgentPreferences.LOCAL_EMBEDDED
@@ -208,7 +227,13 @@ class AgentForegroundService : Service() {
                 if (result.success) "done" else "stopped",
                 "结束(${result.steps}步): ${if (result.needsUser) com.runasakura.phoneagent.ui.ChatSession.ASK_MARK else ""}${result.summary}"
             )
-            if (job == coroutineContext[Job]) {
+            val next = queuedGoal; queuedGoal = null; releaseOrbVoice()
+            if (next != null && job == coroutineContext[Job] && !stopFlag.get()) {
+                // Voice task dictated on the orb during this task: run it now, through the same loop and ConfirmPolicy.
+                log("执行语音下达的任务：$next")
+                job = null
+                android.os.Handler(android.os.Looper.getMainLooper()).post { com.runasakura.phoneagent.ui.ChatSession.startTask(next); begin(next) }
+            } else if (job == coroutineContext[Job]) {
                 overlay?.hide()
                 overlay = null
                 starting.set(false)
@@ -275,7 +300,41 @@ class AgentForegroundService : Service() {
 
     @Volatile private var stopReason: String? = null
 
+    /** Goal dictated on the orb while a task runs; started when the current task ends (cleared by a stop). */
+    @Volatile private var queuedGoal: String? = null
+    private var orbListener: com.runasakura.phoneagent.voice.VoiceInput? = null
+
+    /** SpeechRecognizer must be destroyed on the main thread. */
+    private fun releaseOrbVoice() {
+        val v = orbListener ?: return; orbListener = null
+        android.os.Handler(android.os.Looper.getMainLooper()).post { v.destroy() }
+    }
+
+    /** Orb mic: listen without bringing Tsuki to the front; the transcript becomes the next task. Main thread. */
+    private fun orbVoice() {
+        val ov = overlay
+        if (!com.runasakura.phoneagent.voice.VoiceInput.hasMicPermission(this)) {
+            android.widget.Toast.makeText(this, "请先在 Tsuki 输入框旁点一次麦克风授权录音", android.widget.Toast.LENGTH_LONG).show(); return
+        }
+        if (!com.runasakura.phoneagent.voice.VoiceInput.available(this)) {
+            android.widget.Toast.makeText(this, "本机没有系统语音识别服务，悬浮球语音不可用（可在 Tsuki 输入框用输入法语音键）", android.widget.Toast.LENGTH_LONG).show(); return
+        }
+        orbListener?.let { if (it.listening) { it.stop(); return } }
+        val v = orbListener ?: com.runasakura.phoneagent.voice.VoiceInput(this, object : com.runasakura.phoneagent.voice.VoiceInput.Listener {
+            override fun onListening(on: Boolean) { if (on) ov?.setProgress("🎤 正在听…再点麦克风结束") }
+            override fun onPartial(text: String) { ov?.setProgress("🎤 $text") }
+            override fun onFinal(text: String) {
+                queuedGoal = text.trim().take(300)
+                log("语音记下下一个任务：$queuedGoal（当前任务结束后执行）")
+                ov?.setProgress("🎤 已记下：${text.take(20)}（本任务结束后执行）")
+            }
+            override fun onError(message: String) { ov?.setProgress("🎤 $message") }
+        }).also { orbListener = it }
+        v.start()
+    }
+
     fun requestStop(reason: String = "用户停止") {
+        queuedGoal = null; releaseOrbVoice()
         stopReason = reason
         log("停止原因：$reason")
         stopFlag.set(true)
@@ -321,7 +380,8 @@ class AgentForegroundService : Service() {
     private fun log(msg: String) {
         Log.i(TAG, msg)
         com.runasakura.phoneagent.util.Diagnostics.log(msg)
-        broadcastStatus("log", msg)
+        // Model dumps stay in the exported diagnostics; the chat UI never shows them, so don't broadcast them.
+        if (!msg.startsWith("LLM content:") && !msg.startsWith("LLM raw:")) broadcastStatus("log", msg)
     }
 
     private fun broadcastStatus(type: String, message: String) {
@@ -340,6 +400,7 @@ class AgentForegroundService : Service() {
     override fun onDestroy() {
         if (job?.isActive == true) { stopReason = stopReason ?: "服务被系统结束"; log("停止原因：$stopReason") }
         running = false
+        orbListener?.destroy(); orbListener = null   // onDestroy runs on main
         stopFlag.set(true)
         job?.cancel()
         scope.cancel()

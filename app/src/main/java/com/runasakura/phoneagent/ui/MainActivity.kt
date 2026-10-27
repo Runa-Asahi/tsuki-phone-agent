@@ -82,7 +82,8 @@ class MainActivity : AppCompatActivity() {
             true
         }
         // OCR warm-up after the first frames (it loads ML Kit; competing with startup made the first scroll stutter).
-        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) { kotlinx.coroutines.delay(1500); com.runasakura.phoneagent.ocr.OcrEngine.warmUp() }
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) { kotlinx.coroutines.delay(1500); com.runasakura.phoneagent.ocr.OcrEngine.warmUp()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { if (!isDestroyed) refreshOcrStatus() } }
         ContextCompat.registerReceiver(
             this, statusReceiver, IntentFilter(AgentForegroundService.ACTION_STATUS), ContextCompat.RECEIVER_NOT_EXPORTED
         )
@@ -100,6 +101,9 @@ class MainActivity : AppCompatActivity() {
         binding.cardA11y.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         binding.cardMnn.setOnClickListener { refreshMnnStatus() }
         binding.btnStart.setOnClickListener { startAgent() }
+        mic = MicController(this, binding.btnMic, binding.goalInput,
+            autoSend = { com.runasakura.phoneagent.PhoneAgentApp.instance.prefs.voiceAutoSend },
+            canSend = { !AgentForegroundService.isRunning() }, send = { startAgent() }).also { it.bind() }
         binding.btnStop.setOnClickListener {
             AgentForegroundService.stop(this)
             UiLog.add("请求急停")
@@ -121,12 +125,16 @@ class MainActivity : AppCompatActivity() {
         setRunning(AgentForegroundService.isRunning())
     }
 
+    private var mic: MicController? = null
+
     override fun onDestroy() {
+        mic?.destroy()
         try { unregisterReceiver(statusReceiver) } catch (_: Exception) {}
         super.onDestroy()
     }
 
     private fun setRunning(running: Boolean) {
+        if (!running) refreshOcrStatus()
         binding.btnStart.visibility = if (running) android.view.View.GONE else android.view.View.VISIBLE
         binding.btnStop.visibility = if (running) android.view.View.VISIBLE else android.view.View.GONE
         binding.btnPause.visibility = if (running) android.view.View.VISIBLE else android.view.View.GONE
@@ -199,6 +207,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnStart.imageTintList = android.content.res.ColorStateList.valueOf(k.onAccent)
         binding.btnStop.backgroundTintList = android.content.res.ColorStateList.valueOf(k.crimson)
         binding.btnStop.imageTintList = android.content.res.ColorStateList.valueOf(0xFFFFFFFF.toInt())
+        mic?.tint()
     }
 
     /** First-run checklist shown in the empty state until everything is ready. */
@@ -220,7 +229,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         applyTsuki()
         renderChat(); setRunning(AgentForegroundService.isRunning())
-        refreshMnnStatus()
+        refreshMnnStatus(); refreshOcrStatus()
         ContextCompat.registerReceiver(
             this, a11yReceiver,
             IntentFilter(AgentAccessibilityService.ACTION_A11Y_STATE),
@@ -230,6 +239,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
+        mic?.pause()
         super.onPause()
         try {
             unregisterReceiver(a11yReceiver)
@@ -286,6 +296,14 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    /** OCR pill: on-device ML Kit Chinese engine state + recent latency (was a fixed 「离线中文」 label). */
+    private fun refreshOcrStatus() {
+        val o = com.runasakura.phoneagent.ocr.OcrEngine
+        binding.ocrStatus.text = o.statusText()
+        binding.ocrStatus.setTextColor(ContextCompat.getColor(this, when {
+            o.lastFailed -> R.color.err_red; o.isReady -> R.color.ok_green; else -> R.color.text_secondary }))
+    }
+
     private fun doSelfTest(probe: Boolean) {
         UiLog.clear(); UiLog.add("—— 自检开始 ——")
         Toast.makeText(this, "自检中…", Toast.LENGTH_SHORT).show()
@@ -295,8 +313,8 @@ class MainActivity : AppCompatActivity() {
             }
             val fails = res.count { !it.ok }
             res.firstOrNull { it.name.contains("OCR") }?.let {
-                binding.ocrStatus.text = if (it.ok) "可用" else "失败"
-                binding.ocrStatus.setTextColor(ContextCompat.getColor(this@MainActivity, if (it.ok) R.color.ok_green else R.color.err_red))
+                if (it.ok) refreshOcrStatus() else { binding.ocrStatus.text = "失败"
+                    binding.ocrStatus.setTextColor(ContextCompat.getColor(this@MainActivity, R.color.err_red)) }
             }
             UiLog.add("—— 自检完成：${res.size - fails} 通过，$fails 失败（可点「导出诊断日志」分享）——")
             com.google.android.material.dialog.MaterialAlertDialogBuilder(this@MainActivity)

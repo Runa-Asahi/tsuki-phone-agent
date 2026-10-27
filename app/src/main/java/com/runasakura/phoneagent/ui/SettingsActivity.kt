@@ -65,6 +65,9 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnTeach.setOnClickListener { startActivity(android.content.Intent(this, TeachActivity::class.java)) }
         binding.deepThink.isChecked = prefs.deepThink
         binding.deepThink.setOnCheckedChangeListener { _, on -> prefs.deepThink = on }
+        binding.voiceAutoSend.isChecked = prefs.voiceAutoSend
+        binding.voiceAutoSend.setOnCheckedChangeListener { _, on -> prefs.voiceAutoSend = on }
+        binding.voiceEngine.text = getString(R.string.voice_auto_send_desc) + "\n本机语音通道：" + com.runasakura.phoneagent.voice.VoiceInput.describe(this)
         binding.btnTestCloud.setOnClickListener {
             val url = binding.cloudUrl.text.toString().trim(); val key = binding.cloudKey.text.toString().trim()
             val model = binding.cloudModel.text.toString().trim().ifBlank { CloudProviders.byId(CloudProviders.effectiveProvider(prefs.cloudProvider, url, key)).model }

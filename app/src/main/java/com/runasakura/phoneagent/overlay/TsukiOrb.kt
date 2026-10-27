@@ -58,7 +58,7 @@ object TsukiOrb {
         val expanded get() = panel.visibility == View.VISIBLE
     }
 
-    fun build(ctx: Context, onStop: () -> Unit, onPause: (() -> Boolean)?, onOpen: (() -> Unit)?): Orb {
+    fun build(ctx: Context, onStop: () -> Unit, onPause: (() -> Boolean)?, onOpen: (() -> Unit)?, onVoice: (() -> Unit)? = null): Orb {
         val d = ctx.resources.displayMetrics.density; fun px(v: Int) = (v * d).toInt()
         val k = TsukiTheme.current(ctx)
         val root = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -84,6 +84,7 @@ object TsukiOrb {
         if (onPause != null) panel.addView(circle(R.drawable.ic_pause, k.accentContainer, k.onSurface, "暂停") { v ->
             val paused = onPause.invoke(); v.setImageResource(if (paused) R.drawable.ic_play else R.drawable.ic_pause); v.contentDescription = if (paused) "继续" else "暂停"
         }, lp())
+        if (onVoice != null) panel.addView(circle(R.drawable.ic_mic, k.accentContainer, k.onSurface, "语音下达下一个任务") { onVoice() }, lp())
         if (onOpen != null) panel.addView(circle(R.drawable.ic_open_app, k.accentContainer, k.onSurface, "打开 Tsuki") { onOpen() }, lp())
         panel.addView(circle(R.drawable.ic_stop, k.crimson, 0xFFFFFFFF.toInt(), ctx.getString(R.string.fab_stop)) { onStop() }, lp())
         root.addView(panel, LinearLayout.LayoutParams(-2, -2).apply { marginStart = px(6) })

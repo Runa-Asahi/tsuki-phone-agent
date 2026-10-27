@@ -46,7 +46,7 @@
     <string name="pill_brain">大脑</string>
     <string name="pill_ocr">OCR</string>
     <string name="checking">检测中…</string>
-    <string name="ocr_offline">离线中文</string>
+    <string name="ocr_offline">待预热</string>
     <string name="pause">暂停</string>
     <string name="resume">继续</string>
     <string name="send">发送</string>
@@ -131,4 +131,8 @@
     <string name="local_import">导入模型文件夹</string>
     <string name="local_warm">预热 / 体检</string>
     <string name="local_delete">删除</string>
+    <string name="voice_auto_send">语音说完自动发送</string>
+    <string name="voice_auto_send_desc">关闭时识别结果只填入输入框，确认后再发送。语音下达的任务同样经过确认策略。</string>
+    <string name="voice_input">语音输入</string>
+    <string name="voice_listening">正在听…松开或再点一次结束</string>
 </resources>

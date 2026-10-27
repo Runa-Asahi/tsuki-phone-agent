@@ -16,6 +16,7 @@ class EmergencyStopOverlay(
     private val onStop: () -> Unit,
     private val onPause: (() -> Boolean)? = null,
     private val onOpen: (() -> Unit)? = null,
+    private val onVoice: (() -> Unit)? = null,
 ) {
     private var orb: TsukiOrb.Orb? = null
     private var label: android.widget.TextView? = null
@@ -76,7 +77,7 @@ class EmergencyStopOverlay(
             return // optional; notification stop still works
         }
         // The Tsuki orb (default) or the classic compact pill (orb turned off in Settings).
-        val o = if (TsukiOrb.enabled(context)) TsukiOrb.build(context, onStop, onPause, onOpen) else null
+        val o = if (TsukiOrb.enabled(context)) TsukiOrb.build(context, onStop, onPause, onOpen, onVoice) else null
         val (box, lbl) = if (o != null) o.root to o.label else OverlayPill.build(context, onStop, onPause)
         val type = if (a11y) {
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
