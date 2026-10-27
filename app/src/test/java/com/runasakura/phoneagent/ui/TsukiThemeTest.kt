@@ -47,7 +47,7 @@ class TsukiThemeTest {
         }
         assertEquals(androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_NO, TsukiTheme.effectiveNight(TsukiTheme.Palette.PURE_MOON, TsukiTheme.Mode.DARK))
         assertEquals(TsukiTheme.Mode.DARK.night, TsukiTheme.effectiveNight(TsukiTheme.Palette.SAKURA, TsukiTheme.Mode.DARK))
-        assertEquals(0xFF24102A.toInt(), TsukiTheme.colors(TsukiTheme.Palette.SAKURA, true).role("bg"))
+        assertEquals(0xFF181530.toInt(), TsukiTheme.colors(TsukiTheme.Palette.SAKURA, true).role("bg"))
         assertNull(TsukiTheme.colors(TsukiTheme.Palette.SAKURA, true).role("ok_green"))
     }
 

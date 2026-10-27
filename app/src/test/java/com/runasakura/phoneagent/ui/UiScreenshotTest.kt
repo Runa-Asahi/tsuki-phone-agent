@@ -163,4 +163,11 @@ class UiScreenshotDarkTest : ShotBase() {
         main("08_main_running_dark", { runningSession() }, running = true)
         save("09_settings_full_dark", settingsContent(), h = null)
     }
+    /** 樱 must stay elegant (portrait, moonlit navy + soft pink), never the chibi art. */
+    @Test fun sakuraDark() {
+        val v = MoonSkyView(act).apply { animateMotes = false; colors = TsukiTheme.colors(TsukiTheme.Palette.SAKURA, true) }
+        save("10_sakura_sky_dark", v, h = 900)
+        TsukiTheme.setPalette(act, TsukiTheme.Palette.SAKURA)
+        try { ChatSession.clear(); main("11_sakura_main_dark", {}, running = false) } finally { TsukiTheme.setPalette(act, TsukiTheme.Palette.NIGHT_MOON) }
+    }
 }

@@ -267,7 +267,7 @@ class ChatRenderer(
             override fun getOutline(v: View, o: android.graphics.Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(28).toFloat()) }
         }
         addView(ImageView(ctx).apply {
-            setImageResource(if (TsukiTheme.palette(ctx) == TsukiTheme.Palette.SAKURA) R.drawable.tsuki_chibi else R.drawable.tsuki_portrait); scaleType = ImageView.ScaleType.MATRIX
+            setImageResource(R.drawable.tsuki_portrait)   // calm portrait in every palette (樱 must not turn chibi); scaleType = ImageView.ScaleType.MATRIX
             contentDescription = ctx.getString(R.string.tsuki_portrait_desc)
             addOnLayoutChangeListener { v, l, t, rr, b, _, _, _, _ ->
                 val d = (v as ImageView).drawable ?: return@addOnLayoutChangeListener

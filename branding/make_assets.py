@@ -46,6 +46,7 @@ for d, f in dens.items():
 def fit(im, w): return im.resize((w, int(im.height * w / im.width)), Image.LANCZOS)
 save(fit(c1, 540), f"{RES}/drawable-nodpi/tsuki_portrait.webp", 80)
 save(fit(c2, 540), f"{RES}/drawable-nodpi/tsuki_brand.webp", 80)
-save(fit(c3, 540), f"{RES}/drawable-nodpi/tsuki_chibi.webp", 80)
+# 樱 no longer uses the chibi art in-app (pt79); kept as source only.
+# save(fit(c3, 540), f"{RES}/drawable-nodpi/tsuki_chibi.webp", 80)
 # splash icon: circle crop of the face (Android 12 masks to a circle of 2/3 size)
 sp = fg.resize((432, 432), Image.LANCZOS); save(sp, f"{RES}/drawable-nodpi/tsuki_splash.webp", 84)

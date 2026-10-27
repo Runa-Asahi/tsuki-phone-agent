@@ -52,12 +52,14 @@ class MoonSkyView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         }
         val d = resources.displayMetrics.density
         when (k.particle) {
-            TsukiTheme.Particle.PETALS -> for (m in motes) {   // 樱: petals fall, sway and spin
-                val y = ((m[1] + t * 0.018f * (0.6f + m[2] / 3f)) % 1f + 1f) % 1f
-                val x = ((m[0] + t * 0.006f) % 1f) * w + sin(t * 0.7f + m[3]) * w * 0.04f
-                paint.color = (k.glow and 0x00FFFFFF) or ((200 * sin(y * PI).toFloat()).toInt() shl 24)
-                c.save(); c.translate(x, y * h); c.rotate((t * 40f + m[3] * 57f) % 360f)
-                val s = m[2] * d * 2.2f; shape.reset(); shape.moveTo(0f, -s); shape.quadTo(s * 0.9f, 0f, 0f, s); shape.quadTo(-s * 0.9f, 0f, 0f, -s)
+            TsukiTheme.Particle.PETALS -> for ((i, m) in motes.withIndex()) {   // 樱: a few petals drift down slowly — subtle, calm
+                if (i % 2 == 1) continue   // half the density of 夜月's motes
+                val y = ((m[1] + t * 0.010f * (0.6f + m[2] / 3f)) % 1f + 1f) % 1f
+                val x = ((m[0] + t * 0.004f) % 1f) * w + sin(t * 0.45f + m[3]) * w * 0.03f
+                paint.color = (k.accent and 0x00FFFFFF) or ((95 * sin(y * PI).toFloat()).toInt() shl 24)
+                c.save(); c.translate(x, y * h); c.rotate((t * 14f + m[3] * 57f) % 360f)
+                val s = m[2] * d * 1.8f; shape.reset(); shape.moveTo(0f, -s); shape.quadTo(s * 0.8f, -s * 0.1f, s * 0.12f, s); shape.lineTo(0f, s * 0.78f)
+                shape.lineTo(-s * 0.12f, s); shape.quadTo(-s * 0.8f, -s * 0.1f, 0f, -s)   // sakura petal with its notch
                 c.drawPath(shape, paint); c.restore()
             }
             TsukiTheme.Particle.SPARKLES -> for (m in motes) {   // 纯月: four-point glints pulse in place

@@ -61,11 +61,12 @@ object TsukiTheme {
                 c(0xFF0A1030), c(0xEE141D45), c(0xFF1D2854), c(0xFF35417C), c(0xFFEEF1FA), c(0xFFB2BAD6), c(0xFF8A93B6), Particle.MOTES)
             else Colors(c(0xFF233062), c(0xFFFFFFFF), c(0xFFDDE3F3), c(0xFFBFC9E4), c(0xFFF1F4FB), c(0x664F5F96), c(0x99707DA6), c(0xFFB8233A), c(0xFF5E6788), c(0xFF233062), c(0xFFF4F6FF),
                 c(0xFFF1F4FB), c(0xFFFFFFFF), c(0xFFE4E9F4), c(0xFFD0D7EA), c(0xFF101836), c(0xFF4A5576), c(0xFF6E7898), Particle.MOTES)
-        // sakura pink / plum night, falling petals
-        Palette.SAKURA -> if (dark) Colors(c(0xFFF6A9C6), c(0xFF3A0F24), c(0xFF5C2A55), c(0xFF22091F), c(0xFF6E3060), c(0x77F7B6CF), c(0xCCFFE3EE), c(0xFFFF7F98), c(0xFFF3C98B), c(0xFF7E3463), c(0xFFFFF5F9),
-                c(0xFF24102A), c(0xEE351A3E), c(0xFF45244F), c(0xFF6C3B72), c(0xFFF8EAF2), c(0xFFE1BACD), c(0xFFB88EA6), Particle.PETALS)
-            else Colors(c(0xFFB0346A), c(0xFFFFFFFF), c(0xFFFAD9E7), c(0xFFF7C6DB), c(0xFFFFF4F8), c(0x77F08DB4), c(0x99D98AAD), c(0xFFB8233A), c(0xFF9A5B2E), c(0xFFB0346A), c(0xFFFFF6FA),
-                c(0xFFFFF3F8), c(0xFFFFFFFF), c(0xFFF8E1EC), c(0xFFEDC5D8), c(0xFF3A1430), c(0xFF7A4064), c(0xFF94667F), Particle.PETALS)
+        // 樱: the same moonlit navy/silver world as 夜月, warmed by a dusk-rose horizon and soft sakura-pink accents;
+        // elegant and calm (no chibi art), petals drift sparsely. Distinct from 夜月 (accent, horizon, bubbles, petals).
+        Palette.SAKURA -> if (dark) Colors(c(0xFFF2BCCD), c(0xFF221A36), c(0xFF47385E), c(0xFF0B0D24), c(0xFF553A62), c(0x66F3C4D4), c(0xDDF6EEF5), c(0xFFFF8FA3), c(0xFFE6D3DD), c(0xFF7A4870), c(0xFFFFF7FA),
+                c(0xFF181530), c(0xEE221E3F), c(0xFF30284C), c(0xFF4E4673), c(0xFFF5EFF5), c(0xFFD3C5D6), c(0xFFA596AE), Particle.PETALS)
+            else Colors(c(0xFF8E3E63), c(0xFFFFFFFF), c(0xFFF3E3EC), c(0xFFD9D6EA), c(0xFFFBF5F8), c(0x66E8A9C2), c(0x99B79AB4), c(0xFFB8233A), c(0xFF7A5A6E), c(0xFF8E3E63), c(0xFFFFF7FA),
+                c(0xFFFAF6F9), c(0xFFFFFFFF), c(0xFFF2E8EF), c(0xFFE2D3DE), c(0xFF1E1830), c(0xFF5A4A62), c(0xFF7D6C84), Particle.PETALS)
         // bright moonlight pearl, soft silver-blue, full moon + sparkles; light-only
         Palette.PURE_MOON -> Colors(c(0xFF3F5F94), c(0xFFFFFFFF), c(0xFFE2EAF6), c(0xFFFFFFFF), c(0xFFDCE6F4), c(0x88A9C3E6), c(0xAA9DB4D6), c(0xFFB8233A), c(0xFF8A6A2A), c(0xFFDCE7F7), c(0xFF1C2740),
                 c(0xFFFBFCFF), c(0xFFFFFFFF), c(0xFFEDF1F8), c(0xFFD9E1EE), c(0xFF1C2433), c(0xFF515C72), c(0xFF6F7990), Particle.SPARKLES, fullMoon = true)
