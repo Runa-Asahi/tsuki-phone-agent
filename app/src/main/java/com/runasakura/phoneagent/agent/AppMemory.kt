@@ -105,6 +105,50 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
         return AppMemory(live.factEntries.mapNotNull { if (it in shown) it.copy(conf = it.conf - 1).takeIf { e -> e.conf > 0 } else it }, live.pathEntries, live.skillEntries)
     }
 
+    /**
+     * Verification over later runs: a task that SUCCEEDED while these lessons were shown confirms the relevant ones
+     * (+1, capped at [MAX_CONF], timestamp refreshed). Only lessons that actually relate to the goal count, so an
+     * unrelated lesson cannot farm confidence from tasks it had nothing to do with.
+     */
+    fun confirmShown(goal: String, now: Long = System.currentTimeMillis(), maxFacts: Int = 5): AppMemory {
+        val live = expire(now)
+        val shown = live.factEntries.sortedByDescending { score(it, goal, now) }.take(maxFacts).filter { Similarity.score(it.text, goal) >= RELEVANT }.toSet()
+        if (shown.isEmpty()) return live
+        return AppMemory(live.factEntries.map { if (it in shown) it.copy(conf = minOf(MAX_CONF, it.conf + 1), ts = now) else it }, live.pathEntries, live.skillEntries)
+    }
+
+    /** User deleted one entry on the learning page. [kind] 'F' fact, 'P' route, 'S' skill. */
+    fun remove(kind: Char, text: String): AppMemory = when (kind) {
+        'F' -> AppMemory(factEntries.filterNot { it.text == text }, pathEntries, skillEntries)
+        'P' -> AppMemory(factEntries, pathEntries.filterNot { it.text == text }, skillEntries)
+        else -> AppMemory(factEntries, pathEntries, skillEntries.filterNot { it.text == text })
+    }
+
+    /**
+     * Apply a model-written consolidation plan: each (text, sourceIndices) replaces those facts with one merged lesson.
+     * Evidence is preserved, never invented: conf = max of the sources, ts = newest source. Facts the plan does not
+     * mention are kept as they are; invalid indices / empty texts are ignored.
+     */
+    fun consolidate(plan: List<Pair<String, List<Int>>>, now: Long = System.currentTimeMillis()): AppMemory {
+        // Indices refer to [facts] (what the model was shown), so map before expiring.
+        val fs = factEntries
+        val used = HashSet<Int>(); val merged = ArrayList<Entry>()
+        for ((text, idx) in plan) {
+            val src = idx.filter { it in fs.indices && it !in used }.distinct()
+            val t = text.trim().take(MAX_CHARS)
+            if (src.isEmpty() || t.length < 3) continue
+            used += src
+            merged += Entry(t, src.maxOf { fs[it].conf }, src.maxOf { fs[it].ts })
+        }
+        val kept = fs.filterIndexed { i, _ -> i !in used }
+        return AppMemory((merged + kept).sortedByDescending { it.conf }.take(MAX_FACTS), pathEntries, skillEntries).expire(now)
+    }
+
+    /** Cross-app strategies relevant to [goal] (from the [GLOBAL] bucket), for the prompt. */
+    fun patternsFor(goal: String, now: Long = System.currentTimeMillis(), max: Int = 2): String? =
+        expire(now).factEntries.map { it to (Similarity.score(it.text, goal) + minOf(it.conf, 4) * 0.05) }.sortedByDescending { it.second }
+            .take(max).map { it.first }.takeIf { it.isNotEmpty() }?.joinToString("；") { it.text + if (it.conf < 2) "（未验证）" else "" }
+
     /** A reused route that ended in failure loses confidence (removed at 0). */
     fun penalize(goal: String, now: Long = System.currentTimeMillis()): AppMemory {
         val ps = expire(now).pathEntries.mapNotNull { if (Similarity.score(goalOf(it), goal) >= 0.8) it.copy(conf = it.conf - 2).takeIf { e -> e.conf > 0 } else it }
@@ -122,6 +166,9 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
 
     companion object {
         const val MAX_FACTS = 10; const val MAX_PATHS = 4; const val MAX_CHARS = 60; const val MAX_SKILLS = 6
+        const val MAX_CONF = 6; const val RELEVANT = 0.12
+        /** Consolidate with the model once a bucket holds this many facts. */
+        const val CONSOLIDATE_AT = 7
         const val UNVERIFIED_TTL_MS = 10L * 24 * 3600 * 1000
         /** Shared bucket (stored like an app) for cross-app UI strategies. */
         const val GLOBAL = "_patterns"

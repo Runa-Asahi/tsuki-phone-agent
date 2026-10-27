@@ -69,8 +69,8 @@
     <string name="ui_14">看图能力</string>
     <string name="ui_15">文字读不懂的界面（游戏、纯图标）可以让模型看截图。</string>
     <string name="ui_16">游戏、图标多的界面会附截图给支持看图的云端模型；支付/银行类应用永远不截图。</string>
-    <string name="ui_17">本机 MNN 视觉模型看图</string>
-    <string name="ui_18">文字大脑仍用你选的云端模型。</string>
+    <string name="ui_17">没有内置视觉模型时，用 MNN Chat 的视觉模型</string>
+    <string name="ui_18">本机看图优先用 Tsuki 内置的模型（「本机模型」里装了 Qwen3-VL 即自动启用，与 MNN Chat 无关）；这个开关只在没装内置视觉模型时才起作用。文字大脑仍用你选的模型。</string>
     <string name="ui_19">本机 VL 模型名（留空=MNN 当前模型）</string>
     <string name="ui_20">云端视觉 Base URL（可选）</string>
     <string name="ui_21">视觉模型 API Key（只保存在本机）</string>
@@ -79,7 +79,8 @@
     <string name="ui_24">敏感操作会先停下问你。</string>
     <string name="ui_25">设置闹钟前先确认</string>
     <string name="ui_26">发送消息、通话、支付、删除、卸载、下单始终需要确认，不能关闭。</string>
-    <string name="ui_27">查看 / 清除应用经验</string>
+    <string name="ui_27">学习记录（查看 / 整理 / 删除经验）</string>
+    <string name="learning_title">学习记录</string>
     <string name="ui_28">本机模型（MNN，可选）</string>
     <string name="ui_29">在手机本地跑小模型，离线可用但较慢。</string>
     <string name="shizuku_title">特权模式（Shizuku，可选）</string>

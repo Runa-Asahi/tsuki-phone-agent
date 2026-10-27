@@ -116,14 +116,23 @@ class AgentForegroundService : Service() {
         log("大脑：$brain" + if (cloud == null && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY) "（云端未就绪）" else "")
         val router = LlmRouter({ prefs.routeMode }, local, cloud).also { r -> r.log = { log(it) } }
         router.vision = com.runasakura.phoneagent.llm.CloudProviders.visionClientFor(prefs)
-        val embeddedVision = embedded && com.runasakura.phoneagent.llm.ModelStore.selected(app)?.let { com.runasakura.phoneagent.llm.ModelStore.isVision(it) } == true
-        if (embeddedVision && com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) {
-            router.visionSkill = com.runasakura.phoneagent.llm.EmbeddedMnnClient(app, { com.runasakura.phoneagent.llm.ModelStore.selected(app) }, maxTokens = 96, assist = true)
-            log("看图技能：Tsuki 内置本机模型 ${com.runasakura.phoneagent.llm.ModelStore.selected(app)?.name}（不依赖 MNN Chat，后台并行，不阻塞决策）")
-        } else if (prefs.visionLocal) {
-            router.visionSkill = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.visionLocalModel.ifBlank { prefs.mnnModel }, maxTokens = 96)
-            if (com.runasakura.phoneagent.llm.RoutePolicy.usesLocal(prefs.routeMode)) log("看图技能：本机 MNN 视觉模型 ${prefs.visionLocalModel.ifBlank { prefs.mnnModel }}（需在 MNN Chat 里加载 VL 模型并开启 API）")
+        val visionDir = com.runasakura.phoneagent.llm.ModelStore.selected(app)?.takeIf { com.runasakura.phoneagent.llm.ModelStore.isVision(it) }
+        val eye = com.runasakura.phoneagent.llm.VisionChoice.pick(prefs.routeMode, visionDir != null, com.runasakura.phoneagent.llm.EmbeddedMnn.available, prefs.visionLocal)
+        when (eye) {
+            com.runasakura.phoneagent.llm.VisionChoice.Source.EMBEDDED -> {
+                router.visionSkill = com.runasakura.phoneagent.llm.EmbeddedMnnClient(app, { com.runasakura.phoneagent.llm.ModelStore.selected(app) }, maxTokens = 96, assist = true)
+                // A vision-only role still needs the model warm, even when the text engine is MNN Chat.
+                if (!embedded) com.runasakura.phoneagent.llm.LocalWarmup.kick(app) { log(it) }
+            }
+            com.runasakura.phoneagent.llm.VisionChoice.Source.MNN_CHAT ->
+                router.visionSkill = LocalMnnClient(prefs.mnnBaseUrl, prefs.mnnApiKey, prefs.visionLocalModel.ifBlank { prefs.mnnModel }, maxTokens = 96)
+            com.runasakura.phoneagent.llm.VisionChoice.Source.NONE -> {}
         }
+        router.visionSkillLabel = when (eye) { com.runasakura.phoneagent.llm.VisionChoice.Source.EMBEDDED -> visionDir?.name
+            com.runasakura.phoneagent.llm.VisionChoice.Source.MNN_CHAT -> prefs.visionLocalModel.ifBlank { prefs.mnnModel }; else -> null }
+        router.visionSkillSource = eye
+        log("看图技能：" + eye.label + (router.visionSkillLabel?.let { "（$it）" } ?: "") +
+            if (eye == com.runasakura.phoneagent.llm.VisionChoice.Source.MNN_CHAT && visionDir == null) "；安装内置视觉模型后会自动改用内置" else "")
         if (router.vision != null) log("视觉辅助：${prefs.visionModel}（截图${if (prefs.allowCloudScreenshot) "已允许" else "未允许，视觉不会使用"}）")
         val loop = AgentLoop(
             prefs = prefs,

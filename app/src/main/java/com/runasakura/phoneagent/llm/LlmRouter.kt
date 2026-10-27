@@ -46,6 +46,9 @@ class LlmRouter(
 
     /** Pluggable "看图" skill (e.g. on-device MNN VL): screenshot → text the brain can use. */
     var visionSkill: LlmClient? = null
+    /** Which local eye [visionSkill] is, and its model name, for honest capability lines. */
+    var visionSkillSource: VisionChoice.Source = VisionChoice.Source.NONE
+    var visionSkillLabel: String? = null
     var skillSidelined = false
 
     /**
@@ -101,6 +104,22 @@ class LlmRouter(
             ChatMessage("user", "目标：$goal\n应用：${app ?: "未知"}\n结果：$outcome\n轨迹：${trajectory.take(900)}\n已知：${known.joinToString("；").take(300)}")), 0.0) } ?: return null
         record("经验整理", r, emptyList())
         return parseLesson(r.content)
+    }
+
+    /**
+     * AI consolidation of one app's lessons: merge duplicates / near-duplicates and sharpen wording. The model only
+     * returns texts + which numbered lessons each one replaces; [AppMemory.consolidate] keeps the evidence counts.
+     * Cheap (short input, ≤300 tokens out), 8 s budget, cloud only, never on the step path.
+     */
+    suspend fun consolidateLessons(app: String?, facts: List<String>): List<Pair<String, List<Int>>>? {
+        val c = cloud ?: return null
+        if (mode == AgentPreferences.ROUTE_LOCAL_ONLY || facts.size < 2) return null
+        val numbered = facts.mapIndexed { i, f -> "$i. $f" }.joinToString("\n")
+        val r = withTimeoutOrNull(8_000) { c.chat(listOf(
+            ChatMessage("system", "你是手机 Agent 的经验库管理员。把同一应用的经验条目去重合并：意思相同或互相包含的合成一条更准确的；互相矛盾的只保留编号更大（更新）的那条的意思；不要编造条目里没有的内容。每条≤25字。只输出 json：{\"merged\":[{\"text\":\"合并后的经验\",\"from\":[编号,…]}]}，只列需要合并或改写的组，不需要改动的不要列。"),
+            ChatMessage("user", "应用：${app ?: "未知"}\n经验：\n${numbered.take(1500)}")), 0.0) } ?: return null
+        record("经验合并", r, emptyList())
+        return parseConsolidation(r.content)
     }
 
     /**
@@ -303,6 +322,16 @@ class LlmRouter(
             val pa = o.optJSONArray("patterns")
             val patterns = if (pa == null) emptyList() else (0 until pa.length()).map { pa.optString(it).trim() }.filter { it.length in 3..60 }.take(2)
             if (route == null && facts.isEmpty() && patterns.isEmpty()) null else Lesson(route, facts, patterns)
+        } catch (_: Exception) { null }
+
+        fun parseConsolidation(content: String): List<Pair<String, List<Int>>>? = try {
+            val o = org.json.JSONObject(content.substring(content.indexOf('{'), content.lastIndexOf('}') + 1))
+            val a = o.optJSONArray("merged") ?: org.json.JSONArray()
+            (0 until a.length()).mapNotNull { a.optJSONObject(it) }.mapNotNull { m ->
+                val t = m.optString("text").trim(); val from = m.optJSONArray("from") ?: return@mapNotNull null
+                val idx = (0 until from.length()).mapNotNull { j -> from.opt(j)?.toString()?.trim()?.toIntOrNull() }
+                if (t.length in 3..60 && idx.isNotEmpty()) t to idx else null
+            }
         } catch (_: Exception) { null }
 
         fun parseCheckpoint(content: String): String? = try {

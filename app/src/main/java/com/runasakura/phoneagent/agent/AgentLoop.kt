@@ -96,8 +96,13 @@ class AgentLoop(
                 if (dropped > 0) onLog("失败反思：丢弃 $dropped 条缺乏证据的结论（未被本次屏幕变化证实）")
             }
         // Failure: routes reused this time lose confidence; facts shown this time are demoted (unverified ones dropped).
-        val m = if (r.success) base.merge(facts, goal, lesson?.route ?: traj)
+        // Success also verifies the relevant lessons that were shown this time (evidence over later runs).
+        var m = if (r.success) base.confirmShown(goal).merge(facts, goal, lesson?.route ?: traj)
             else (if (reusedPath) base.penalize(goal) else base).decayShown(goal).merge(facts, null, null)
+        if (m.factEntries.size >= AppMemory.CONSOLIDATE_AT && m.factEntries.size > base.factEntries.size) router.consolidateLessons(appLabel, m.facts)?.takeIf { it.isNotEmpty() }?.let { plan ->
+            val before = m.factEntries.size; m = m.consolidate(plan)
+            if (m.factEntries.size < before) onLog("经验整理：AI 合并重复经验 $before → ${m.factEntries.size} 条（保留验证次数）")
+        }
         prefs.setAppMemory(pkg, m.encode())
         lesson?.patterns?.takeIf { it.isNotEmpty() }?.let { ps ->
             val g = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)) }.getOrNull() ?: AppMemory.EMPTY
@@ -113,6 +118,8 @@ class AgentLoop(
     private suspend fun runTask(goalIn: String): Result {
         var goal = GoalRewrite.normalize(goalIn)
         if (goal != goalIn) onLog("目标规范化：$goal")
+        globalPatterns = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)).patternsFor(goal, max = 3) }.getOrNull()
+        globalPatterns?.let { onLog("载入通用经验：$it") }
         var a11y = phoneProvider()
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider() } }
             ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
@@ -1007,12 +1014,14 @@ class AgentLoop(
             (router.visionSkill != null && !router.skillSidelined && !router.localSidelined) ||
             (router.visionReady && prefs.allowCloudScreenshot)
 
-    private fun visionStatus(): String = when {
-        router.cloudReady && prefs.allowCloudScreenshot && com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel) -> "云端模型 ${prefs.cloudModel} 直接看截图"
-        router.visionSkill != null && !router.skillSidelined && !router.localSidelined -> "本机视觉模型描述截图"
-        router.visionReady && prefs.allowCloudScreenshot -> "看图辅助模型"
-        else -> "无（模型不支持图片/未允许发送截图/视觉模型不可用）→ 用文字 OCR + 色块候选代替截图"
-    }
+    private fun visionStatus(): String = com.runasakura.phoneagent.llm.VisionChoice.describe(
+        cloudSees = router.cloudReady && com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel), cloudModel = prefs.cloudModel,
+        shotsAllowed = prefs.allowCloudScreenshot,
+        local = if (router.visionSkill != null && !router.skillSidelined) router.visionSkillSource else com.runasakura.phoneagent.llm.VisionChoice.Source.NONE,
+        localModel = router.visionSkillLabel) +
+        (if (router.visionReady && prefs.allowCloudScreenshot) "；另配看图辅助模型" else "")
+    /** Relevant cross-app strategies for this goal (learned into the GLOBAL bucket), loaded once per task. */
+    private var globalPatterns: String? = null
     private var emptyLooks = 0
     private var shotThisStep = false
     private var lastNoEffect = false
@@ -1212,7 +1221,7 @@ class AgentLoop(
             // cached transcript prefix instead of being re-sent with every step.
             if (transcript.size() == 0) {
                 appMem?.hint(goal)?.let { appendLine("# 以往经验\n$it") }
-                globalHint?.let { appendLine("# 通用界面经验\n$it") }
+                globalPatterns?.let { appendLine("# 通用界面经验（跨应用，仅供参考）\n$it") }
             }
             skill?.suggestion(effective, obsItems.map { it.label })?.let { appendLine(it) }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
@@ -1459,7 +1468,6 @@ class AgentLoop(
         lastFailedAction = null; lastFailedTarget = null
     }
     /** Cross-app UI strategies learned from earlier tasks (loaded once per task; constant → prefix-cache friendly). */
-    private val globalHint: String? by lazy { runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)).hint("", maxFacts = 4) }.getOrNull()?.replace("此应用以往经验：", "") }
 
     /** Shizuku backend active for this task (decided at task start; each use re-checks the live binder). */
     private var shellOn = false
