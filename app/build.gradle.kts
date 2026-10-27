@@ -11,8 +11,8 @@ android {
         applicationId = "com.runasakura.phoneagent"
         minSdk = 26
         targetSdk = 36
-        versionCode = 22
-        versionName = "0.12.0-mvp"
+        versionCode = 23
+        versionName = "0.13.0-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // On-device LLM (MNN) is arm64 only; 16 KB page aligned for Android 15+/16.
