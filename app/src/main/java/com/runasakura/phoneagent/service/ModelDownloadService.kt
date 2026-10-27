@@ -43,7 +43,8 @@ class ModelDownloadService : Service() {
                     startFg(msg, p.done, p.total)
                 }
                 val d = when {
-                    adopt != null -> ModelStore.adopt(this@ModelDownloadService, java.io.File(adopt), cb)
+                    adopt != null -> com.runasakura.phoneagent.llm.ModelSources.pending?.let { c ->
+                        com.runasakura.phoneagent.llm.ModelSources.adopt(this@ModelDownloadService, c, cb) } ?: error("没有待导入的模型")
                     tree != null -> ModelStore.import(this@ModelDownloadService, tree, cb)
                     else -> ModelStore.download(this@ModelDownloadService, repo, cb)
                 }
@@ -75,7 +76,7 @@ class ModelDownloadService : Service() {
         val state = MutableStateFlow(State(false))
         fun download(ctx: Context) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java))
         fun import(ctx: Context, tree: Uri) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_TREE, tree.toString()))
-        fun adopt(ctx: Context, path: String) = ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_ADOPT, path))
+        fun adopt(ctx: Context, c: com.runasakura.phoneagent.llm.ModelSources.Candidate) = run { com.runasakura.phoneagent.llm.ModelSources.pending = c }.let { ctx.startForegroundService(Intent(ctx, ModelDownloadService::class.java).putExtra(EXTRA_ADOPT, c.label)) }
         fun cancel(ctx: Context) = ctx.startService(Intent(ctx, ModelDownloadService::class.java).setAction(ACTION_CANCEL))
     }
 }

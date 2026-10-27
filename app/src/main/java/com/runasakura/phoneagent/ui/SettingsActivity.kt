@@ -39,13 +39,15 @@ class SettingsActivity : AppCompatActivity() {
         binding.visionUrl.setText(prefs.visionBaseUrl)
         binding.visionModel.setText(prefs.visionModel)
         binding.visionLocal.isChecked = prefs.visionLocal
+        binding.visionLocal.setOnCheckedChangeListener { _, on -> prefs.visionLocal = on; if (firstStatusDone) refreshLocal(keepMsg = true) }
+        binding.cloudShot.setOnCheckedChangeListener { _, on -> prefs.allowCloudScreenshot = on; if (firstStatusDone) refreshLocal(keepMsg = true) }
         binding.visionLocalModel.setText(prefs.visionLocalModel)
         binding.confirmAlarm.isChecked = prefs.confirmAlarm
         binding.cloudThinking.isChecked = prefs.cloudThinking
         binding.modelCheckpoint.isChecked = prefs.modelCheckpoint
-        setupShizuku()
-        setupKeepAlive()
-        setupLocalModel()
+        // Status cards (Shizuku binder, a11y/secure settings, model folders) load after the first frame and off the
+        // main thread, so opening Settings paints immediately instead of stalling on IPC and file walks.
+        binding.root.post { if (!isFinishing) { setupShizuku(); setupKeepAlive(); setupLocalModel(); firstStatusDone = true } }
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
@@ -59,7 +61,7 @@ class SettingsActivity : AppCompatActivity() {
         val cur = if (prefs.routeMode == AgentPreferences.ROUTE_LOCAL_FIRST) AgentPreferences.ROUTE_HYBRID else prefs.routeMode
         binding.routeMode.setSelection(modes.indexOf(cur).coerceAtLeast(0))
 
-        binding.btnAppMemory.setOnClickListener { showAppMemory() }
+        binding.btnAppMemory.setOnClickListener { startActivity(android.content.Intent(this, LearningActivity::class.java)) }
         binding.btnTestCloud.setOnClickListener {
             val url = binding.cloudUrl.text.toString().trim(); val key = binding.cloudKey.text.toString().trim()
             val model = binding.cloudModel.text.toString().trim().ifBlank { CloudProviders.byId(CloudProviders.effectiveProvider(prefs.cloudProvider, url, key)).model }
@@ -137,6 +139,15 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    /** Run [work] on IO, then [apply] on the main thread if the screen is still alive. */
+    private fun <T> offMain(work: () -> T, apply: (T) -> Unit) {
+        lifecycleScope.launch {
+            val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching(work) }
+            if (!isFinishing && !isDestroyed) r.onSuccess(apply)
+        }
+    }
+    private var firstStatusDone = false
+
     private val shizukuListener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { _, _ -> runOnUiThread { refreshShizuku() } }
 
     private fun setupShizuku() {
@@ -161,8 +172,7 @@ class SettingsActivity : AppCompatActivity() {
             ?: Toast.makeText(this, "未找到 Shizuku 应用", Toast.LENGTH_SHORT).show()
     }
 
-    private fun refreshShizuku() {
-        val st = com.runasakura.phoneagent.shell.ShizukuBackend.status(this)
+    private fun refreshShizuku() = offMain({ com.runasakura.phoneagent.shell.ShizukuBackend.status(this) }) { st ->
         val dot = if (st == com.runasakura.phoneagent.shell.ShizukuStatus.READY) "●  " else "○  "
         binding.shizukuStatus.text = dot + st.label
         binding.btnShizukuGrant.text = when (st) {
@@ -173,7 +183,8 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnShizukuGrant.isEnabled = st != com.runasakura.phoneagent.shell.ShizukuStatus.READY
     }
 
-    override fun onResume() { super.onResume(); if (::binding.isInitialized) { refreshShizuku(); refreshAlive() } }
+    // Coming back from Shizuku / system settings refreshes; the first resume is covered by the deferred setup.
+    override fun onResume() { super.onResume(); if (::binding.isInitialized && firstStatusDone) { refreshShizuku(); refreshAlive(); refreshLocal() } }
 
     private fun setupKeepAlive() {
         val heal = com.runasakura.phoneagent.a11y.A11ySelfHeal
@@ -210,49 +221,79 @@ class SettingsActivity : AppCompatActivity() {
         Toast.makeText(this, "无法打开该设置页，请在系统设置里手动查找", Toast.LENGTH_LONG).show()
     }
 
-    private fun refreshAlive() {
+    private fun refreshAlive() = offMain({
         val heal = com.runasakura.phoneagent.a11y.A11ySelfHeal
         val connected = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() != null
         val st = com.runasakura.phoneagent.a11y.A11yHealth.state(connected, runCatching { heal.listed(this) }.getOrDefault(false), true)
         val battery = getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(packageName) == true
-        binding.aliveStatus.text = listOfNotNull(
+        val secure = heal.hasSecurePerm(this)
+        listOfNotNull(
             "无障碍：${st.label}",
             "电池优化：" + if (battery) "已忽略 ✓" else "受限制（建议忽略）",
-            "自愈权限：" + if (heal.hasSecurePerm(this)) "已授予 ✓" else "未授予（可用 Shizuku 授予）",
+            "自愈权限：" + if (secure) "已授予 ✓" else "未授予（可用 Shizuku 授予）",
             heal.lastHeal(this)?.let { "最近自愈：$it" },
             com.runasakura.phoneagent.CrashGuard.last(this)?.let { "最近异常：" + it.substringAfter(' ').take(80) },
-        ).joinToString("\n")
-        binding.btnGrantSecure.isEnabled = !heal.hasSecurePerm(this)
-    }
+        ).joinToString("\n") to secure
+    }) { (text, secure) -> binding.aliveStatus.text = text; binding.btnGrantSecure.isEnabled = !secure }
 
     override fun onDestroy() {
         try { rikka.shizuku.Shizuku.removeRequestPermissionResultListener(shizukuListener) } catch (_: Throwable) {}
         super.onDestroy()
     }
 
-    /** Per-app experience written by the model: view, delete one app, or clear all. */
-    private fun showAppMemory() {
-        val prefs = PhoneAgentApp.instance.prefs
-        val all = prefs.allAppMemory()
-        if (all.isEmpty()) { android.widget.Toast.makeText(this, "还没有学到任何应用经验", android.widget.Toast.LENGTH_SHORT).show(); return }
-        val pkgs = all.keys.sorted()
-        fun name(p: String) = if (p == com.runasakura.phoneagent.agent.AppMemory.GLOBAL) "通用界面经验（跨应用）" else p
-        val labels = pkgs.map { p -> val m = com.runasakura.phoneagent.agent.AppMemory.decode(all[p]); "${name(p)}\n经验 ${m.facts.size} 条 · 路线 ${m.paths.size} 条" }.toTypedArray()
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("应用经验（点一项查看）")
-            .setItems(labels) { _, i ->
-                val p = pkgs[i]; val m = com.runasakura.phoneagent.agent.AppMemory.decode(all[p])
-                fun badge(c: Int) = if (c >= 2) "（已验证 $c 次）" else "（未验证）"
-                val body = (m.factEntries.map { "• ${it.text}${badge(it.conf)}" } + m.pathEntries.map { "→ ${it.text.substringBefore("=>")}：${it.text.substringAfter("=>")}${badge(it.conf)}" }).joinToString("\n").ifBlank { "（空）" }
-                com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle(name(p)).setMessage(body)
-                    .setPositiveButton("关闭", null)
-                    .setNegativeButton("删除此应用经验") { _, _ -> prefs.clearAppMemory(p) }.show()
-            }
-            .setNegativeButton("全部清除") { _, _ -> prefs.clearAppMemory() }
-            .setPositiveButton("关闭", null).show()
+    // SAF: the grant is persisted, and the picked folder is searched 3 levels deep (picking "Download" is enough).
+    private val pickModelDir = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        com.runasakura.phoneagent.llm.ModelSources.rememberTree(this, uri)
+        binding.localStatus.text = "正在查找所选文件夹里的模型…"
+        lifecycleScope.launch {
+            val found = runCatching { com.runasakura.phoneagent.llm.ModelSources.scanTree(this@SettingsActivity, uri) }.getOrDefault(emptyList())
+            if (found.isEmpty()) binding.localStatus.text = "所选文件夹（含 3 层子文件夹）里没有完整的 MNN 模型：需要同时有 config.json、llm.mnn 和权重文件。"
+            else chooseCandidate(found)
+        }
     }
 
-    private val pickModelDir = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) com.runasakura.phoneagent.service.ModelDownloadService.import(this, uri)
+    /** One candidate → confirm-free adopt; several → pick one. Copy runs in the foreground service with progress. */
+    private fun chooseCandidate(found: List<com.runasakura.phoneagent.llm.ModelSources.Candidate>) {
+        fun go(c: com.runasakura.phoneagent.llm.ModelSources.Candidate) {
+            binding.localStatus.text = "正在复制 ${c.label}（${c.bytes / 1_000_000} MB）…"
+            com.runasakura.phoneagent.service.ModelDownloadService.adopt(this, c)
+        }
+        if (found.size == 1) { go(found[0]); return }
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("选择要使用的模型")
+            .setItems(found.map { "${it.label}\n${it.where} · ${it.bytes / 1_000_000} MB" }.toTypedArray()) { _, i -> go(found[i]) }
+            .setNegativeButton("取消", null).show()
+    }
+
+    /**
+     * 「使用已下载的模型」: Shizuku scan (reads /sdcard and MNN Chat's /data/local/tmp/mnn_models) when ready, plus the
+     * last granted folder; otherwise explain exactly what works and offer the folder picker / download.
+     */
+    private fun useDownloaded() {
+        binding.localStatus.text = "正在查找已下载的模型…"
+        offMain({
+            val out = ArrayList<com.runasakura.phoneagent.llm.ModelSources.Candidate>()
+            val sh = com.runasakura.phoneagent.shell.ShizukuBackend.shellOrNull(this)
+            if (sh != null) out += runCatching { com.runasakura.phoneagent.llm.ModelSources.scanShell(sh) }.getOrDefault(emptyList())
+            out += com.runasakura.phoneagent.llm.ModelSources.scanDirect(this)
+            com.runasakura.phoneagent.llm.ModelSources.lastTree(this)?.let { t ->
+                out += runCatching { kotlinx.coroutines.runBlocking { com.runasakura.phoneagent.llm.ModelSources.scanTree(this@SettingsActivity, t) } }.getOrDefault(emptyList()) }
+            out.distinctBy { it.label + it.bytes } to (sh != null)
+        }) { (found, shizuku) ->
+            if (found.isNotEmpty()) { binding.localStatus.text = "找到 ${found.size} 个模型"; chooseCandidate(found); return@offMain }
+            val msg = buildString {
+                append("没有找到可直接使用的模型。\n\n")
+                append("• MNN Chat 自己下载的模型存放在它的私有目录（/data/data/…/.mnnmodels），安卓不允许任何其他应用读取，Shizuku 也不行。最简单：点「一键下载推荐模型」，和 MNN Chat 里的是同一份文件（魔塔社区 MNN/Qwen3-VL-2B-Instruct-MNN）。\n")
+                append("• 如果模型文件夹在「下载/文档」等位置：点「选择文件夹」，选那个文件夹或它的上级（会自动往下找 3 层）。\n")
+                if (!shizuku) append("• 已开启 Shizuku 时，还能自动扫描手机存储和 MNN Chat 的本地模型目录 /data/local/tmp/mnn_models。")
+                else append("• 已用 Shizuku 扫描手机存储和 /data/local/tmp/mnn_models，没有完整模型（需要 config.json + llm.mnn + 权重）。")
+            }
+            binding.localStatus.text = "未找到可用模型（详情见对话框）"
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("使用已下载的模型").setMessage(msg)
+                .setPositiveButton("选择文件夹") { _, _ -> pickModelDir.launch(null) }
+                .setNeutralButton("一键下载") { _, _ -> com.runasakura.phoneagent.service.ModelDownloadService.download(this) }
+                .setNegativeButton("取消", null).show()
+        }
     }
 
     /** 本机模型 card: engine choice (embedded / MNN Chat API), status, download / import / warm-up / delete. */
@@ -271,15 +312,7 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
         binding.btnLocalImport.setOnClickListener { pickModelDir.launch(null) }
-        // Offer any complete MNN model already sitting in Downloads / Documents (copied out of MNN Chat).
-        binding.btnLocalUseFound.setOnClickListener {
-            val found = com.runasakura.phoneagent.llm.ModelStore.findExisting(this)
-            if (found.isEmpty()) { binding.localStatus.text = "未在下载/文档目录找到可用模型（MNN Chat 私有目录其他应用读不到，请先复制出来或点上方下载）"; return@setOnClickListener }
-            val labels = found.map { "${it.dir.name}（${it.where} · ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(it.dir) / 1_000_000} MB）" }.toTypedArray()
-            com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("使用已下载的模型")
-                .setItems(labels) { _, which -> com.runasakura.phoneagent.service.ModelDownloadService.adopt(this, found[which].dir.absolutePath) }
-                .setNegativeButton("取消", null).show()
-        }
+        binding.btnLocalUseFound.setOnClickListener { useDownloaded() }
         binding.btnLocalWarm.setOnClickListener {
             binding.localStatus.text = "预热中…"
             lifecycleScope.launch {
@@ -299,7 +332,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnLocalDelete.setOnClickListener {
             val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this) ?: return@setOnClickListener
             com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("删除 ${dir.name}？")
-                .setMessage("释放约 ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(dir) / 1_000_000} MB，之后可重新下载。")
+                .setMessage("释放约 ${com.runasakura.phoneagent.llm.ModelStore.sizeOfCached(dir) / 1_000_000} MB，之后可重新下载。")
                 .setPositiveButton("删除") { _, _ -> com.runasakura.phoneagent.llm.ModelStore.delete(this, dir); refreshLocal() }.setNegativeButton("取消", null).show()
         }
         lifecycleScope.launch {
@@ -317,23 +350,30 @@ class SettingsActivity : AppCompatActivity() {
     private fun refreshLocal(keepMsg: Boolean = false) {
         val prefs = com.runasakura.phoneagent.PhoneAgentApp.instance.prefs
         val embedded = prefs.localEngine == AgentPreferences.LOCAL_EMBEDDED
-        val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this)
-        for (b in listOf(binding.btnLocalDownload, binding.btnLocalImport, binding.btnLocalUseFound, binding.btnLocalWarm, binding.btnLocalDelete)) b.isEnabled = embedded
-        binding.btnLocalWarm.isEnabled = embedded && dir != null; binding.btnLocalDelete.isEnabled = embedded && dir != null
-        if (keepMsg) return
-        binding.localStatus.text = when {
-            !embedded -> "使用 MNN Chat 的 API（下面的地址）。MNN Chat 在后台会被系统限速。"
-            !com.runasakura.phoneagent.llm.EmbeddedMnn.available -> "本设备不支持内置推理（需要 arm64）"
-            dir != null -> com.runasakura.phoneagent.llm.LocalWarmup.status(this) + " · ${com.runasakura.phoneagent.llm.ModelStore.sizeOf(dir) / 1_000_000} MB" + if (com.runasakura.phoneagent.llm.ModelStore.isVision(dir)) " · 可看图" else ""
-            else -> {
-                val part = com.runasakura.phoneagent.llm.ModelStore.partialBytes(this)
-                val found = com.runasakura.phoneagent.llm.ModelStore.findExisting(this).size
-                buildString {
-                    append("尚未安装。点「一键下载」从魔塔社区拉取（公开，无需登录）")
-                    if (part > 0) append("；已缓存 ${part / 1_000_000} MB，可续传")
-                    if (found > 0) append("；或点「使用已下载的模型」（发现 $found 个）")
+        // Everything here may touch disk (folder walks) or load the 8 MB native library: compute off the main thread.
+        offMain({
+            val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this)
+            val text = when {
+                !embedded -> "使用 MNN Chat 的 API（下面的地址）。MNN Chat 在后台会被系统限速。"
+                !com.runasakura.phoneagent.llm.EmbeddedMnn.available -> "本设备不支持内置推理（需要 arm64）"
+                dir != null -> com.runasakura.phoneagent.llm.LocalWarmup.status(this) + " · ${com.runasakura.phoneagent.llm.ModelStore.sizeOfCached(dir) / 1_000_000} MB" +
+                    if (com.runasakura.phoneagent.llm.ModelStore.isVision(dir)) " · 可看图（看图技能会用它）" else " · 纯文字模型（不能看图）"
+                else -> {
+                    val part = com.runasakura.phoneagent.llm.ModelStore.partialBytes(this)
+                    "尚未安装。点「一键下载推荐模型」从魔塔社区拉取（公开，无需登录）" + if (part > 0) "；已缓存 ${part / 1_000_000} MB，可续传" else ""
                 }
             }
+            val vdir = dir?.takeIf { com.runasakura.phoneagent.llm.ModelStore.isVision(it) }
+            val eye = com.runasakura.phoneagent.llm.VisionChoice.pick(prefs.routeMode, vdir != null, com.runasakura.phoneagent.llm.EmbeddedMnn.available, prefs.visionLocal)
+            val see = "当前看图：" + com.runasakura.phoneagent.llm.VisionChoice.describe(com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel) && prefs.cloudApiKey.isNotBlank(),
+                prefs.cloudModel, prefs.allowCloudScreenshot, eye, if (eye == com.runasakura.phoneagent.llm.VisionChoice.Source.EMBEDDED) vdir?.name else prefs.visionLocalModel.ifBlank { prefs.mnnModel })
+            Triple(dir, text, see)
+        }) { (dir, text, see) ->
+            binding.visionNow.text = see
+            for (b in listOf(binding.btnLocalDownload, binding.btnLocalImport, binding.btnLocalUseFound)) b.isEnabled = embedded
+            binding.btnLocalWarm.isEnabled = embedded && dir != null; binding.btnLocalDelete.isEnabled = embedded && dir != null
+            binding.btnLocalDownload.visibility = if (dir == null || com.runasakura.phoneagent.service.ModelDownloadService.state.value.running) View.VISIBLE else View.GONE
+            if (!keepMsg) binding.localStatus.text = text
         }
     }
 

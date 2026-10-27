@@ -72,6 +72,19 @@ object ShizukuShell : PrivilegedShell {
     }
 
     /**
+     * Stream a command's stdout (for large reads such as copying a model file with `cat`). The caller must close the
+     * returned stream; the process is destroyed with it. Recorded in the Shizuku command log like every exec.
+     */
+    fun openStream(argv: List<String>): java.io.InputStream {
+        val p = newProcess.invoke(null, argv.toTypedArray(), null, null) as Process
+        p.outputStream.close()
+        ShellLog.record(argv, ShellLog.caller(), "stream")
+        return object : java.io.FilterInputStream(p.inputStream) {
+            override fun close() { try { super.close() } finally { try { p.destroy() } catch (_: Exception) {} } }
+        }
+    }
+
+    /**
      * Clipboard with shell identity: IClipboard over Shizuku's binder wrapper (the shell UID is exempt from the
      * Android 10+ background-read restriction). Signatures differ per Android version → reflection, best-effort.
      */

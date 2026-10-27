@@ -43,6 +43,10 @@ object ModelStore {
     fun isComplete(d: File): Boolean = d.isDirectory && File(d, "config.json").isFile && File(d, "llm.mnn").isFile &&
         (d.listFiles()?.none { it.name.endsWith(".part") } ?: false)
     fun sizeOf(d: File): Long = d.walk().filter { it.isFile }.sumOf { it.length() }
+    private val sizeCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, Long>>()
+    /** [sizeOf] memoised by folder mtime (Settings shows it on every resume). */
+    fun sizeOfCached(d: File): Long { val m = d.lastModified(); sizeCache[d.absolutePath]?.takeIf { it.first == m }?.let { return it.second }
+        return sizeOf(d).also { sizeCache[d.absolutePath] = m to it } }
     fun isVision(d: File): Boolean = File(d, "visual.mnn").isFile
     /** Bytes already on disk for an in-progress download of [repo] (for the status line before resume). */
     fun partialBytes(ctx: Context, repo: String = DEFAULT_REPO): Long {
@@ -104,22 +108,6 @@ object ModelStore {
         walkShallow(File("/storage/emulated/0/Documents"), "文档")
         walkShallow(File("/sdcard/Download"), "下载")
         return out.distinctBy { it.dir.canonicalPath }
-    }
-
-    /** Copy a found external model into the app private store and select it. */
-    suspend fun adopt(ctx: Context, src: File, onProgress: (Progress) -> Unit): File = withContext(Dispatchers.IO) {
-        check(isComplete(src)) { "不是完整的 MNN 模型目录" }
-        val dir = File(root(ctx), src.name.replace(Regex("[^\\w.-]"), "_")).apply { mkdirs() }
-        val files = src.listFiles()?.filter { it.isFile } ?: emptyList()
-        val total = files.sumOf { it.length() }; var done = 0L
-        for (f in files) {
-            val part = File(dir, f.name + ".part")
-            f.inputStream().use { i -> part.outputStream().use { o -> val b = ByteArray(1 shl 16)
-                while (true) { coroutineContext.ensureActive(); val n = i.read(b); if (n < 0) break; o.write(b, 0, n); done += n
-                    if (done % (4L shl 20) < b.size) onProgress(Progress(done, total, f.name)) } } }
-            part.renameTo(File(dir, f.name)); onProgress(Progress(done, total, f.name))
-        }
-        select(ctx, dir); dir
     }
 
     /** Resumable download (HTTP Range on <file>.part); every file is sha256-checked before it is renamed into place. */
