@@ -62,6 +62,9 @@ class SettingsActivity : AppCompatActivity() {
         binding.routeMode.setSelection(modes.indexOf(cur).coerceAtLeast(0))
 
         binding.btnAppMemory.setOnClickListener { startActivity(android.content.Intent(this, LearningActivity::class.java)) }
+        binding.btnTeach.setOnClickListener { startActivity(android.content.Intent(this, TeachActivity::class.java)) }
+        binding.deepThink.isChecked = prefs.deepThink
+        binding.deepThink.setOnCheckedChangeListener { _, on -> prefs.deepThink = on }
         binding.btnTestCloud.setOnClickListener {
             val url = binding.cloudUrl.text.toString().trim(); val key = binding.cloudKey.text.toString().trim()
             val model = binding.cloudModel.text.toString().trim().ifBlank { CloudProviders.byId(CloudProviders.effectiveProvider(prefs.cloudProvider, url, key)).model }

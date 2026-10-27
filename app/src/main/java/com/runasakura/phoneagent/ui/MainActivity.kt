@@ -70,6 +70,7 @@ class MainActivity : AppCompatActivity() {
         binding.toolbar.setOnMenuItemClickListener {
             when (it.itemId) {
                 R.id.action_settings -> startActivity(Intent(this, SettingsActivity::class.java))
+                R.id.action_teach -> startActivity(Intent(this, TeachActivity::class.java).putExtra(TeachActivity.EXTRA_GOAL, binding.goalInput.text?.toString().orEmpty()))
                 R.id.action_new -> newSession()
                 R.id.action_history -> showHistory()
                 R.id.action_selftest -> runSelfTest()

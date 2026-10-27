@@ -113,6 +113,10 @@ class AgentPreferences(context: Context) : AgentSettings {
         get() = sp.getBoolean("model_checkpoint", false)
         set(v) = sp.edit().putBoolean("model_checkpoint", v).apply()
 
+    override var deepThink: Boolean
+        get() = sp.getBoolean("deep_think", true)
+        set(v) = sp.edit().putBoolean("deep_think", v).apply()
+
     override var confirmAlarm: Boolean
         get() = sp.getBoolean("confirm_alarm", true)
         set(v) = sp.edit().putBoolean("confirm_alarm", v).apply()

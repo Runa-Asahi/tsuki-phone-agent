@@ -61,6 +61,12 @@
             android:theme="@style/Theme.HonorPhoneAgent.Translucent" />
 
         <activity
+            android:name=".ui.TeachActivity"
+            android:exported="false"
+            android:parentActivityName=".ui.MainActivity"
+            android:label="@string/teach_title" />
+
+        <activity
             android:name=".ui.LearningActivity"
             android:exported="false"
             android:parentActivityName=".ui.SettingsActivity"

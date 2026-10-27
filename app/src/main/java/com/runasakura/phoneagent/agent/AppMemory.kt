@@ -10,7 +10,8 @@ package com.runasakura.phoneagent.agent
  *    least twice may replace the planner call.
  * Storage: plain lines "F2:conf|ts|text" / "P2:conf|ts|goal=>route" (legacy "F:"/"P:" lines still decode).
  */
-class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val skillEntries: List<Entry> = emptyList()) {
+class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val skillEntries: List<Entry> = emptyList(),
+                val recipeEntries: List<Entry> = emptyList()) {
     data class Entry(val text: String, val conf: Int, val ts: Long)
 
     val facts: List<String> get() = factEntries.map { it.text }
@@ -18,9 +19,11 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
 
     fun encode(): String = (factEntries.map { "F2:${it.conf}|${it.ts}|" + it.text.replace('\n', ' ') } +
         pathEntries.map { "P2:${it.conf}|${it.ts}|" + it.text.replace('\n', ' ') } +
-        skillEntries.map { "S2:${it.conf}|${it.ts}|" + it.text.replace('\n', ' ') }).joinToString("\n")
+        skillEntries.map { "S2:${it.conf}|${it.ts}|" + it.text.replace('\n', ' ') } +
+        recipeEntries.map { "R2:${it.conf}|${it.ts}|" + it.text.replace('\n', ' ') }).joinToString("\n")
 
     val skills: List<Skill> get() = skillEntries.mapNotNull { Skill.decode(it.text)?.copy(conf = it.conf) }
+    val recipes: List<Recipe> get() = recipeEntries.mapNotNull { Recipe.decode(it.text)?.copy(conf = it.conf) }
 
     /** Best skill for [goal] (similar goal, confirmed skills preferred); null when nothing close enough. */
     fun skillFor(goal: String, now: Long = System.currentTimeMillis()): Skill? =
@@ -39,17 +42,34 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
             val old = ss.removeAt(i); val oldSteps = Skill.decode(old.text)?.steps.orEmpty()
             ss.add(0, Entry(if (oldSteps.isNotEmpty() && oldSteps.size < clean.size) old.text else text, old.conf + 1, now))
         } else ss.add(0, Entry(text, 1, now))
-        return AppMemory(factEntries, pathEntries, ss.take(MAX_SKILLS))
+        return AppMemory(factEntries, pathEntries, ss.take(MAX_SKILLS), recipeEntries)
     }
 
     /** Replaying a skill failed: it loses confidence (dropped at 0). */
     fun penalizeSkill(goal: String, now: Long = System.currentTimeMillis()): AppMemory =
         AppMemory(factEntries, pathEntries, expire(now).skillEntries.mapNotNull { e ->
-            if (Skill.decode(e.text)?.let { Similarity.score(it.goal, goal) >= Skill.MIN_SIM } == true) e.copy(conf = e.conf - 2).takeIf { it.conf > 0 } else e })
+            if (Skill.decode(e.text)?.let { Similarity.score(it.goal, goal) >= Skill.MIN_SIM } == true) e.copy(conf = e.conf - 2).takeIf { it.conf > 0 } else e }, recipeEntries)
+
+    /** Best user-taught recipe for [goal] (slot-safe); preferred over auto skills when both match. */
+    fun recipeFor(goal: String, now: Long = System.currentTimeMillis()): Recipe? =
+        expire(now).recipeEntries.mapNotNull { e -> Recipe.decode(e.text)?.copy(conf = e.conf)?.takeIf { Relevance.sameTask(it.goal, goal, Skill.MIN_SIM) }
+            ?.let { it to Similarity.score(it.goal, goal) } }
+            .maxByOrNull { it.second + minOf(it.first.conf, 4) * 0.05 + 0.15 }?.first   // +0.15: user-taught beats auto skill at equal score
+
+    /** Save / refresh a user-taught recipe (same goal → overwrite with higher conf). */
+    fun learnRecipe(r: Recipe, now: Long = System.currentTimeMillis()): AppMemory {
+        val live = expire(now)
+        val rs = ArrayList(live.recipeEntries)
+        val i = rs.indexOfFirst { Recipe.decode(it.text)?.let { x -> Relevance.sameTask(x.goal, r.goal, 0.8) } == true }
+        val text = r.encode()
+        if (i >= 0) { val old = rs.removeAt(i); rs.add(0, Entry(text, minOf(MAX_CONF, old.conf + 1), now)) }
+        else rs.add(0, Entry(text, maxOf(1, r.conf), now))
+        return AppMemory(live.factEntries, live.pathEntries, live.skillEntries, rs.take(MAX_RECIPES))
+    }
 
     /** Texts the semantic index should have vectors for (lessons + route goals). */
-    fun skillGoals(): List<String> = skillEntries.mapNotNull { Skill.decode(it.text)?.goal }
-    fun retrievalTexts(): List<String> = factEntries.map { it.text } + pathEntries.map { goalOf(it) }
+    fun skillGoals(): List<String> = skillEntries.mapNotNull { Skill.decode(it.text)?.goal } + recipeEntries.mapNotNull { Recipe.decode(it.text)?.goal }
+    fun retrievalTexts(): List<String> = factEntries.map { it.text } + pathEntries.map { goalOf(it) } + skillGoals()
 
     private fun goalOf(p: Entry) = p.text.substringBefore("=>")
     private fun routeOf(p: Entry) = p.text.substringAfter("=>")
@@ -61,7 +81,9 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
     fun score(e: Entry, goal: String, now: Long): Double {
         val rel = Relevance.score(e.text, goal)
         val ageDays = if (e.ts == 0L) 30.0 else (now - e.ts) / 86_400_000.0
-        return rel * 8 + minOf(e.conf, 4) * 0.25 - ageDays / 30.0
+        // Unverified negative tips ("点击无效") are noisy — keep them but rank them last unless highly relevant.
+        val neg = if (e.conf < 2 && NEG.containsMatchIn(e.text)) -1.5 else 0.0
+        return rel * 8 + minOf(e.conf, 4) * 0.25 - ageDays / 30.0 + neg
     }
 
     /**
@@ -112,7 +134,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
             val text = "$goal=>${path.take(300)}"
             if (i >= 0) { val old = ps.removeAt(i); ps.add(0, Entry(text, old.conf + 1, now)) } else ps.add(0, Entry(text, 1, now))
         }
-        return AppMemory(f.sortedByDescending { it.conf }.take(MAX_FACTS), ps.take(MAX_PATHS), expire(now).skillEntries)
+        return AppMemory(f.sortedByDescending { it.conf }.take(MAX_FACTS), ps.take(MAX_PATHS), expire(now).skillEntries, expire(now).recipeEntries)
     }
 
     /**
@@ -122,7 +144,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
     fun decayShown(goal: String, now: Long = System.currentTimeMillis(), maxFacts: Int = 5): AppMemory {
         val live = expire(now)
         val shown = live.shown(goal, now, maxFacts).toSet()
-        return AppMemory(live.factEntries.mapNotNull { if (it in shown) it.copy(conf = it.conf - 1).takeIf { e -> e.conf > 0 } else it }, live.pathEntries, live.skillEntries)
+        return AppMemory(live.factEntries.mapNotNull { if (it in shown) it.copy(conf = it.conf - 1).takeIf { e -> e.conf > 0 } else it }, live.pathEntries, live.skillEntries, live.recipeEntries)
     }
 
     /**
@@ -134,14 +156,15 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
         val live = expire(now)
         val shown = live.shown(goal, now, maxFacts).filter { Relevance.relevant(it.text, goal, RELEVANT) }.toSet()
         if (shown.isEmpty()) return live
-        return AppMemory(live.factEntries.map { if (it in shown) it.copy(conf = minOf(MAX_CONF, it.conf + 1), ts = now) else it }, live.pathEntries, live.skillEntries)
+        return AppMemory(live.factEntries.map { if (it in shown) it.copy(conf = minOf(MAX_CONF, it.conf + 1), ts = now) else it }, live.pathEntries, live.skillEntries, live.recipeEntries)
     }
 
     /** User deleted one entry on the learning page. [kind] 'F' fact, 'P' route, 'S' skill. */
     fun remove(kind: Char, text: String): AppMemory = when (kind) {
-        'F' -> AppMemory(factEntries.filterNot { it.text == text }, pathEntries, skillEntries)
-        'P' -> AppMemory(factEntries, pathEntries.filterNot { it.text == text }, skillEntries)
-        else -> AppMemory(factEntries, pathEntries, skillEntries.filterNot { it.text == text })
+        'F' -> AppMemory(factEntries.filterNot { it.text == text }, pathEntries, skillEntries, recipeEntries)
+        'P' -> AppMemory(factEntries, pathEntries.filterNot { it.text == text }, skillEntries, recipeEntries)
+        'R' -> AppMemory(factEntries, pathEntries, skillEntries, recipeEntries.filterNot { it.text == text })
+        else -> AppMemory(factEntries, pathEntries, skillEntries.filterNot { it.text == text }, recipeEntries)
     }
 
     /**
@@ -161,7 +184,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
             merged += Entry(t, src.maxOf { fs[it].conf }, src.maxOf { fs[it].ts })
         }
         val kept = fs.filterIndexed { i, _ -> i !in used }
-        return AppMemory((merged + kept).sortedByDescending { it.conf }.take(MAX_FACTS), pathEntries, skillEntries).expire(now)
+        return AppMemory((merged + kept).sortedByDescending { it.conf }.take(MAX_FACTS), pathEntries, skillEntries, recipeEntries).expire(now)
     }
 
     /** Cross-app strategies relevant to [goal] (from the [GLOBAL] bucket), for the prompt. */
@@ -172,11 +195,12 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
     /** A reused route that ended in failure loses confidence (removed at 0). */
     fun penalize(goal: String, now: Long = System.currentTimeMillis()): AppMemory {
         val ps = expire(now).pathEntries.mapNotNull { if (Similarity.score(goalOf(it), goal) >= 0.8) it.copy(conf = it.conf - 2).takeIf { e -> e.conf > 0 } else it }
-        return AppMemory(expire(now).factEntries, ps, expire(now).skillEntries)
+        return AppMemory(expire(now).factEntries, ps, expire(now).skillEntries, expire(now).recipeEntries)
     }
 
     private fun expire(now: Long): AppMemory =
-        AppMemory(factEntries.filter { fresh(it, now) }, pathEntries.filter { fresh(it, now) }, skillEntries.filter { fresh(it, now) })
+        AppMemory(factEntries.filter { fresh(it, now) }, pathEntries.filter { fresh(it, now) },
+            skillEntries.filter { fresh(it, now) }, recipeEntries.filter { fresh(it, now) })
 
     /**
      * Hygiene: everything expires after [TTL_MS] without confirmation; a lesson seen only once (conf 1) expires
@@ -185,7 +209,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
     private fun fresh(e: Entry, now: Long) = e.ts == 0L || now - e.ts < (if (e.conf <= 1) UNVERIFIED_TTL_MS else TTL_MS)
 
     companion object {
-        const val MAX_FACTS = 10; const val MAX_PATHS = 4; const val MAX_CHARS = 60; const val MAX_SKILLS = 6
+        const val MAX_FACTS = 10; const val MAX_PATHS = 4; const val MAX_CHARS = 60; const val MAX_SKILLS = 6; const val MAX_RECIPES = 8
         const val MAX_CONF = 6; const val RELEVANT = 0.12
         /** Consolidate with the model once a bucket holds this many facts. */
         const val CONSOLIDATE_AT = 7
@@ -206,21 +230,21 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
         const val TTL_MS = 30L * 24 * 3600 * 1000
 
         fun decode(s: String?): AppMemory {
-            val f = ArrayList<Entry>(); val p = ArrayList<Entry>(); val k = ArrayList<Entry>()
+            val f = ArrayList<Entry>(); val p = ArrayList<Entry>(); val k = ArrayList<Entry>(); val r = ArrayList<Entry>()
             s.orEmpty().lines().forEach { l ->
                 when {
-                    l.startsWith("F2:") || l.startsWith("P2:") || l.startsWith("S2:") -> {
+                    l.startsWith("F2:") || l.startsWith("P2:") || l.startsWith("S2:") || l.startsWith("R2:") -> {
                         val parts = l.drop(3).split('|', limit = 3)
                         if (parts.size == 3) {
                             val e = Entry(parts[2], parts[0].toIntOrNull() ?: 1, parts[1].toLongOrNull() ?: 0L)
-                            when (l[0]) { 'F' -> f += e; 'P' -> p += e; else -> k += e }
+                            when (l[0]) { 'F' -> f += e; 'P' -> p += e; 'R' -> r += e; else -> k += e }
                         }
                     }
                     l.startsWith("F:") -> f += Entry(l.drop(2), 1, 0L)
                     l.startsWith("P:") -> p += Entry(l.drop(2), 1, 0L)
                 }
             }
-            return AppMemory(f, p, k)
+            return AppMemory(f, p, k, r)
         }
     }
 }

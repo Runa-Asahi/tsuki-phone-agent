@@ -20,7 +20,7 @@ object ObsFormat {
     /** Role hint: checkboxes never close popups; close-like words usually do. */
 
     fun line(it: ScreenItem, w: Int, h: Int): String = buildString {
-        append('[').append(it.id).append("] ").append(it.label.ifBlank { "(输入框)" })
+        append('[').append(it.id).append("] ").append(OcrNormalize.display(it.label.ifBlank { "(输入框)" }))
         append(" (").append(it.cx).append(',').append(it.cy).append(')')
         if (it.bw > 0) append(" ").append(it.bw).append('x').append(it.bh)
         // (No 3x3 region word: the centre coordinate already says where it is — 2–3 tokens saved per element.)
@@ -38,7 +38,7 @@ object ObsFormat {
         for (it in s.items.take(MAX_ITEMS)) {
             val g = if (it.edit) null else groups[it.label]
             if (g != null && !emitted.add(it.label)) continue
-            val l = if (g != null) "「${it.label}」×${g.size}：" + g.joinToString(" ") { e -> "[${e.id}](${e.cx},${e.cy})" } else line(it, s.w, s.h)
+            val l = if (g != null) "「${OcrNormalize.display(it.label)}」×${g.size}：" + g.joinToString(" ") { e -> "[${e.id}](${e.cx},${e.cy})" } else line(it, s.w, s.h)
             if (sb.length + l.length > maxChars) break
             sb.append(l).append('\n'); shown += g?.size ?: 1
         }
@@ -115,10 +115,10 @@ object SemanticDiff {
 /** Remembers actions that produced no meaningful change; the same target is refused next time. */
 class NoEffectGuard {
     private val dead = LinkedHashMap<String, String>()
-    private fun normLabel(s: String) = Text.norm(s).replace(Regex("[^\\p{IsHan}A-Za-z0-9]"), "")
+    private fun normLabel(s: String) = Text.norm(OcrNormalize.word(s)).replace(Regex("[^\\p{IsHan}A-Za-z0-9]"), "")
 
     fun key(a: AgentAction, label: String?): String? = when (a) {
-        is AgentAction.Tap -> label?.let { "t:" + normLabel(it) } ?: a.x?.let { "c:${it / 150},${(a.y ?: 0) / 150}" }
+        is AgentAction.Tap -> label?.let { "t:" + normLabel(it) } ?: a.x?.let { "c:${it / 40},${(a.y ?: 0) / 40}" }
         is AgentAction.Back -> "back"
         else -> null
     }

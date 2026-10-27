@@ -124,10 +124,15 @@ class AgentLoop(
         var goal = GoalRewrite.normalize(goalIn)
         if (goal != goalIn) onLog("目标规范化：$goal")
         Relevance.clearBoost(); retrievalLogged = false
-        val globalMem = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)) }.getOrNull()
+        think.reset(); recipe = null; lastOrient = null
+        globalMem = runCatching { AppMemory.decode(prefs.appMemory(AppMemory.GLOBAL)) }.getOrNull()
         prepareRetrieval(goal, globalMem)
         globalPatterns = runCatching { globalMem?.patternsFor(goal, max = 3) }.getOrNull()
         globalPatterns?.let { onLog("载入通用经验：$it") }
+        // User-taught recipe saved without a package lands in GLOBAL — load it even before the target app is known.
+        if (recipe == null) recipe = globalMem?.recipeFor(goal)?.also {
+            onLog("载入用户教授的流程（通用，${it.steps.size} 步）：" + it.steps.joinToString(" → "))
+        }
         var a11y = phoneProvider()
             ?: run { onLog("无障碍服务未连接，等待重连（最多 10 秒）…"); com.runasakura.phoneagent.util.Await.nonNull(10_000) { phoneProvider() } }
             ?: return Result(false, 0, "无障碍服务未开启（等待 10 秒仍未重连，请到设置→辅助功能重新打开）")
@@ -277,7 +282,13 @@ class AgentLoop(
                 appMem = runCatching { AppMemory.decode(prefs.appMemory(match.packageName)) }.getOrNull()
                 appMem?.let { prepareRetrieval(goal, it); rerankLessons(goal, it) }
                 appMem?.hint(goal)?.let { onLog("载入应用经验：" + it.replace("\n", " | ")) }
-                skill = appMem?.skillFor(goal)?.also { onLog("载入技能（${it.steps.size} 步，已验证${it.conf}次）：" + it.steps.joinToString(" → ")) }
+                appMem?.recipeFor(goal)?.let { r ->
+                    recipe = r; onLog("载入用户教授的流程（${r.steps.size} 步）：" + r.steps.joinToString(" → "))
+                }
+                if (recipe == null) recipe = globalMem?.recipeFor(goal)?.also {
+                    onLog("载入用户教授的流程（通用，${it.steps.size} 步）：" + it.steps.joinToString(" → "))
+                }
+                if (recipe == null) skill = appMem?.skillFor(goal)?.also { onLog("载入技能（${it.steps.size} 步，已验证${it.conf}次）：" + it.steps.joinToString(" → ")) }
                 if (!com.runasakura.phoneagent.util.TaskTiming.time("启动应用") { dev.bringToFront(match.packageName, match.label) }) {
                     return Result(false, 1, "无法把「${match.label}」带到前台（前台=${dev.foregroundPackage()}）")
                 }
@@ -435,6 +446,10 @@ class AgentLoop(
                 if (++refocus > 3) return Result(false, step, "多次无法回到目标应用 $tp")
                 onLog("前台(${snap.packageName})不是目标应用，重新启动 $tp（不调用模型）")
                 if (!dev.bringToFront(tp, tp)) return Result(false, step, "目标应用无法到前台（${dev.foregroundPackage()}）")
+                // Intent relaunch often flips portrait↔landscape for games; wait until size settles before deciding.
+                waitOrientationStable(a11y, lastOrient)
+                cloudPlanText = null; planJob?.cancel(); planJob = null; planNote = null   // stale plan used old coords
+                think.blacklist.removeAll { it.startsWith("c:") }   // relaunch may reshuffle layout
                 step--; continue
             }
             if (tp == null && AppResolver.isAgentOrBrain(snap.packageName)) {
@@ -444,11 +459,40 @@ class AgentLoop(
                 step--; continue
             }
 
+            // Orientation flip (e.g. game relaunch): drop parallel plan that still has old-size coordinates.
+            val orient = sc.w to sc.h
+            if (lastOrient != null && lastOrient != orient) {
+                onLog("屏幕方向变化：${lastOrient!!.first}x${lastOrient!!.second} → ${sc.w}x${sc.h}，丢弃旧规划")
+                cloudPlanText = null; planJob?.cancel(); planJob = null; planNote = null
+                // Coord keys are stale after rotation; keep label/back bans (still meaningful).
+                think.blacklist.removeAll { it.startsWith("c:") }
+            }
+            lastOrient = orient
+
+            // Stale parallel plan: if recent steps made no progress, the plan's coords/route are likely wrong.
+            if (lastNoEffect && think.noProgress >= 2 && cloudPlanText != null) {
+                onLog("连续无进展：丢弃过时并行规划，改为就地观察")
+                cloudPlanText = null; planJob?.cancel(); planJob = null; planNote = null
+            }
+
+            // Shallow / deep hybrid — before look/shot so deep can force a screenshot this step.
+            val decision = ThinkMode.decide(think, step, prefs.maxSteps, prefs.deepThink)
+            if (decision.mode == ThinkMode.Mode.DEEP) {
+                onLog("思考模式=深（${decision.reason}）")
+                lookNext = true
+                cleanShotNext = true   // SoM boxes can hide × / close icons — deep looks at a clean frame
+                deepNote = ThinkMode.deepBlock(decision.reason ?: "卡住", think.blacklist, effective.takeLast(6), canSee = canSee())
+                escalateNext = escalateNext || router.canEscalate
+            } else {
+                deepNote = null
+                if (step == 1 && prefs.deepThink) onLog("思考模式=浅")
+            }
+
             // Text can't describe this screen well (games/landscape/icons) or we're stuck → use eyes.
             // Adaptive, not fixed: the model asked to look, the last action did nothing, we're looping, or the
             // first look at a screen with almost no text. Otherwise text (OCR + structure) is enough.
             val hardScreen = lookNext || lastNoEffect || steps.looping || steps.recentFailures >= 1 ||
-                (modelSteps == 0 && sc.items.size < 8) || sc.items.size < 3
+                (modelSteps == 0 && sc.items.size < 8) || sc.items.size < 3 || decision.mode == ThinkMode.Mode.DEEP
             lookNext = false; modelSteps++
             val vision = router.cloudReady && prefs.allowCloudScreenshot &&
                 com.runasakura.phoneagent.llm.CloudProviders.cloudSeesImages(prefs.cloudModel)
@@ -463,6 +507,7 @@ class AgentLoop(
             if (shot != null && vision) onLog("附带截图给云端模型（${prefs.cloudModel} 支持看图）")
             var obsNote = diffNote
             planNote?.let { obsNote = listOfNotNull(obsNote, "$it（仅供参考，以屏幕为准）").joinToString("\n"); planNote = null }
+            deepNote?.let { obsNote = listOfNotNull(obsNote, it).joinToString("\n") }
             // Local vision assist runs in parallel and never blocks a step: it is started for hard/sparse screens and
             // its description is attached when ready — only while the screen is still the one it described.
             val sigNow = recentSigs.lastOrNull()
@@ -538,8 +583,10 @@ class AgentLoop(
             // Local↔cloud collaboration: simple steps stay local; escalate to cloud on no-progress
             // or after the previous step's invalid/unparseable output.
             val lowConf = sc.items.size < 3  // almost nothing readable (OCR-only alone is not low-confidence)
-            val escalate = escalateNext || steps.stuckCount >= 2 || lowConf || steps.looping || (vision && brainShot != null)
+            val deepNow = decision.mode == ThinkMode.Mode.DEEP
+            val escalate = escalateNext || deepNow || steps.stuckCount >= 2 || lowConf || steps.looping || (vision && brainShot != null)
             if (escalate && router.canEscalate && router.localUsable) onLog("改用云端：" + when {
+                deepNow -> "深思考（${decision.reason ?: "卡住"}）"
                 escalateNext -> "上一步本机输出无效或低置信（重复同一动作）"
                 lowConf -> "界面文字过少（低置信）"
                 else -> "界面连续无变化" })
@@ -576,7 +623,7 @@ class AgentLoop(
 
             var plan = ActionParser.parse(resp.content)
             plan.memory?.takeIf { it.isNotBlank() }?.let { if (memory.add(it)) onLog("记住：$it") }
-            plan.subgoal?.let { onLog("小目标：$it") }
+            plan.subgoal?.let { onLog("小目标：$it"); ThinkMode.onSubgoal(think, it, GoalMatch.saysYes(plan.goalMatch)) }
             plan.screen?.let { onLog("界面类型（模型判断）：$it") }
             plan.goalMatch?.let { onLog("与目标是否一致（模型判断）：$it") }
             lastScreenKind = plan.screen; lastGoalMatch = plan.goalMatch
@@ -591,7 +638,7 @@ class AgentLoop(
             onLog("thought: ${plan.thought}")
             onLog("action: ${plan.action}")
             var err = validationError(plan, resp.content, sc)
-            if (err != null) escalateNext = true
+            if (err != null) { escalateNext = true; ThinkMode.onReject(think) } else ThinkMode.onAccepted(think)
             // Low confidence: local model repeats exactly the previous action → next step goes to cloud.
             val actKey = plan.action.toString()
             if (err == null && !resp.backend.startsWith("cloud") && !resp.backend.startsWith("deepseek") && actKey == lastActionKey) {
@@ -705,7 +752,15 @@ class AgentLoop(
                         lastExec = null; continue
                     }
                     // Same step: re-ask with the screenshot attached right away (no wait, no step consumed; ≤3 per task).
-                    if (freeLooks < 3) { freeLooks++; step--; onLog("模型请求看截图：本步直接附图重问（不占步数）") } else onLog("模型请求看截图（下一步附图）")
+                    // Cap free looks; after that, if a shot was already attached this step, force an action instead of look-looping.
+                    if (freeLooks < 3) { freeLooks++; step--; onLog("模型请求看截图：本步直接附图重问（不占步数）"); lastExec = null; continue }
+                    if (shotThisStep) {
+                        onLog("已附图仍只请求 look：停止空看，要求本步给出具体动作")
+                        transcript.note("已附截图仍输出 look。请根据截图给出具体 tap/swipe/back 等动作，不要再 look。")
+                        steps.recordAction("空 look（已附图）", ok = false)
+                        lastExec = null; continue
+                    }
+                    onLog("模型请求看截图（下一步附图）")
                     lastExec = null; continue
                 }
             }
@@ -778,7 +833,11 @@ class AgentLoop(
                     // Generic: the same target twice in a row without reaching the goal = treat as ineffective
                     // (catches "confirm without selecting" even when OCR churn makes the screen look changed).
                     val k = guard.key(action, lastExec!!.second)
-                    if (k != null && k == prevExecKey && StepBudget.jaccard(labelsNow, prevExecLabels) >= 0.7) { guard.record(action, lastExec!!.second, lastExec!!.third + "（连续两次同一目标未推进）"); onLog("同一目标连点两次未推进，标记为无效") }
+                    if (k != null && k == prevExecKey && StepBudget.jaccard(labelsNow, prevExecLabels) >= 0.7) {
+                        guard.record(action, lastExec!!.second, lastExec!!.third + "（连续两次同一目标未推进）")
+                        ThinkMode.actionKey(action, lastExec!!.second)?.let { think.blacklist += it }
+                        onLog("同一目标连点两次未推进，标记为无效")
+                    }
                     prevExecKey = k; prevExecLabels = labelsNow
                     onLog(if (ok) "执行成功：${ActionDesc.of(action, tapped)}" else "执行失败：${lastExecError ?: "未知原因"}")
                     if (action is AgentAction.Launch && ok) {
@@ -952,13 +1011,25 @@ class AgentLoop(
             return "你自己判断 goal_match=${plan.goalMatch}，与目标不一致，不能 done；继续操作或退回主入口"
         if (plan.needScreenshot && !canSee() && lookSubstitutes >= 2)
             return "本次无法看截图（已两次改用高精度 OCR），不要再输出 look；" + Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn)
-        if (a is AgentAction.Tap && a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x != null && a.y != null &&
-            !shotThisStep && !ObsFormat.nearAny(sc.items, a.x!!, a.y!!) && !LayoutHints.isGallery(sc)) {
-            // Without any vision path the coordinate tap is the model's only way to reach a text-free control: allow a
-            // bounded number of exploratory taps with stated reasoning; their outcome is verified by the screen diff.
-            if (!canSee() && exploreTaps < MAX_EXPLORE_TAPS && !plan.thought.isNullOrBlank()) { exploreTaps++; onLog("探索性坐标点击（无看图能力，$exploreTaps/$MAX_EXPLORE_TAPS）：(${a.x},${a.y})"); return null }
-            return if (canSee()) "坐标(${a.x},${a.y})附近没有任何识别到的元素；请点列表里的元素，或输出 {\"type\":\"look\"} 请求截图"
-            else "坐标(${a.x},${a.y})附近没有识别到的元素，探索性点击次数已用完；" + Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn)
+        if (a is AgentAction.Tap && a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x != null && a.y != null) {
+            if (a.x!! !in 0 until sc.w || a.y!! !in 0 until sc.h)
+                return "坐标(${a.x},${a.y})超出当前屏幕 ${sc.w}x${sc.h}（方向可能刚变过，请按最新截图坐标重点）"
+            val near = ObsFormat.nearAny(sc.items, a.x!!, a.y!!) || LayoutHints.isGallery(sc)
+            val sparse = sc.source.startsWith("ocr") || sc.items.count { !it.label.startsWith("〔") } <= 2
+            // Blacklisted by ThinkMode / NoEffectGuard: refuse even if near an element.
+            val key = ThinkMode.actionKey(a, null)
+            if (key != null && key in think.blacklist) return "坐标(${a.x},${a.y})已在禁止列表（先前点过无效），请换位置或 look 后按截图选关闭钮/其他入口"
+            if (!shotThisStep && !near && !LayoutHints.isGallery(sc)) {
+                // tree=0 games / splash / any-tap-to-continue: blank taps are legitimate. Allow when the screen is
+                // sparse OR we already attached a shot this step OR vision is off (exploratory). Cap attempts.
+                val allowBlank = sparse || shotThisStep || !canSee()
+                if (allowBlank && exploreTaps < MAX_EXPLORE_TAPS && !plan.thought.isNullOrBlank()) {
+                    exploreTaps++; onLog("空白/任意处点击（${if (sparse) "界面树稀疏" else "探索"} $exploreTaps/$MAX_EXPLORE_TAPS）：(${a.x},${a.y})")
+                    return null
+                }
+                return if (canSee() && !sparse) "坐标(${a.x},${a.y})附近没有任何识别到的元素；请点列表里的元素，或输出 {\"type\":\"look\"} 请求截图"
+                else "坐标(${a.x},${a.y})附近没有识别到的元素，探索性点击次数已用完；" + Alternatives.untried(sc.items, guard.deadLabels(), tappedLabels, shellOn)
+            }
         }
         return null
     }
@@ -971,6 +1042,10 @@ class AgentLoop(
     private var prevSource: String? = null
     private var verifyNext = false
     private val repeatReminder = RepeatReminder()
+    private val think = ThinkMode.State()
+    private var recipe: Recipe? = null
+    private var lastOrient: Pair<Int, Int>? = null   // (w,h) of last observation
+    private var deepNote: String? = null
     private var cleanShotNext = false
     private val transcript = Transcript()
     private var pendingObs: String? = null
@@ -1055,6 +1130,7 @@ class AgentLoop(
 
     /** Relevant cross-app strategies for this goal (learned into the GLOBAL bucket), loaded once per task. */
     private var globalPatterns: String? = null
+    private var globalMem: AppMemory? = null
     private var emptyLooks = 0
     private var shotThisStep = false
     private var lastNoEffect = false
@@ -1120,11 +1196,17 @@ class AgentLoop(
         // Actions whose effect is not on screen (system command, clipboard, media/volume keys, wait) are judged by
         // their tool result, not by a screen diff — never mark them "ineffective" or ban them as a loop.
         if (!d.meaningful && isOffScreen(le.first)) return "上一步：${le.third}$exp → 界面未变（此操作不改变界面，以工具结果为准）"
+        val key = ThinkMode.actionKey(le.first, le.second)
         return if (!d.meaningful) {
             guard.record(le.first, le.second, le.third); lastNoEffect = true
+            ThinkMode.onOutcome(think, key, progressed = false)
+            key?.let { think.blacklist += it }
             "上一步：${le.third}$exp → 界面没有实质变化${if (exact) "" else "（只是 OCR 抖动）"}= 这个动作无效，不要再做"
         } else buildString {
             effective += le.third
+            val wasDeep = think.mode == ThinkMode.Mode.DEEP
+            ThinkMode.onOutcome(think, key, progressed = true)
+            if (wasDeep && think.mode == ThinkMode.Mode.SHALLOW) onLog("思考模式=浅（已有进展，退出深思考）")
             append("上一步：").append(le.third).append(exp).append(" → 界面有变化")
             if (d.added.isNotEmpty()) append(" 新出现:").append(d.added.distinct().take(6).joinToString("、"))
             if (d.removed.isNotEmpty()) append(" 消失:").append(d.removed.distinct().take(6).joinToString("、"))
@@ -1240,10 +1322,29 @@ class AgentLoop(
         return "$reason\n对象/页面：$title\n内容：${lastTyped ?: "（无输入）"}\n用户目标：$goal"
     }
 
+
+    /** After relaunching a game, wait until the screenshot size matches [want] or settles for 2 reads. */
+    private suspend fun waitOrientationStable(a11y: com.runasakura.phoneagent.a11y.Phone, want: Pair<Int, Int>?) {
+        var last: Pair<Int, Int>? = null; var stable = 0
+        repeat(8) {
+            pause(350)
+            val shot = try { a11y.screenshotJpegBase64(320) } catch (_: Exception) { null } ?: return
+            // Decode bounds cheaply from JPEG header via BitmapFactory options.
+            val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            val bytes = android.util.Base64.decode(shot, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+            val cur = opts.outWidth to opts.outHeight
+            if (want != null && cur == want) { onLog("方向已恢复 ${cur.first}x${cur.second}"); return }
+            if (cur == last) stable++ else { stable = 0; last = cur }
+            if (stable >= 1 && want == null) { onLog("方向已稳定 ${cur.first}x${cur.second}"); return }
+        }
+        last?.let { onLog("方向等待超时，当前 ${it.first}x${it.second}") }
+    }
+
     private fun buildObserveMessage(goal: String, snap: UiSnapshot, step: Int, diffNote: String? = null): String {
         // Order: task-stable context first (prefix-cache friendly), then per-step feedback, screen list last.
         return buildString {
-            appendLine("/no_think")
+            if (think.mode == ThinkMode.Mode.SHALLOW) appendLine("/no_think")
             // Task-stable lines are sent once and then live in the cached transcript prefix; after a reset (empty
             // transcript) they are re-sent. Saves ~60–120 tokens per step without the model losing them.
             val fresh = transcript.size() == 0 || refreshStable
@@ -1256,7 +1357,8 @@ class AgentLoop(
                 appMem?.hint(goal)?.let { appendLine("# 以往经验\n$it") }
                 globalPatterns?.let { appendLine("# 通用界面经验（跨应用，仅供参考）\n$it") }
             }
-            skill?.suggestion(effective, obsItems.map { it.label })?.let { appendLine(it) }
+            recipe?.suggestion(effective, obsItems.map { it.label })?.let { appendLine(it) }
+                ?: skill?.suggestion(effective, obsItems.map { it.label })?.let { appendLine(it) }
             memory.text()?.let { appendLine("# 本任务已知\n$it") }
             if (!canSee() && !noVisionNoted && (snap.lowConfidence || lastScreen?.source != "tree")) {
                 noVisionNoted = true
@@ -1270,7 +1372,8 @@ class AgentLoop(
                     if (targetPkgForMemory == null) targetPkgForMemory = snap.packageName
                     if (snap.packageName != targetPkgForMemory || appMem == null) runCatching { AppMemory.decode(prefs.appMemory(snap.packageName)) }.getOrNull()?.let { m ->
                         m.hint(goal)?.let { appendLine("# 此应用以往经验\n$it") }
-                        if (skill == null) skill = m.skillFor(goal)?.also { onLog("载入技能（${it.steps.size} 步）：" + it.steps.joinToString(" → ")) }
+                        if (recipe == null) m.recipeFor(goal)?.let { r -> recipe = r; onLog("载入用户教授的流程（${r.steps.size} 步）：" + r.steps.joinToString(" → ")) }
+                        if (recipe == null && skill == null) skill = m.skillFor(goal)?.also { onLog("载入技能（${it.steps.size} 步）：" + it.steps.joinToString(" → ")) }
                     }
                 }
             }

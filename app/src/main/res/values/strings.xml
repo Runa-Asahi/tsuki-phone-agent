@@ -81,6 +81,11 @@
     <string name="ui_26">发送消息、通话、支付、删除、卸载、下单始终需要确认，不能关闭。</string>
     <string name="ui_27">学习记录（查看 / 整理 / 删除经验）</string>
     <string name="learning_title">学习记录</string>
+    <string name="teach_title">教 Tsuki 做一件事</string>
+    <string name="teach_entry">教我做…</string>
+    <string name="deep_think">卡住时加深思考</string>
+    <string name="deep_think_desc">同一动作反复无效、连续无进展或小目标来回切换时，自动进入深思考：强制看图、诊断原因、换未试过的策略。成功推进后回到浅思考。不切换模型。</string>
+
     <string name="storage_title">存储与清理</string>
     <string name="storage_desc">本机模型和缓存占用的空间。「一键清理」只删除临时文件、中断的下载、模型加载缓存（未加载时）和经验向量缓存（需要时自动重算），不会删除已安装的模型或学到的经验。每天也会自动清理一次临时文件和超过 3 天的中断下载。</string>
     <string name="storage_clean">一键清理</string>

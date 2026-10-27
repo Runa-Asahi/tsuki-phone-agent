@@ -97,7 +97,15 @@ class AgentForegroundService : Service() {
         val overlayCtx: android.content.Context = com.runasakura.phoneagent.a11y.AgentAccessibilityService.require() ?: this
         pauseFlag.set(false)
         overlay = EmergencyStopOverlay(overlayCtx, { requestStop("悬浮窗「急停」被点击") }, { togglePause() }, {
-            startActivity(android.content.Intent(this, com.runasakura.phoneagent.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)) }).also { it.show() }
+            // During a task, never pull Tsuki to the foreground (it flips game orientation and derails coordinates).
+            // The user can open Tsuki from the notification or after the task ends.
+            if (isRunning()) {
+                log("任务进行中：点悬浮球「打开」已忽略，避免抢占前台（结束后再打开）")
+                android.widget.Toast.makeText(this, "任务进行中，结束后再打开 Tsuki", android.widget.Toast.LENGTH_SHORT).show()
+            } else {
+                startActivity(android.content.Intent(this, com.runasakura.phoneagent.ui.MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            }
+        }).also { it.show() }
         val prefs = PhoneAgentApp.instance.prefs
         // Local engine: embedded MNN inside Tsuki (default; runs in this foreground-service process) or MNN Chat's API.
         val embedded = prefs.localEngine == AgentPreferences.LOCAL_EMBEDDED

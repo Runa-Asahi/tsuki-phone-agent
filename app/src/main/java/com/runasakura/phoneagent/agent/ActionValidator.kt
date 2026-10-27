@@ -22,7 +22,11 @@ object ActionValidator {
                 !a.nodeId.isNullOrBlank() && items.none { it.id == a.nodeId } ->
                     "node_id ${a.nodeId} 不存在，只能用列表里的 e 编号"
                 !a.text.isNullOrBlank() &&
-                    items.none { Text.eq(it.label, a.text) || Text.norm(it.label).contains(Text.norm(a.text!!)) } ->
+                    items.none {
+                        val want = OcrNormalize.word(a.text!!); val got = OcrNormalize.word(it.label)
+                        Text.eq(it.label, a.text) || Text.eq(got, want) ||
+                            Text.norm(it.label).contains(Text.norm(a.text!!)) || Text.norm(got).contains(Text.norm(want))
+                    } ->
                     "屏幕上没有文字「${a.text}」"
                 a.nodeId.isNullOrBlank() && a.text.isNullOrBlank() && a.x != null && a.y != null &&
                     (a.x !in 0 until w || a.y !in 0 until h) -> "坐标超出屏幕"

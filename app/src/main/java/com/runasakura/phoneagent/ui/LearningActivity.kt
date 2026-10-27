@@ -55,7 +55,7 @@ class LearningActivity : AppCompatActivity() {
                     val label = if (pkg == AppMemory.GLOBAL) "通用界面经验（跨应用）" else runCatching {
                         packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
                     Bucket(pkg, label, m.factEntries.map { Row('F', it.text, it.conf, it.ts) } + m.pathEntries.map { Row('P', it.text, it.conf, it.ts) } +
-                        m.skillEntries.map { Row('S', it.text, it.conf, it.ts) })
+                        m.skillEntries.map { Row('S', it.text, it.conf, it.ts) } + m.recipeEntries.map { Row('R', it.text, it.conf, it.ts) })
                 }.filter { it.rows.isNotEmpty() }.sortedWith(compareBy({ it.pkg != AppMemory.GLOBAL }, { -it.rows.size }))
             }
             render(buckets)
@@ -65,6 +65,7 @@ class LearningActivity : AppCompatActivity() {
     private fun render(buckets: List<Bucket>) {
         list.removeAllViews()
         val total = buckets.sumOf { it.rows.size }; val verified = buckets.sumOf { b -> b.rows.count { it.conf >= 2 } }
+        list.addView(button("教 Tsuki 做一件事") { startActivity(android.content.Intent(this, TeachActivity::class.java)) })
         list.addView(note("检索方式：" + retrievalMode()))
         list.addView(note(if (total == 0) "还没有学到经验。每次任务结束后，Tsuki 会根据这次的证据记下可复用的经验；成功时验证被用到的经验，失败时降低它们的可信度，过期或从未被验证的会自动淘汰。"
             else "共 $total 条，其中 $verified 条已被后续任务验证。「待验证」只出现过一次，10 天内没被再次证实会自动淘汰；点一条可删除。"))
@@ -82,9 +83,13 @@ class LearningActivity : AppCompatActivity() {
     }
 
     private fun row(b: Bucket, r: Row): View {
-        val kind = when (r.kind) { 'F' -> "经验"; 'P' -> "路线"; else -> "技能" }
-        val body = when (r.kind) { 'F' -> r.text; 'P' -> r.text.substringBefore("=>") + "：" + r.text.substringAfter("=>")
-            else -> r.text.substringBefore("=>") + "：" + r.text.substringAfter("=>") }
+        val kind = when (r.kind) { 'F' -> "经验"; 'P' -> "路线"; 'R' -> "教授流程"; else -> "技能" }
+        val body = when (r.kind) {
+            'F' -> r.text
+            'R' -> com.runasakura.phoneagent.agent.Recipe.decode(r.text)?.let { rec ->
+                rec.goal + "：" + rec.steps.joinToString(" → ") } ?: r.text
+            else -> r.text.substringBefore("=>") + "：" + r.text.substringAfter("=>")
+        }
         val badge = if (r.conf >= 2) "已验证 ${r.conf} 次" else "待验证"
         val age = if (r.ts <= 0) "" else " · " + ago(System.currentTimeMillis() - r.ts)
         val card = LinearLayout(this).apply {

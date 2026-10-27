@@ -123,6 +123,21 @@ class LlmRouter(
     }
 
     /**
+     * Compress a user teach session (dictated or demonstrated steps) into a reusable [Recipe].
+     * Cloud only, 10 s budget; the model must not invent steps that were not in the trace.
+     */
+    suspend fun compressTeach(goal: String, app: String?, trace: String): com.runasakura.phoneagent.agent.Recipe? {
+        val c = cloud ?: return null
+        if (mode == AgentPreferences.ROUTE_LOCAL_ONLY) return null
+        val r = withTimeoutOrNull(10_000) { c.chat(listOf(
+            ChatMessage("system", "你是手机 Agent 的流程教练。把用户教授的操作整理成可复用流程。只保留用户明确做过或说过的步骤，不要编造。每步≤30字，写清要点的按钮/文字。只输出 json：{\"goal\":\"规范化目标\",\"pre\":[\"前置条件，可选\"],\"steps\":[\"步骤…\"],\"tips\":[\"失败时注意，可选\"]}"),
+            ChatMessage("user", "目标：$goal\n应用：${app ?: "未知"}\n教授记录：\n${trace.take(2000)}")), 0.0) } ?: return null
+        record("教授整理", r, emptyList())
+        return com.runasakura.phoneagent.agent.Recipe.parsePlan(r.content)
+    }
+
+
+    /**
      * Optional LLM rerank of learned lessons (setting, default off; one cheap cloud call per task, 5 s budget):
      * returns candidate indices in order of usefulness for [goal]; null → keep the embedding/bigram order.
      */

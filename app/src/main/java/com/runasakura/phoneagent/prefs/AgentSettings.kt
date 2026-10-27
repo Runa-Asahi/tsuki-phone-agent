@@ -12,6 +12,8 @@ interface AgentSettings {
     val sensitivePackages: Set<String>
     /** Optional: summarise compacted transcript spans with one cheap model call (default off). */
     val modelCheckpoint: Boolean
+    /** When stuck, deepen reasoning (look + diagnose + try a new strategy). Default on. */
+    val deepThink: Boolean
     fun appMemory(pkg: String): String?
     fun setAppMemory(pkg: String, v: String)
 }
@@ -24,6 +26,7 @@ class MemorySettings(
     override var confirmAlarm: Boolean = true,
     override var sensitivePackages: Set<String> = emptySet(),
     override var modelCheckpoint: Boolean = false,
+    override var deepThink: Boolean = true,
 ) : AgentSettings {
     val mem = HashMap<String, String>()
     override fun appMemory(pkg: String) = mem[pkg]

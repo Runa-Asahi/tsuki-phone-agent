@@ -75,6 +75,11 @@ object ChatSession {
         val line = line0.trim()
         if (line.isEmpty() || NOISE.any { line.startsWith(it) }) return
         when {
+            line.startsWith("思考模式=") -> {
+                items += Item.Note(nextId++, "🧠 " + line)
+                phase = Phase.THINKING
+                (currentStep() ?: run { newStep("思考", now); currentStep()!! }).details += line
+            }
             line.startsWith("小目标：") -> (currentStep() ?: run { newStep("思考", now); currentStep()!! }).insight = line.substringAfter("：").take(40)
             line.startsWith("界面类型（模型判断）：") || line.startsWith("与目标是否一致（模型判断）：") ->
                 currentStep()?.details?.add(line.replace("（模型判断）", ""))

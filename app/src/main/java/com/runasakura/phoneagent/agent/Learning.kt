@@ -132,10 +132,17 @@ object Alternatives {
         val fresh = items.filter { n(it.label).let { l -> l.isNotEmpty() && l !in tappedN && deadN.none { d -> d == l } } || it.label.startsWith("〔") }
         val visual = fresh.filter { it.label.startsWith("〔") }
         val text = fresh.filterNot { it.label.startsWith("〔") }
+        // Prefer dismiss labels when a popup may be blocking (generic keywords, no app hardcode).
+        val dismiss = text.filter { l ->
+            val t = OcrNormalize.word(l.label)
+            t.contains("关闭") || t.contains("跳过") || t.contains("取消") || t == "×" || t == "X" || t.equals("x", true) ||
+                t.contains("不再弹出") || t.contains("不再提示") || t.contains("稍后") || t.contains("我知道了")
+        }
         return buildString {
             append("可选的未试动作：")
+            if (dismiss.isNotEmpty()) append("优先关弹窗 ").append(dismiss.take(4).joinToString(" ") { "[${it.id}]${it.label.take(8)}" }).append("；")
             if (visual.isNotEmpty()) append("无文字候选 ").append(visual.take(6).joinToString(" ") { "[${it.id}]${it.label}(${it.cx},${it.cy})" }).append("；")
-            if (text.isNotEmpty()) append("未点过的元素 ").append(text.take(8).joinToString(" ") { "[${it.id}]${it.label.take(8)}" }).append("；")
+            if (text.isNotEmpty()) append("未点过的元素 ").append(text.filter { it !in dismiss }.take(8).joinToString(" ") { "[${it.id}]${it.label.take(8)}" }).append("；")
             items.firstOrNull { it.edit }?.let { append("页内搜索：在 [${it.id}] 输入目标关键词；") }
             append("滑动 swipe 换一屏；")
             if (shell) append("Shizuku 按键 {\"type\":\"key\",\"key\":\"escape\"}；")
