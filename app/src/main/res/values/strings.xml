@@ -83,14 +83,14 @@
     <string name="learning_title">学习记录</string>
     <string name="teach_title">教 Tsuki 做一件事</string>
     <string name="teach_entry">教我做…</string>
-    <string name="teach_guide">像带新人上岗一样：说清目标，然后口述步骤，或打开目标应用逐步示范。Tsuki 会把轨迹整理成可复用流程；下次相似任务优先按你教的走。不绑定任何具体 App。</string>
+    <string name="teach_guide">像带新人上岗：① 填写目标并点「开始上岗」（教练条浮起）；② 点「说一步」口述或打字「追加口述」，和/或去目标应用操作（点哪里会尽量自动记；游戏无树时手动「记录此步」）；③ 点「完成并整理」。不会把口述发成新任务。不绑定任何具体 App。</string>
     <string name="teach_goal_hint">目标（例如：给{联系人}发消息说{内容}）</string>
     <string name="teach_pkg_hint">应用包名（可选，示范时自动识别）</string>
     <string name="teach_steps_hint">口述步骤（每行一步），或示范时在此写备注</string>
     <string name="teach_dictate">口述 → 保存</string>
     <string name="teach_demo_start">开始示范</string>
     <string name="teach_demo_finish">结束示范并整理</string>
-    <string name="teach_log_empty">还没有记录。点「开始示范」后，悬浮教练条会跟着你进任何应用。</string>
+    <string name="teach_log_empty">还没有记录。点「开始上岗」后，上方教练条会跟着你：说一步 / 记录此步 / 完成 / 取消。</string>
     <string name="teach_learned_title">已学会，可以上岗</string>
     <string name="teach_try_now">立刻试一次</string>
     <string name="teach_view_learning">去学习记录</string>

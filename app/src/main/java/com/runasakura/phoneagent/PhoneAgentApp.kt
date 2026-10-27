@@ -37,7 +37,8 @@ class PhoneAgentApp : Application() {
         // store (Keystore, slowest) and the task history JSON are built on a worker.
         for (f in listOf("ui", "task_history")) getSharedPreferences(f, 0)
         Thread({ runCatching { prefs.warmSecure() }; runCatching { com.runasakura.phoneagent.ui.TaskHistory.load(this) }
-            runCatching { com.runasakura.phoneagent.voice.LocalAsr.refresh(this) } }, "tsuki-warm").start()
+            runCatching { com.runasakura.phoneagent.voice.LocalAsr.refresh(this) }
+            runCatching { com.runasakura.phoneagent.agent.TeachSession.restore(this) } }, "tsuki-warm").start()
         createNotificationChannels()
         installCrashGuard()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {

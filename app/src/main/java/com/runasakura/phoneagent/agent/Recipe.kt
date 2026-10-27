@@ -72,9 +72,11 @@ data class Recipe(
 
         /** Offline / no-cloud fallback: each non-empty content line becomes a step. Pure. */
         fun offlineSteps(trace: String): List<String> = trace.lines().map { it.trim() }
-            .filter { it.length in 2..80 && !it.startsWith("口述") && !it.startsWith("示范") }
+            .filter { it.length in 2..120 }
+            .filterNot { it.startsWith("口述：") && it.length <= 4 || it.startsWith("示范轨迹") }
             .map { it.replace(Regex("""^\d+[．.、)]\s*"""), "") }
-            .filter { it.isNotBlank() }
+            .map { it.removePrefix("口述：").trim() }
+            .filter { it.isNotBlank() && !it.startsWith("示范") }
             .take(12)
 
         /**

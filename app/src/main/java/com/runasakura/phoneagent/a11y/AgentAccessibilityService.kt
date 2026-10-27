@@ -47,6 +47,8 @@ class AgentAccessibilityService : AccessibilityService() {
         A11yEvents.record("已连接")
         Log.i(TAG, "AccessibilityService connected")
         try { sendBroadcast(Intent(ACTION_A11Y_STATE).setPackage(packageName).putExtra(EXTRA_CONNECTED, true)) } catch (e: Throwable) { Log.w(TAG, "broadcast", e) }
+        // Re-show the teach coach bar after MagicOS unbound/rebound us mid-session.
+        runCatching { com.runasakura.phoneagent.agent.TeachSession.restore(this) }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -54,6 +56,18 @@ class AgentAccessibilityService : AccessibilityService() {
             if (event == null) return
             event.packageName?.toString()?.let { lastPackage = it }
             lastEventAt = System.currentTimeMillis()
+            // Teach mode: auto-record user taps (WeChat / normal apps). Games with empty trees still need「记录此步」.
+            if (com.runasakura.phoneagent.agent.TeachSession.active &&
+                (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED || event.eventType == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED)) {
+                val pkg = event.packageName?.toString().orEmpty()
+                if (pkg.isNotBlank() && !com.runasakura.phoneagent.agent.AppResolver.isAgentOrBrain(pkg)) {
+                    val label = buildString {
+                        event.text?.forEach { if (!it.isNullOrBlank()) { if (isNotEmpty()) append(' '); append(it) } }
+                        if (isEmpty()) event.contentDescription?.let { append(it) }
+                    }.trim().take(40)
+                    com.runasakura.phoneagent.agent.TeachSession.onUserClick(applicationContext, pkg, label)
+                }
+            }
         } catch (e: Throwable) { Log.w(TAG, "onAccessibilityEvent", e) }
     }
 

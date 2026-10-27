@@ -1,8 +1,11 @@
 package com.runasakura.phoneagent.agent
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
@@ -10,9 +13,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.google.android.material.button.MaterialButton
-import com.runasakura.phoneagent.R
 import com.runasakura.phoneagent.a11y.AgentAccessibilityService
 import com.runasakura.phoneagent.ui.TsukiTheme
+import com.runasakura.phoneagent.util.Diagnostics
+import com.runasakura.phoneagent.voice.VoiceInput
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,131 +24,240 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * On-the-job training mode (Grok Bot "learn from demonstration" counterpart on the phone).
- *
- * While active, a small floating coach bar rides above every app:「记录此步」snapshots the current package +
- * a11y/OCR labels (+ optional user note),「结束示范」hands the trajectory back to [TeachActivity] for LLM
- * compression into a [Recipe]. Games with an empty a11y tree still work — the user marks each key screen
- * themselves, the same way Grok Bot's teach recording relies on the user performing the steps.
- *
- * Single process-wide session; the coach bar uses the overlay permission (already required for the orb).
+ * Android shell around [TeachMachine]: floating coach bar, voice dictate into the teach log (never starts a task),
+ * a11y click auto-steps, SharedPreferences persistence across process death / a11y rebind.
  */
 object TeachSession {
-    data class Step(
-        val n: Int,
-        val pkg: String,
-        val labels: List<String>,
-        val note: String?,
-        val source: String,   // "a11y" | "ocr" | "none"
-        val at: Long = System.currentTimeMillis(),
-    ) {
-        /** One line for the LLM / offline fallback. Pure. */
-        fun line(): String = buildString {
-            append("$n. 包=$pkg")
-            if (labels.isNotEmpty()) append(" 可见[${source}]：" + labels.take(12).joinToString("、") { it.take(14) })
-            if (!note.isNullOrBlank()) append(" 说明：$note")
+    private const val PREF = "teach_session"
+    private const val KEY = "state"
+
+    @Volatile private var state: TeachMachine.State = TeachMachine.State()
+    private var bar: android.view.View? = null
+    private var wm: WindowManager? = null
+    private var titleView: TextView? = null
+    private var voice: VoiceInput? = null
+    private var lastClickPkg: String? = null
+    private var lastClickLabel: String? = null
+    private var lastClickAt = 0L
+    private val main = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(TeachMachine.State) -> Unit>()
+
+    val active get() = state.active
+    val ready get() = state.ready
+    fun snapshot(): TeachMachine.State = state
+    fun statusLine(): String = TeachMachine.statusLine(state)
+
+    fun addListener(l: (TeachMachine.State) -> Unit) { listeners += l; l(state) }
+    fun removeListener(l: (TeachMachine.State) -> Unit) { listeners -= l }
+
+    /** Load persisted session (call from Application / TeachActivity). Restores coach bar if still Active. */
+    fun restore(ctx: Context) {
+        val loaded = TeachMachine.decode(prefs(ctx).getString(KEY, null))
+        state = loaded
+        if (loaded.active) {
+            Diagnostics.log("教授：从持久化恢复（口述 ${loaded.dictations.size} · 示范 ${loaded.steps.size}）")
+            val app = ctx.applicationContext
+            main.post { ensureBar(app); notifyUi() }
+        } else if (loaded.ready) {
+            Diagnostics.log("教授：发现待整理会话，打开整理页")
+            val app = ctx.applicationContext
+            main.post { openCompress(app) }
         }
     }
 
-    data class State(val goal: String, val pkgHint: String?, val steps: List<Step>)
-
-    interface Listener {
-        fun onStep(s: State)
-        fun onFinished(s: State)
-        fun onCancelled()
-    }
-
-    @Volatile private var goal: String = ""
-    @Volatile private var pkgHint: String? = null
-    private val steps = ArrayList<Step>()
-    @Volatile private var listener: Listener? = null
-    @Volatile private var noteSupplier: (() -> String?)? = null
-    private var bar: android.view.View? = null
-    private var wm: WindowManager? = null
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-
-    val active get() = goal.isNotBlank()
-    fun snapshot(): State? = if (!active) null else State(goal, pkgHint, steps.toList())
-    fun trace(): String = steps.joinToString("\n") { it.line() }
+    fun canStartOverlay(ctx: Context) =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(ctx)
 
     /**
-     * Start coaching. [noteSupplier] is read each time the user marks a step (e.g. the last line of an EditText).
-     * Returns false when the overlay permission is missing (caller should open the system sheet).
+     * Enter Active. Requires overlay permission (coach bar). Returns false if goal too short or no overlay.
+     * Does NOT start an agent task.
      */
-    fun start(ctx: Context, goal: String, pkgHint: String?, noteSupplier: (() -> String?)?, listener: Listener): Boolean {
-        if (goal.trim().length < 2) return false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(ctx)) return false
-        stop(cancel = true)
-        this.goal = goal.trim(); this.pkgHint = pkgHint?.trim()?.ifBlank { null }
-        this.noteSupplier = noteSupplier; this.listener = listener; steps.clear()
-        showBar(ctx.applicationContext)
+    fun begin(ctx: Context, goal: String, pkgHint: String? = null): Boolean {
+        val next = TeachMachine.begin(goal, pkgHint, System.currentTimeMillis()) ?: return false
+        if (!canStartOverlay(ctx)) {
+            Diagnostics.log("教授：开始失败（无悬浮窗权限）")
+            return false
+        }
+        releaseVoice()
+        state = next
+        persist(ctx)
+        Diagnostics.log("教授：开始「${state.goal}」— 等待口述或示范")
+        ensureBar(ctx.applicationContext)
+        if (bar == null) {
+            Diagnostics.log("教授：开始失败（教练条未显示）")
+            state = TeachMachine.State(); prefs(ctx).edit().remove(KEY).apply()
+            return false
+        }
+        notifyUi()
+        Toast.makeText(ctx, "上岗已开始：请口述步骤（点「说一步」）或去目标应用操作后点「记录此步」", Toast.LENGTH_LONG).show()
         return true
     }
 
-    fun cancel(ctx: Context) { stop(cancel = true); Toast.makeText(ctx, "已取消示范", Toast.LENGTH_SHORT).show() }
-
-    fun finish() {
-        val s = snapshot() ?: return
-        val l = listener
-        val ctx = bar?.context
-        stop(cancel = false)
-        when {
-            s.steps.isEmpty() -> l?.onCancelled()
-            l != null -> try { l.onFinished(s) } catch (_: Throwable) { handOff(ctx, s) }
-            else -> handOff(ctx, s)
-        }
+    fun appendDictate(ctx: Context, text: String) {
+        if (!state.active) return
+        val before = state.dictations.size
+        state = TeachMachine.appendDictate(state, text)
+        if (state.dictations.size == before) return
+        persist(ctx)
+        Diagnostics.log("教授：收到口述 #${state.dictations.size}「${text.trim().take(40)}」")
+        refreshBar()
+        notifyUi()
+        Toast.makeText(ctx, "已记下口述（共 ${state.dictations.size} 句）", Toast.LENGTH_SHORT).show()
     }
 
-    /** Activity was killed while the user demonstrated: reopen Teach with the captured trace. */
-    private fun handOff(ctx: android.content.Context?, s: State) {
-        val c = ctx?.applicationContext ?: return
-        c.startActivity(android.content.Intent(c, com.runasakura.phoneagent.ui.TeachActivity::class.java)
-            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(com.runasakura.phoneagent.ui.TeachActivity.EXTRA_GOAL, s.goal)
-            .putExtra(com.runasakura.phoneagent.ui.TeachActivity.EXTRA_TRACE, s.steps.joinToString("\n") { it.line() })
-            .putExtra(com.runasakura.phoneagent.ui.TeachActivity.EXTRA_PKG, dominantPkg(s.steps) ?: s.pkgHint))
-    }
-
-    /** Capture one step from whatever is currently on screen (main-thread entry; work hops to Default). */
     fun mark(ctx: Context) {
-        if (!active) return
+        if (!state.active) return
         scope.launch {
-            val step = withContext(Dispatchers.Default) { capture(ctx) } ?: run {
-                Toast.makeText(ctx, "请先打开要教的应用", Toast.LENGTH_LONG).show(); return@launch
+            val captured = withContext(Dispatchers.Default) { captureScreen() }
+            if (captured == null) {
+                Toast.makeText(ctx, "请先打开要教的应用（当前像是桌面或 Tsuki）", Toast.LENGTH_LONG).show()
+                Diagnostics.log("教授：记录此步失败（无前台目标包）")
+                return@launch
             }
-            steps += step
-            if (pkgHint.isNullOrBlank()) pkgHint = step.pkg
-            refreshBar()
-            listener?.onStep(State(goal, pkgHint, steps.toList()))
-            Toast.makeText(ctx, "上岗第 ${step.n} 步已记下", Toast.LENGTH_SHORT).show()
+            state = TeachMachine.addStep(state, captured.first, captured.second, null, captured.third, System.currentTimeMillis())
+            persist(ctx)
+            Diagnostics.log("教授：记录步骤 ${state.steps.size} 包=${captured.first} 源=${captured.third} 标签=${captured.second.take(6)}")
+            refreshBar(); notifyUi()
+            Toast.makeText(ctx, "已记示范第 ${state.steps.size} 步", Toast.LENGTH_SHORT).show()
         }
     }
 
-    private fun capture(ctx: Context): Step? {
+    /** Called from accessibility TYPE_VIEW_CLICKED while teaching (skipped for our own package). */
+    fun onUserClick(ctx: Context, pkg: String, label: String) {
+        if (!state.active) return
+        if (AppResolver.isAgentOrBrain(pkg)) return
+        val now = System.currentTimeMillis()
+        if (!TeachMachine.shouldRecordClick(lastClickPkg, lastClickLabel, lastClickAt, pkg, label, now)) return
+        lastClickPkg = pkg; lastClickLabel = label; lastClickAt = now
+        val note = label.ifBlank { null }?.let { "点击「$it」" }
+        state = TeachMachine.addStep(state, pkg, listOfNotNull(label.takeIf { it.isNotBlank() }), note, "click", now)
+        persist(ctx)
+        Diagnostics.log("教授：自动记录点击 步骤${state.steps.size} 包=$pkg 「${label.take(20)}」")
+        main.post { refreshBar(); notifyUi() }
+    }
+
+    fun finish(ctx: Context) {
+        if (!state.active) return
+        releaseVoice()
+        if (state.empty()) {
+            Diagnostics.log("教授：完成被拒绝（尚无口述也无示范）")
+            Toast.makeText(ctx, "还没有记录：请先「说一步」或「记录此步」", Toast.LENGTH_LONG).show()
+            return
+        }
+        val next = TeachMachine.finish(state) ?: return
+        state = next
+        persist(ctx)
+        hideBar()
+        Diagnostics.log("教授：完成（口述 ${state.dictations.size} · 示范 ${state.steps.size}）→ 整理")
+        openCompress(ctx.applicationContext)
+        notifyUi()
+    }
+
+    fun cancel(ctx: Context) {
+        releaseVoice()
+        Diagnostics.log("教授：取消")
+        state = TeachMachine.cancel(state)
+        prefs(ctx).edit().remove(KEY).apply()
+        hideBar()
+        notifyUi()
+        Toast.makeText(ctx, "已取消上岗", Toast.LENGTH_SHORT).show()
+    }
+
+    /** After compress succeeded or failed permanently: clear ReadyToCompress. */
+    fun clearCompressed(ctx: Context) {
+        state = TeachMachine.clearAfterCompress(state)
+        prefs(ctx).edit().remove(KEY).apply()
+        notifyUi()
+    }
+
+    fun mergeTrace(): String = TeachMachine.mergeTrace(state)
+    fun dominantPkg(): String? = TeachMachine.dominantPkg(state.steps) ?: state.pkgHint
+
+    // ---- voice on coach bar (into teach log, never ChatSession / agent task) ----
+    fun toggleDictateVoice(ctx: Context) {
+        if (!state.active) return
+        if (voice?.listening == true) { voice?.stop(); return }
+        if (!VoiceInput.hasMicPermission(ctx)) {
+            // Ask via transparent activity; on grant user taps 说一步 again.
+            runCatching {
+                ctx.startActivity(Intent(ctx, com.runasakura.phoneagent.ui.MicPermissionActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION))
+            }
+            Toast.makeText(ctx, "请允许麦克风后，再点「说一步」", Toast.LENGTH_LONG).show()
+            Diagnostics.log("教授：等待口述 — 需要麦克风权限")
+            return
+        }
+        if (!VoiceInput.available(ctx) && !com.runasakura.phoneagent.voice.LocalAsr.installed(ctx)) {
+            Toast.makeText(ctx, "没有语音识别：可在设置下载本地语音模型，或在上岗页打字追加口述", Toast.LENGTH_LONG).show()
+            Diagnostics.log("教授：等待口述 — 无识别引擎")
+            return
+        }
+        Diagnostics.log("教授：等待口述…")
+        Toast.makeText(ctx, "请说步骤…说完再点一次或停顿结束", Toast.LENGTH_SHORT).show()
+        val app = ctx.applicationContext
+        main.post {
+            releaseVoice()
+            val v = VoiceInput(app, object : VoiceInput.Listener {
+                override fun onListening(on: Boolean) { refreshBar() }
+                override fun onPartial(text: String) {}
+                override fun onFinal(text: String) {
+                    appendDictate(app, text)
+                    releaseVoice()
+                }
+                override fun onError(message: String) {
+                    Diagnostics.log("教授：口述识别失败 $message")
+                    Toast.makeText(app, message, Toast.LENGTH_SHORT).show()
+                    releaseVoice(); refreshBar()
+                }
+            })
+            v.endpointStops = true
+            voice = v
+            if (!v.start()) releaseVoice()
+            refreshBar()
+        }
+    }
+
+    private fun releaseVoice() {
+        val v = voice; voice = null
+        if (v != null) main.post { runCatching { v.destroy() } }
+    }
+
+    private fun captureScreen(): Triple<String, List<String>, String>? {
         val a11y = AgentAccessibilityService.require()
         val pkg = a11y?.foregroundPackage()?.takeIf { it.isNotBlank() && !AppResolver.isAgentOrBrain(it) }
-            ?: pkgHint
+            ?: state.pkgHint
         if (pkg.isNullOrBlank()) return null
         var source = "none"; var labels = emptyList<String>()
         runCatching {
             a11y?.let { svc ->
-                val phone = com.runasakura.phoneagent.a11y.ServicePhone(svc)
-                val items = phone.screenItems()
+                val items = com.runasakura.phoneagent.a11y.ServicePhone(svc).screenItems()
                 if (items.isNotEmpty()) {
                     labels = items.map { it.label }.filter { it.isNotBlank() }.distinct().take(16)
-                    // OCR-sourced items use synthetic ids like "o1"; tree nodes use view ids / "#n".
                     source = if (items.all { it.id.startsWith("o") || it.id.isBlank() }) "ocr" else "a11y"
                 }
             }
         }
-        return Step(steps.size + 1, pkg, labels, noteSupplier?.invoke()?.trim()?.takeIf { it.isNotBlank() }?.take(40), source)
+        return Triple(pkg, labels, source)
     }
 
-    private fun stop(cancel: Boolean) {
-        hideBar()
-        val l = listener
-        goal = ""; pkgHint = null; listener = null; noteSupplier = null; steps.clear()
-        if (cancel) l?.onCancelled()
+    private fun openCompress(ctx: Context) {
+        ctx.startActivity(Intent(ctx, com.runasakura.phoneagent.ui.TeachActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putExtra(com.runasakura.phoneagent.ui.TeachActivity.EXTRA_COMPRESS, true))
+    }
+
+    private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREF, 0)
+    private fun persist(ctx: Context) {
+        prefs(ctx).edit().putString(KEY, TeachMachine.encode(state)).apply()
+    }
+
+    private fun notifyUi() { val s = state; listeners.forEach { runCatching { it(s) } } }
+
+    private fun ensureBar(ctx: Context) {
+        if (bar != null) { refreshBar(); return }
+        if (!canStartOverlay(ctx)) return
+        showBar(ctx)
     }
 
     private fun showBar(ctx: Context) {
@@ -161,16 +274,16 @@ object TeachSession {
         }
         val title = TextView(ctx).apply {
             textSize = 13f; setTextColor(k.onSurface); paint.isFakeBoldText = true
-            tag = "title"
         }
-        box.addView(title)
+        box.addView(title); titleView = title
         val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         fun b(t: String, on: () -> Unit) = MaterialButton(ctx, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-            text = t; textSize = 12f; minHeight = dp(40); minimumWidth = dp(72)
+            text = t; textSize = 11f; minHeight = dp(40); minimumWidth = dp(64); isAllCaps = false
             setOnClickListener { on() }
         }
+        row.addView(b("说一步") { toggleDictateVoice(ctx) })
         row.addView(b("记录此步") { mark(ctx) })
-        row.addView(b("结束示范") { finish() })
+        row.addView(b("完成") { finish(ctx) })
         row.addView(b("取消") { cancel(ctx) })
         box.addView(row)
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -181,24 +294,27 @@ object TeachSession {
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; y = dp(48) }
         val w = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        runCatching { w.addView(box, lp) }.onFailure { Toast.makeText(ctx, "无法显示上岗教练条（需要悬浮窗权限）", Toast.LENGTH_LONG).show(); return }
+        runCatching { w.addView(box, lp) }.onFailure {
+            Diagnostics.log("教授：教练条显示失败 ${it.message}")
+            Toast.makeText(ctx, "无法显示上岗教练条（需要悬浮窗权限）", Toast.LENGTH_LONG).show()
+            return
+        }
         wm = w; bar = box; refreshBar()
+        Diagnostics.log("教授：教练条已显示")
     }
 
     private fun refreshBar() {
-        val box = bar as? LinearLayout ?: return
-        val title = box.findViewWithTag<TextView>("title") ?: return
-        title.text = "上岗中 · ${goal.take(18)}" + if (steps.isEmpty()) " · 操作目标应用后点「记录此步」" else " · 已记 ${steps.size} 步"
+        val listening = voice?.listening == true
+        titleView?.text = buildString {
+            append("上岗中 · ${state.goal.take(14)}")
+            append(" · 口述${state.dictations.size}/示范${state.steps.size}")
+            append(if (listening) " · 正在听…" else " · 说一步或记录此步")
+        }
     }
 
     private fun hideBar() {
-        val v = bar; val w = wm; bar = null; wm = null
+        releaseVoice()
+        val v = bar; val w = wm; bar = null; wm = null; titleView = null
         if (v != null && w != null) runCatching { w.removeView(v) }
-    }
-
-    /** Pure: pick the dominant package from recorded steps (the one that appears most after step 1). */
-    fun dominantPkg(steps: List<Step>): String? {
-        if (steps.isEmpty()) return null
-        return steps.groupingBy { it.pkg }.eachCount().maxByOrNull { it.value }?.key
     }
 }
