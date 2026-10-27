@@ -92,6 +92,11 @@ object ThinkMode {
         }
     }
 
+    /** Force deep for one cycle (e.g. taught recipe's next target is not on screen — don't blind-tap). */
+    fun forceDeep(s: State, reason: String) {
+        s.mode = Mode.DEEP; s.reason = reason; s.deepLeft = maxOf(s.deepLeft, DEEP_COOLDOWN)
+    }
+
     fun decide(s: State, step: Int, budget: Int, enabled: Boolean): Decision {
         if (!enabled) return Decision(Mode.SHALLOW, null)
         if (s.deepLeft > 0) { s.deepLeft--; s.mode = Mode.DEEP; return Decision(Mode.DEEP, s.reason) }

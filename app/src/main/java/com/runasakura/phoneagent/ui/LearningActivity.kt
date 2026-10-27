@@ -97,13 +97,68 @@ class LearningActivity : AppCompatActivity() {
             background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(col(R.color.card_bg)); setStroke(dp(1), col(R.color.outline)) }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }
             isClickable = true; isFocusable = true; minimumHeight = dp(48)
-            contentDescription = "$kind，$badge：$body。点按可删除"
-            setOnClickListener { confirm("删除这条$kind？\n\n$body") { prefs.setAppMemory(b.pkg, AppMemory.decode(prefs.appMemory(b.pkg)).remove(r.kind, r.text).encode()); reload() } }
+            contentDescription = "$kind，$badge：$body。点按管理"
+            setOnClickListener {
+                if (r.kind == 'R') manageRecipe(b, r)
+                else confirm("删除这条$kind？\n\n$body") {
+                    prefs.setAppMemory(b.pkg, AppMemory.decode(prefs.appMemory(b.pkg)).remove(r.kind, r.text).encode()); reload()
+                }
+            }
         }
         card.addView(TextView(this).apply { text = body; textSize = 14f; setTextColor(col(R.color.text_primary)) })
         card.addView(TextView(this).apply { text = "$kind · $badge$age"; textSize = 12f
             setTextColor(if (r.conf >= 2) col(R.color.primary) else col(R.color.text_tertiary)); setPadding(0, dp(4), 0, 0) })
         return card
+    }
+
+    /** Recipe card: view / try / verify / edit / delete — counterpart of Grok Bot skill management after a teach. */
+    private fun manageRecipe(b: Bucket, r: Row) {
+        val rec = com.runasakura.phoneagent.agent.Recipe.decode(r.text) ?: return
+        val detail = buildString {
+            append(rec.goal); append('\n')
+            if (rec.pre.isNotEmpty()) append("前置：").append(rec.pre.joinToString("；")).append('\n')
+            rec.steps.forEachIndexed { i, s -> append("${i + 1}. $s\n") }
+            if (rec.tips.isNotEmpty()) append("失败提示：").append(rec.tips.joinToString("；")).append('\n')
+            if (rec.slots.isNotEmpty()) append("可变输入：").append(rec.slots.joinToString("、"))
+        }
+        val actions = arrayOf("立刻试一次", if (r.conf >= 2) "已验证 · 再验证一次" else "标记已验证", "编辑步骤", "删除")
+        MaterialAlertDialogBuilder(this).setTitle("教授流程").setMessage(detail)
+            .setItems(actions) { _, which ->
+                when (which) {
+                    0 -> {
+                        ChatSession.startTask(rec.goal)
+                        startActivity(android.content.Intent(this, MainActivity::class.java)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            .putExtra(MainActivity.EXTRA_START_GOAL, rec.goal))
+                    }
+                    1 -> {
+                        val bumped = AppMemory.decode(prefs.appMemory(b.pkg)).learnRecipe(rec.copy(conf = maxOf(2, r.conf + 1)))
+                        prefs.setAppMemory(b.pkg, bumped.encode()); reload()
+                        android.widget.Toast.makeText(this, "已标记验证", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    2 -> editRecipe(b, r, rec)
+                    3 -> { prefs.setAppMemory(b.pkg, AppMemory.decode(prefs.appMemory(b.pkg)).remove('R', r.text).encode()); reload() }
+                }
+            }.setNegativeButton("关闭", null).show()
+    }
+
+    private fun editRecipe(b: Bucket, r: Row, rec: com.runasakura.phoneagent.agent.Recipe) {
+        val input = android.widget.EditText(this).apply {
+            setText(rec.steps.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n"))
+            setMinLines(4); setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        MaterialAlertDialogBuilder(this).setTitle("编辑步骤（每行一步）").setView(input)
+            .setPositiveButton("保存") { _, _ ->
+                val steps = input.text.toString().lines()
+                    .map { it.trim().replace(Regex("""^\d+[．.、)]\s*"""), "") }
+                    .filter { it.length in 2..60 }
+                if (steps.isEmpty()) { android.widget.Toast.makeText(this, "至少保留一步", android.widget.Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                val updated = rec.copy(steps = steps.take(12))
+                var m = AppMemory.decode(prefs.appMemory(b.pkg)).remove('R', r.text)
+                m = m.learnRecipe(updated)
+                prefs.setAppMemory(b.pkg, m.encode()); reload()
+            }
+            .setNegativeButton("取消", null).show()
     }
 
     private fun consolidate(b: Bucket) {

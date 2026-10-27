@@ -475,6 +475,13 @@ class AgentLoop(
                 cloudPlanText = null; planJob?.cancel(); planJob = null; planNote = null
             }
 
+            // Taught recipe: if the next step's quoted target is missing on screen, go deep instead of blind-tapping.
+            recipe?.let { r ->
+                Recipe.nextMissing(r, effective, sc.items.map { it.label })?.let { miss ->
+                    ThinkMode.forceDeep(think, "教授流程下一步「$miss」当前屏幕未见")
+                    onLog("教授流程偏离：下一步目标「$miss」不在屏幕上 → 深思考")
+                }
+            }
             // Shallow / deep hybrid — before look/shot so deep can force a screenshot this step.
             val decision = ThinkMode.decide(think, step, prefs.maxSteps, prefs.deepThink)
             if (decision.mode == ThinkMode.Mode.DEEP) {

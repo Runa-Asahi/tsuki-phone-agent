@@ -13,6 +13,8 @@ data class Recipe(
     val pre: List<String> = emptyList(),
     val tips: List<String> = emptyList(),
     val conf: Int = 1,
+    /** Parameter names extracted from the teach session (e.g. 联系人, 关键词); shown in learning UI. */
+    val slots: List<String> = emptyList(),
 ) {
     fun encode(): String = buildString {
         append(goal.replace("=>", "→").replace('|', '/'))
@@ -21,6 +23,7 @@ data class Recipe(
         pre.forEach { parts += "pre:" + clean(it) }
         steps.forEach { parts += "step:" + clean(it) }
         tips.forEach { parts += "tip:" + clean(it) }
+        slots.forEach { parts += "slot:" + clean(it) }
         append(parts.joinToString("|"))
     }
 
@@ -46,14 +49,15 @@ data class Recipe(
         fun decode(text: String): Recipe? {
             val g = text.substringBefore("=>", "").trim(); val body = text.substringAfter("=>", "")
             if (g.isBlank() || body.isBlank()) return null
-            val pre = ArrayList<String>(); val steps = ArrayList<String>(); val tips = ArrayList<String>()
+            val pre = ArrayList<String>(); val steps = ArrayList<String>(); val tips = ArrayList<String>(); val slots = ArrayList<String>()
             for (p in body.split('|')) when {
                 p.startsWith("pre:") -> pre += p.removePrefix("pre:").trim()
                 p.startsWith("step:") -> steps += p.removePrefix("step:").trim()
                 p.startsWith("tip:") -> tips += p.removePrefix("tip:").trim()
+                p.startsWith("slot:") -> slots += p.removePrefix("slot:").trim()
                 p.isNotBlank() -> steps += p.trim()   // legacy: bare steps
             }
-            return if (steps.isEmpty()) null else Recipe(g, steps.filter { it.isNotEmpty() }, pre.filter { it.isNotEmpty() }, tips.filter { it.isNotEmpty() })
+            return if (steps.isEmpty()) null else Recipe(g, steps.filter { it.isNotEmpty() }, pre.filter { it.isNotEmpty() }, tips.filter { it.isNotEmpty() }, slots = slots.filter { it.isNotEmpty() })
         }
 
         /** Parse the cloud LLM's JSON compression of a teach session. */
@@ -62,7 +66,26 @@ data class Recipe(
             fun arr(k: String) = o.optJSONArray(k)?.let { a -> (0 until a.length()).map { a.optString(it).trim() }.filter { it.length in 2..60 } }.orEmpty()
             val goal = o.optString("goal").trim().take(60)
             val steps = arr("steps")
-            if (goal.length < 2 || steps.isEmpty()) null else Recipe(goal, steps.take(12), arr("pre").take(3), arr("tips").take(4))
+            if (goal.length < 2 || steps.isEmpty()) null
+            else Recipe(goal, steps.take(12), arr("pre").take(3), arr("tips").take(4), slots = arr("slots").take(4))
         } catch (_: Exception) { null }
+
+        /** Offline / no-cloud fallback: each non-empty content line becomes a step. Pure. */
+        fun offlineSteps(trace: String): List<String> = trace.lines().map { it.trim() }
+            .filter { it.length in 2..80 && !it.startsWith("口述") && !it.startsWith("示范") }
+            .map { it.replace(Regex("""^\d+[．.、)]\s*"""), "") }
+            .filter { it.isNotBlank() }
+            .take(12)
+
+        /**
+         * Pure: does the current screen look like the recipe's next step is available?
+         * Missing a quoted target that isn't on screen → the loop should go deep instead of blind-tapping.
+         */
+        fun nextMissing(recipe: Recipe, done: List<String>, screenLabels: List<String>): String? {
+            val next = recipe.steps.drop(done.count { d -> recipe.steps.any { Skill.same(it, d) } }).firstOrNull() ?: return null
+            val t = Regex("「([^」]{1,24})」").find(next)?.groupValues?.get(1) ?: return null
+            val hit = screenLabels.any { Similarity.score(it, t) >= 0.8 || it.contains(t) || t.contains(it) }
+            return if (hit) null else t
+        }
     }
 }
