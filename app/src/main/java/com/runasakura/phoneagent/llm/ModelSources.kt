@@ -76,6 +76,8 @@ object ModelSources {
 
     /** Copy a candidate into filesDir/models/<name> (resumable per file via size check) and select it. */
     suspend fun adopt(ctx: Context, c: Candidate, onProgress: (ModelStore.Progress) -> Unit): File = withContext(Dispatchers.IO) {
+        // Same model already installed (e.g. imported earlier under another name): just select it, no second copy.
+        ModelStore.duplicateOf(ctx, c.files)?.let { ModelStore.select(ctx, it); return@withContext it }
         val dir = File(ModelStore.root(ctx), c.label.replace(Regex("[^\\w.-]"), "_")).apply { mkdirs() }
         val need = c.bytes - dir.walk().filter { it.isFile }.sumOf { it.length() } + (100L shl 20)
         check(dir.usableSpace >= need) { "存储空间不足：还需约 ${need shr 20} MB" }

@@ -15,11 +15,17 @@ class PhoneAgentApp : Application() {
         super.onTrimMemory(level)
         @Suppress("DEPRECATION")
         val heavy = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND || level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
-        if (heavy && com.runasakura.phoneagent.llm.EmbeddedMnn.state == com.runasakura.phoneagent.llm.EmbeddedMnn.State.READY &&
-            !com.runasakura.phoneagent.service.AgentForegroundService.isRunning()) com.runasakura.phoneagent.llm.EmbeddedMnn.release()
-        // The embedder (~250 MB) reloads in ~1 s; drop it off the main thread (it may be mid-encode).
-        if (heavy && !com.runasakura.phoneagent.service.AgentForegroundService.isRunning()) Thread { com.runasakura.phoneagent.llm.TextEmbedder.release() }.start()
+        val running = com.runasakura.phoneagent.service.AgentForegroundService.isRunning()
+        if (heavy && com.runasakura.phoneagent.llm.EmbeddedMnn.state == com.runasakura.phoneagent.llm.EmbeddedMnn.State.READY && !running)
+            com.runasakura.phoneagent.llm.EmbeddedMnn.release()
+        // The embedder (~250 MB) is only needed for a moment at task start/end and reloads in ~1–2 s: drop it on any
+        // pressure signal, UI hidden included, even during a task (on the housekeeping thread; it may be mid-encode).
+        @Suppress("DEPRECATION")
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN || level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+            com.runasakura.phoneagent.util.Idle.exec.execute { com.runasakura.phoneagent.llm.TextEmbedder.release() }
     }
+
+    @Volatile private var visible = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -28,6 +34,16 @@ class PhoneAgentApp : Application() {
         prefs = AgentPreferences(this)
         createNotificationChannels()
         installCrashGuard()
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(a: android.app.Activity) { visible++ }
+            override fun onActivityStopped(a: android.app.Activity) { visible = (visible - 1).coerceAtLeast(0) }
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {}
+            override fun onActivityResumed(a: android.app.Activity) {}
+            override fun onActivityPaused(a: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
+            override fun onActivityDestroyed(a: android.app.Activity) {}
+        })
+        com.runasakura.phoneagent.util.Idle.start(this) { visible > 0 }
         // Shizuku audit + UiAutomation gate: while our accessibility service is connected or enabled, never let a
         // `uiautomator`-style command run (it makes the system unbind us).
         val app = this

@@ -81,6 +81,9 @@
     <string name="ui_26">发送消息、通话、支付、删除、卸载、下单始终需要确认，不能关闭。</string>
     <string name="ui_27">学习记录（查看 / 整理 / 删除经验）</string>
     <string name="learning_title">学习记录</string>
+    <string name="storage_title">存储与清理</string>
+    <string name="storage_desc">本机模型和缓存占用的空间。「一键清理」只删除临时文件、中断的下载、模型加载缓存（未加载时）和经验向量缓存（需要时自动重算），不会删除已安装的模型或学到的经验。每天也会自动清理一次临时文件和超过 3 天的中断下载。</string>
+    <string name="storage_clean">一键清理</string>
     <string name="sem_title">语义检索</string>
     <string name="sem_desc">用本机小模型理解经验的意思（例如「改闹钟」能找到「时钟应用新建闹钟」），中英文都可。没装时按字面相似度检索。向量只算一次并保存在本机，不上传。</string>
     <string name="sem_download">下载语义模型（约 217 MB）</string>

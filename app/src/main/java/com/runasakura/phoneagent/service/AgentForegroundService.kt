@@ -116,8 +116,12 @@ class AgentForegroundService : Service() {
         log("大脑：$brain" + if (cloud == null && prefs.routeMode != AgentPreferences.ROUTE_LOCAL_ONLY) "（云端未就绪）" else "")
         val router = LlmRouter({ prefs.routeMode }, local, cloud).also { r -> r.log = { log(it) } }
         // Lesson retrieval: on-device embedding index when the semantic model is installed (else bigram fallback).
+        // (file checks only; the agent coroutine's first prepare() does the native load off the main thread)
         com.runasakura.phoneagent.llm.TextEmbedder.attach(app)
         com.runasakura.phoneagent.agent.Relevance.llmRerank = com.runasakura.phoneagent.llm.TextEmbedder.llmRerank(app)
+        // Never keep both large models: once the lesson vectors are ready, drop the embedder if the local LLM is loaded.
+        com.runasakura.phoneagent.agent.Relevance.afterPrepare = {
+            if (com.runasakura.phoneagent.llm.EmbeddedMnn.loadedDir != null) com.runasakura.phoneagent.llm.TextEmbedder.release() }
         router.vision = com.runasakura.phoneagent.llm.CloudProviders.visionClientFor(prefs)
         val visionDir = com.runasakura.phoneagent.llm.ModelStore.selected(app)?.takeIf { com.runasakura.phoneagent.llm.ModelStore.isVision(it) }
         val eye = com.runasakura.phoneagent.llm.VisionChoice.pick(prefs.routeMode, visionDir != null, com.runasakura.phoneagent.llm.EmbeddedMnn.available, prefs.visionLocal)

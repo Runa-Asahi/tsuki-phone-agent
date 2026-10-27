@@ -175,11 +175,23 @@ object ModelStore {
         if (selectWhenDone) select(ctx, dir); dir
     }
 
+    /**
+     * An installed model with exactly these files (name + size) — importing the same model twice must not leave a
+     * second 1.5 GB copy. Pure over [installed] so it is unit-testable.
+     */
+    fun sameFiles(a: Collection<Pair<String, Long>>, b: Collection<Pair<String, Long>>): Boolean {
+        val big = { l: Collection<Pair<String, Long>> -> l.filter { !it.first.endsWith(".part") && it.second > 0 }.toSet() }
+        return big(a).isNotEmpty() && big(a) == big(b)
+    }
+    fun duplicateOf(ctx: Context, files: Collection<Pair<String, Long>>): File? = installed(ctx).firstOrNull { d ->
+        sameFiles(files, d.listFiles()?.filter { it.isFile }?.map { it.name to it.length() }.orEmpty()) }
+
     /** Import a folder picked with ACTION_OPEN_DOCUMENT_TREE (e.g. a model copied out of MNN Chat). */
     suspend fun import(ctx: Context, tree: Uri, onProgress: (Progress) -> Unit): File = withContext(Dispatchers.IO) {
         val doc = androidx.documentfile.provider.DocumentFile.fromTreeUri(ctx, tree) ?: error("无法读取所选文件夹")
         val files = doc.listFiles().filter { it.isFile }
         check(files.any { it.name == "config.json" } && files.any { it.name == "llm.mnn" }) { "所选文件夹里没有 config.json / llm.mnn，不是 MNN 模型目录" }
+        duplicateOf(ctx, files.map { (it.name ?: "") to it.length() })?.let { select(ctx, it); return@withContext it }
         val dir = File(root(ctx), (doc.name ?: "imported").replace(Regex("[^\\w.-]"), "_")).apply { mkdirs() }
         val total = files.sumOf { it.length() }; var done = 0L
         for (f in files) {

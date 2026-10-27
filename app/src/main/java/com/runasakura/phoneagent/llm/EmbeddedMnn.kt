@@ -31,6 +31,8 @@ object EmbeddedMnn {
     @Volatile var lastError: String? = null; private set
     @Volatile var loadMs = 0L; private set
     @Volatile var lastLatencyMs = 0L; private set
+    /** Wall time of the last load or inference (idle reaper input). */
+    @Volatile var lastUse = 0L; private set
     /** Backend that successfully loaded last time: "opencl" or "cpu". */
     @Volatile var backend: String = "cpu"; private set
     @Volatile private var handle = 0L
@@ -63,7 +65,7 @@ object EmbeddedMnn {
         if (!available) { lastError = "本机推理库不可用（仅支持 arm64）"; state = State.FAILED; return false }
         val cfg = File(dir, "config.json"); if (!cfg.isFile) { lastError = "模型目录缺少 config.json"; state = State.FAILED; return false }
         if (handle != 0L) { cancel(); chatLock.withLock { releasePending = false; freeNow() } }
-        state = State.LOADING
+        state = State.LOADING; lastUse = System.currentTimeMillis()
         val t0 = System.currentTimeMillis()
         val tmp = File(ctx.cacheDir, "mnn_mmap").apply { mkdirs() }.absolutePath
         val pref = preferredBackend(ctx)
@@ -120,7 +122,7 @@ object EmbeddedMnn {
                 }
                 out
             } finally {
-                lastLatencyMs = System.currentTimeMillis() - t0
+                lastLatencyMs = System.currentTimeMillis() - t0; lastUse = System.currentTimeMillis()
                 if (state == State.BUSY) state = State.READY
                 if (releasePending) { releasePending = false; freeNow() }
                 // Drop decoded JPEG temps so cache does not grow across assist calls.
@@ -129,6 +131,9 @@ object EmbeddedMnn {
         } }
 
     fun cancel() { val h = handle; if (h != 0L) runCatching { nativeCancel(h) } }
+
+    /** Unload when unused for [idleMs] and not mid-inference (keeps ~1.5–2 GB from lingering). */
+    fun releaseIfIdle(idleMs: Long) { if (handle != 0L && state == State.READY && System.currentTimeMillis() - lastUse > idleMs) release() }
 
     fun release() {
         if (state == State.BUSY) { releasePending = true; cancel(); return }

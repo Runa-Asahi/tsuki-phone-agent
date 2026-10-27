@@ -47,7 +47,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.modelCheckpoint.isChecked = prefs.modelCheckpoint
         // Status cards (Shizuku binder, a11y/secure settings, model folders) load after the first frame and off the
         // main thread, so opening Settings paints immediately instead of stalling on IPC and file walks.
-        binding.root.post { if (!isFinishing) { setupShizuku(); setupKeepAlive(); setupLocalModel(); setupSemantic(); firstStatusDone = true } }
+        binding.root.post { if (!isFinishing) { setupShizuku(); setupKeepAlive(); setupLocalModel(); setupSemantic(); setupStorage(); firstStatusDone = true } }
         if (prefs.visionApiKey.isNotBlank()) binding.visionKey.hint = "已保存 " + com.runasakura.phoneagent.llm.CloudProviders.mask(prefs.visionApiKey) + "（留空不修改）"
 
         val modes = listOf(
@@ -184,7 +184,7 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     // Coming back from Shizuku / system settings refreshes; the first resume is covered by the deferred setup.
-    override fun onResume() { super.onResume(); if (::binding.isInitialized && firstStatusDone) { refreshShizuku(); refreshAlive(); refreshLocal() } }
+    override fun onResume() { super.onResume(); if (::binding.isInitialized && firstStatusDone) { refreshShizuku(); refreshAlive(); refreshLocal(); refreshStorage() } }
 
     private fun setupKeepAlive() {
         val heal = com.runasakura.phoneagent.a11y.A11ySelfHeal
@@ -335,7 +335,7 @@ class SettingsActivity : AppCompatActivity() {
             val dir = com.runasakura.phoneagent.llm.ModelStore.selected(this) ?: return@setOnClickListener
             com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setTitle("删除 ${dir.name}？")
                 .setMessage("释放约 ${com.runasakura.phoneagent.llm.ModelStore.sizeOfCached(dir) / 1_000_000} MB，之后可重新下载。")
-                .setPositiveButton("删除") { _, _ -> com.runasakura.phoneagent.llm.ModelStore.delete(this, dir); refreshLocal() }.setNegativeButton("取消", null).show()
+                .setPositiveButton("删除") { _, _ -> offMain({ com.runasakura.phoneagent.llm.ModelStore.delete(this, dir) }) { refreshLocal(); refreshStorage() } }.setNegativeButton("取消", null).show()
         }
         lifecycleScope.launch {
             com.runasakura.phoneagent.service.ModelDownloadService.state.collect { st ->
@@ -344,10 +344,32 @@ class SettingsActivity : AppCompatActivity() {
                 if (st.total > 0) binding.localProgress.setProgressCompat((st.done * 1000 / st.total).toInt(), true) else binding.localProgress.isIndeterminate = st.running
                 binding.btnLocalDownload.text = if (st.running) "取消下载" else getString(R.string.local_download)
                 if (st.running) binding.localStatus.text = "${st.msg} · ${st.done / 1_000_000}/${st.total / 1_000_000} MB"
-                else if (st.msg.isNotBlank()) { binding.localStatus.text = st.msg; refreshLocal(keepMsg = true) }
+                else if (st.msg.isNotBlank()) { binding.localStatus.text = st.msg; refreshLocal(keepMsg = true); refreshStorage() }
             }
         }
         refreshLocal()
+    }
+
+    // ---- Storage usage + one-tap cleanup (sizes are computed off the main thread) ----
+    private fun setupStorage() {
+        binding.btnClean.setOnClickListener {
+            binding.btnClean.isEnabled = false
+            offMain({ com.runasakura.phoneagent.util.StorageJanitor.clean(this, manual = true) }) { freed ->
+                binding.btnClean.isEnabled = true
+                refreshStorage("已清理 ${com.runasakura.phoneagent.util.StorageJanitor.mb(freed)}")
+                refreshSemantic()
+            }
+        }
+        refreshStorage()
+    }
+
+    private fun refreshStorage(msg: String? = null) = offMain({ com.runasakura.phoneagent.util.StorageJanitor.usage(this) to
+        com.runasakura.phoneagent.llm.ModelStore.installed(this).size }) { (u, nModels) ->
+        val J = com.runasakura.phoneagent.util.StorageJanitor
+        val parts = listOfNotNull("本机大模型 ${J.mb(u.models)}" + if (nModels > 1) "（$nModels 个，不用的可在上方删除）" else "", "语义模型 ${J.mb(u.embedModel)}".takeIf { u.embedModel > 0 },
+            "经验向量 ${J.mb(u.vectors)}".takeIf { u.vectors > 0 }, "模型加载缓存 ${J.mb(u.mmapCache)}".takeIf { u.mmapCache > 0 },
+            "中断的下载 ${J.mb(u.partial)}".takeIf { u.partial > 0 }, "临时文件 ${J.mb(u.temp)}".takeIf { u.temp > 0 })
+        binding.storageNow.text = listOfNotNull(msg, "共 ${J.mb(u.total)}：" + parts.joinToString(" · ")).joinToString("\n")
     }
 
     // ---- Semantic retrieval model (bge-large-zh via MNN, ~217 MB) ----
@@ -367,7 +389,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         binding.btnSemDelete.setOnClickListener {
             com.google.android.material.dialog.MaterialAlertDialogBuilder(this).setMessage("删除语义检索模型和已保存的经验向量？经验本身不会删除，检索会回到按字面相似度。")
-                .setPositiveButton("删除") { _, _ -> offMain({ E.delete(this) }) { refreshSemantic() } }.setNegativeButton("取消", null).show()
+                .setPositiveButton("删除") { _, _ -> offMain({ E.delete(this) }) { refreshSemantic(); refreshStorage() } }.setNegativeButton("取消", null).show()
         }
         refreshSemantic()
     }
@@ -377,7 +399,7 @@ class SettingsActivity : AppCompatActivity() {
         if (st.total > 0) binding.semProgress.setProgressCompat((st.done * 1000 / st.total).toInt(), true) else binding.semProgress.isIndeterminate = st.running
         binding.btnSemDownload.text = if (st.running) "取消下载" else getString(R.string.sem_download)
         if (st.running) binding.semStatus.text = "${st.msg} · ${st.done / 1_000_000}/${st.total / 1_000_000} MB"
-        else refreshSemantic(st.msg.takeIf { it.isNotBlank() })
+        else { refreshSemantic(st.msg.takeIf { it.isNotBlank() }); refreshStorage() }
     }
 
     private fun refreshSemantic(msg: String? = null) = offMain({

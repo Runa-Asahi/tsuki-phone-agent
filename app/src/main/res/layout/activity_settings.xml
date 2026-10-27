@@ -151,6 +151,14 @@
         </com.google.android.material.card.MaterialCardView>
         <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:accessibilityHeading="true" android:text="@string/storage_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/storage_desc" />
+            <TextView android:id="@+id/storageNow" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnClean" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/storage_clean" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
             <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_28" />
             <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_29" />
             <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/warn_amber" android:text="@string/model_hint" />
