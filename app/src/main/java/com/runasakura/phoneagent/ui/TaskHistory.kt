@@ -28,10 +28,16 @@ object TaskHistory {
         memo?.let { if (it.first === raw || it.first == raw) return it.second }
         return decode(raw).also { memo = raw to it }
     }
+    /** Main-thread safe: the parsed history if already loaded (app start preloads it), else empty. */
+    fun peek(): List<Entry> = memo?.second.orEmpty()
+    val loaded get() = memo != null
+    /** Loads (prefs file + JSON parse) on the IO dispatcher. */
+    suspend fun loadAsync(ctx: Context): List<Entry> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { load(ctx) }
     fun add(ctx: Context, goal: String, ok: Boolean, summary: String) {
         if (goal.isBlank()) return
         val p = ctx.getSharedPreferences(PREF, 0)
-        p.edit().putString(KEY, encode(prepend(decode(p.getString(KEY, null)), Entry(goal, ok, summary.take(200), System.currentTimeMillis())))).apply()
+        val raw = encode(prepend(decode(p.getString(KEY, null)), Entry(goal, ok, summary.take(200), System.currentTimeMillis())))
+        p.edit().putString(KEY, raw).apply(); memo = raw to decode(raw)
     }
-    fun clear(ctx: Context) = ctx.getSharedPreferences(PREF, 0).edit().clear().apply()
+    fun clear(ctx: Context) { memo = null to emptyList(); ctx.getSharedPreferences(PREF, 0).edit().clear().apply() }
 }

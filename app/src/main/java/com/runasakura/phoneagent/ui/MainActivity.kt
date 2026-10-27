@@ -87,16 +87,21 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.registerReceiver(
             this, statusReceiver, IntentFilter(AgentForegroundService.ACTION_STATUS), ContextCompat.RECEIVER_NOT_EXPORTED
         )
-        // Quick chips: recent successful goals first (one-tap replay), then examples.
-        val recentOk = TaskHistory.load(this).filter { it.ok }.map { it.goal }.distinct().take(4)
-        for (g in recentOk) binding.exampleChips.addView(com.google.android.material.chip.Chip(this).apply {
-            text = "↻ " + g.take(16); setOnClickListener { binding.goalInput.setText(g); binding.goalInput.setSelection(g.length) } })
-        for (ex in SUGGESTIONS.filter { it !in recentOk }) {
-            val chip = com.google.android.material.chip.Chip(this).apply {
-                text = ex
-                setOnClickListener { binding.goalInput.setText(ex); binding.goalInput.setSelection(ex.length) }
+        // Quick chips: recent successful goals first (one-tap replay), then examples. History is read off the main thread.
+        lifecycleScope.launch {
+            val recentOk = TaskHistory.loadAsync(this@MainActivity).filter { it.ok }.map { it.goal }.distinct().take(4)
+            if (isDestroyed) return@launch
+            binding.exampleChips.removeAllViews()
+            for (g in recentOk) binding.exampleChips.addView(com.google.android.material.chip.Chip(this@MainActivity).apply {
+                text = "↻ " + g.take(16); setOnClickListener { binding.goalInput.setText(g); binding.goalInput.setSelection(g.length) } })
+            for (ex in SUGGESTIONS.filter { it !in recentOk }) {
+                val chip = com.google.android.material.chip.Chip(this@MainActivity).apply {
+                    text = ex
+                    setOnClickListener { binding.goalInput.setText(ex); binding.goalInput.setSelection(ex.length) }
+                }
+                binding.exampleChips.addView(chip)
             }
-            binding.exampleChips.addView(chip)
+            if (ChatSession.snapshot().isEmpty()) renderChat()   // the welcome card's "recent" list now has data
         }
         binding.cardA11y.setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         binding.cardMnn.setOnClickListener { refreshMnnStatus() }
@@ -402,6 +407,7 @@ class MainActivity : AppCompatActivity() {
         if (renderPending.compareAndSet(false, true)) binding.chatList.postDelayed({ renderPending.set(false); renderChat() }, 120)
     }
     private val renderer by lazy {
+        handleStartGoal(intent)
         ChatRenderer(this,
             onConfirm = { AgentForegroundService.deliverConfirm(it) },
             onRetry = { g -> if (!AgentForegroundService.isRunning()) startAgent(g) },
@@ -411,7 +417,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderChat() {
         val atBottom = !binding.scrollChat.canScrollVertically(1)
-        val recent = if (ChatSession.snapshot().isEmpty()) TaskHistory.load(this).take(3).map { it.goal to it.ok } else emptyList()
+        val recent = if (ChatSession.snapshot().isEmpty()) TaskHistory.peek().take(3).map { it.goal to it.ok } else emptyList()
         renderer.render(binding.chatList, ChatSession.snapshot(), ChatSession.phase, recent, SUGGESTIONS,
             if (ChatSession.snapshot().isEmpty()) setupItems() else emptyList(), java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
         renderPhase()
@@ -427,8 +433,9 @@ class MainActivity : AppCompatActivity() {
         ChatSession.clear(); UiLog.clear(); setRunning(false); renderChat()
     }
 
-    private fun showHistory() {
-        val h = TaskHistory.load(this)
+    private fun showHistory() { lifecycleScope.launch { showHistory(TaskHistory.loadAsync(this@MainActivity)) } }
+    private fun showHistory(h: List<TaskHistory.Entry>) {
+        if (isDestroyed) return
         if (h.isEmpty()) { Toast.makeText(this, "还没有历史任务", Toast.LENGTH_SHORT).show(); return }
         val fmt = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.CHINA)
         com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
@@ -447,7 +454,21 @@ class MainActivity : AppCompatActivity() {
         } else Toast.makeText(this, R.string.overlay_ok, Toast.LENGTH_SHORT).show()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent); setIntent(intent); handleStartGoal(intent)
+    }
+
+    /** Teach「立刻试一次」and similar deep-links: fill the goal and start once a11y is ready. */
+    private fun handleStartGoal(intent: Intent?) {
+        val g = intent?.getStringExtra(EXTRA_START_GOAL)?.trim().orEmpty()
+        if (g.length < 2) return
+        intent?.removeExtra(EXTRA_START_GOAL)
+        binding.goalInput.setText(g); binding.goalInput.setSelection(g.length)
+        binding.root.post { if (!isDestroyed && !AgentForegroundService.isRunning()) startAgent(g) }
+    }
+
     companion object {
+        const val EXTRA_START_GOAL = "start_goal"
         val SUGGESTIONS = listOf("给文件传输助手发消息说你好", "打开蓝牙", "明天早上7点的闹钟", "打开图库看第一张照片", "打开B站，搜索猫咪", "微信里最后一条消息是什么")
     }
 }

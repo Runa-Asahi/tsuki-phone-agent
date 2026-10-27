@@ -32,6 +32,12 @@ class PhoneAgentApp : Application() {
         com.runasakura.phoneagent.ui.TsukiTheme.init(this)
         instance = this
         prefs = AgentPreferences(this)
+        // Main-thread I/O audit: getSharedPreferences() starts loading the file on its own thread and returns at once,
+        // so touching the files the first screen needs here overlaps their disk read with startup; the encrypted key
+        // store (Keystore, slowest) and the task history JSON are built on a worker.
+        for (f in listOf("ui", "task_history")) getSharedPreferences(f, 0)
+        Thread({ runCatching { prefs.warmSecure() }; runCatching { com.runasakura.phoneagent.ui.TaskHistory.load(this) }
+            runCatching { com.runasakura.phoneagent.voice.LocalAsr.refresh(this) } }, "tsuki-warm").start()
         createNotificationChannels()
         installCrashGuard()
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
