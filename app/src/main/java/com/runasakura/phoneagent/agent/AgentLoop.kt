@@ -111,7 +111,8 @@ class AgentLoop(
         }
         // Encode the new lessons now (vectors persisted) so the next task scores them without any inference.
         Relevance.index?.let { idx -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching { idx.prepare(null, m.retrievalTexts() + g2?.retrievalTexts().orEmpty(), 3_000) } } }
+            runCatching { idx.prepare(null, m.retrievalTexts() + g2?.retrievalTexts().orEmpty(), 3_000) }
+            runCatching { Relevance.afterPrepare?.invoke() } } }
         if (lesson == null) { onLog(when {
             r.success -> "经验沉淀：记录本次路线（未经模型整理）"
             reusedPath -> "失败：已降低复用路线的可信度"
@@ -1035,7 +1036,8 @@ class AgentLoop(
     private suspend fun prepareRetrieval(goal: String, mem: AppMemory?) {
         val idx = Relevance.index ?: return
         val texts = mem?.retrievalTexts().orEmpty()
-        val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { idx.prepare(goal, texts, 1_500) }.getOrDefault(0) }
+        val n = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { idx.prepare(goal, texts, 1_500, queries = mem?.skillGoals().orEmpty()) }.getOrDefault(0).also { runCatching { Relevance.afterPrepare?.invoke() } } }
         if (!retrievalLogged || n > 0) { retrievalLogged = true
             onLog("经验检索：${Relevance.mode()}" + if (n > 0) "（新编码 $n 条，${idx.lastPrepareMs}ms）" else "") }
     }

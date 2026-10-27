@@ -24,8 +24,9 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
 
     /** Best skill for [goal] (similar goal, confirmed skills preferred); null when nothing close enough. */
     fun skillFor(goal: String, now: Long = System.currentTimeMillis()): Skill? =
-        expire(now).skillEntries.mapNotNull { e -> Skill.decode(e.text)?.copy(conf = e.conf)?.let { it to Similarity.score(it.goal, goal) } }
-            .filter { it.second >= Skill.MIN_SIM }.maxByOrNull { it.second + minOf(it.first.conf, 4) * 0.05 }?.first
+        expire(now).skillEntries.mapNotNull { e -> Skill.decode(e.text)?.copy(conf = e.conf)?.takeIf { Relevance.sameTask(it.goal, goal, Skill.MIN_SIM) }
+                ?.let { it to Similarity.score(it.goal, goal) } }
+            .maxByOrNull { it.second + minOf(it.first.conf, 4) * 0.05 }?.first
 
     /** Record a successful trajectory as a skill (same goal → confirmed; a shorter variant replaces a longer one). */
     fun learnSkill(goal: String, steps: List<String>, now: Long = System.currentTimeMillis()): AppMemory {
@@ -47,6 +48,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
             if (Skill.decode(e.text)?.let { Similarity.score(it.goal, goal) >= Skill.MIN_SIM } == true) e.copy(conf = e.conf - 2).takeIf { it.conf > 0 } else e })
 
     /** Texts the semantic index should have vectors for (lessons + route goals). */
+    fun skillGoals(): List<String> = skillEntries.mapNotNull { Skill.decode(it.text)?.goal }
     fun retrievalTexts(): List<String> = factEntries.map { it.text } + pathEntries.map { goalOf(it) }
 
     private fun goalOf(p: Entry) = p.text.substringBefore("=>")
@@ -62,10 +64,24 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
         return rel * 8 + minOf(e.conf, 4) * 0.25 - ageDays / 30.0
     }
 
+    /**
+     * The lessons the prompt shows for [goal] (and that later get verified / demoted): best-scored first, skipping
+     * near-duplicates of one already picked (MMR-style diversity), so 5 slots are not spent on one idea phrased 3 ways.
+     * Must stay the single selection used by [hint], [decayShown] and [confirmShown].
+     */
+    fun shown(goal: String, now: Long, maxFacts: Int): List<Entry> {
+        val picked = ArrayList<Entry>()
+        for (e in factEntries.sortedByDescending { score(it, goal, now) }) {
+            if (picked.size >= maxFacts) break
+            if (picked.none { Relevance.redundant(it.text, e.text) }) picked += e
+        }
+        return picked
+    }
+
     /** Text injected into planner/step prompts; null when nothing usable. */
     fun hint(goal: String, now: Long = System.currentTimeMillis(), maxFacts: Int = 5): String? {
         val live = expire(now)
-        val fs = live.factEntries.sortedByDescending { score(it, goal, now) }.take(maxFacts).map { it.text + if (it.conf < 2) "（未验证）" else "" }
+        val fs = live.shown(goal, now, maxFacts).map { it.text + if (it.conf < 2) "（未验证）" else "" }
         // Routes: semantic match allowed for the advisory hint (the planner-skipping [knownPath] stays strict bigram).
         val p = live.pathEntries.filter { Relevance.score(goalOf(it), goal) >= 0.6 }.maxByOrNull { it.conf }
         val parts = listOfNotNull(
@@ -105,7 +121,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
      */
     fun decayShown(goal: String, now: Long = System.currentTimeMillis(), maxFacts: Int = 5): AppMemory {
         val live = expire(now)
-        val shown = live.factEntries.sortedByDescending { score(it, goal, now) }.take(maxFacts).toSet()
+        val shown = live.shown(goal, now, maxFacts).toSet()
         return AppMemory(live.factEntries.mapNotNull { if (it in shown) it.copy(conf = it.conf - 1).takeIf { e -> e.conf > 0 } else it }, live.pathEntries, live.skillEntries)
     }
 
@@ -116,7 +132,7 @@ class AppMemory(val factEntries: List<Entry>, val pathEntries: List<Entry>, val 
      */
     fun confirmShown(goal: String, now: Long = System.currentTimeMillis(), maxFacts: Int = 5): AppMemory {
         val live = expire(now)
-        val shown = live.factEntries.sortedByDescending { score(it, goal, now) }.take(maxFacts).filter { Relevance.relevant(it.text, goal, RELEVANT) }.toSet()
+        val shown = live.shown(goal, now, maxFacts).filter { Relevance.relevant(it.text, goal, RELEVANT) }.toSet()
         if (shown.isEmpty()) return live
         return AppMemory(live.factEntries.map { if (it in shown) it.copy(conf = minOf(MAX_CONF, it.conf + 1), ts = now) else it }, live.pathEntries, live.skillEntries)
     }

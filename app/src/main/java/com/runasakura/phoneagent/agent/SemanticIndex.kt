@@ -84,16 +84,18 @@ class SemanticIndex(
      * Encode [goal] (query role) and any [texts] (document role) not cached yet, within [budgetMs].
      * Returns how many vectors were computed. Safe to call repeatedly; persists when something changed.
      */
-    fun prepare(goal: String?, texts: Collection<String>, budgetMs: Long = 1500, clock: () -> Long = System::currentTimeMillis): Int {
+    fun prepare(goal: String?, texts: Collection<String>, budgetMs: Long = 1500, queries: Collection<String> = emptyList(),
+                clock: () -> Long = System::currentTimeMillis): Int {
         val t0 = clock(); var n = 0
         fun one(t: String, q: Boolean): Boolean {
             if (t.isBlank() || get(t, q) != null) return true
             if (clock() - t0 > budgetMs) return false
-            val v = runCatching { encoder.encode(t, q) }.getOrNull() ?: return false
+            val v = runCatching { encoder.encode(norm(t), q) }.getOrNull() ?: return false
             put(t, q, Vec(v)); n++; return true
         }
         if (goal != null && !one(goal, true)) { lastPrepareMs = clock() - t0; return n }
         for (t in texts.distinct()) if (!one(t, false)) break
+        for (t in queries.distinct()) if (!one(t, true)) break
         lastPrepareMs = clock() - t0
         if (n > 0) save()
         return n
@@ -105,12 +107,20 @@ class SemanticIndex(
         return a.dot(b)
     }
 
+    /** Cosine between two goals (query role, e.g. a skill's goal vs the current goal); null when not cached. */
+    fun cosineQQ(a: String, b: String): Double? { val x = get(a, true) ?: return null; val y = get(b, true) ?: return null; return x.dot(y) }
+
+    /** Cosine between two stored lessons (document role) — used for diversity (MMR); null when not cached. */
+    fun docCosine(a: String, b: String): Double? { val x = get(a, false) ?: return null; val y = get(b, false) ?: return null; return x.dot(y) }
+
     /** Calibrated 0..1 semantic relevance from cache; null when not available. */
     fun score(text: String, goal: String): Double? = cosine(text, goal)?.let { ((it - lo) / (hi - lo)).coerceIn(0.0, 1.0) }
 
     companion object {
         private const val MAGIC = 0x54534B32 // "TSK2"
-        fun norm(s: String) = s.trim().replace(Regex("\\s+"), " ").take(400)
+        /** Canonical text for keys and encoding: drop bookkeeping tags (（本应用实测）/（未验证）) and collapse spaces. */
+        fun norm(s: String) = s.replace(TAGS, "").trim().replace(Regex("\\s+"), " ").take(400)
+        private val TAGS = Regex("（(本应用实测|未验证|已验证\\d*次?)）")
     }
 }
 
@@ -122,6 +132,8 @@ object Relevance {
     @Volatile var index: SemanticIndex? = null
     /** User setting: let the cloud model rerank the top lessons once per task. */
     @Volatile var llmRerank = false
+    /** Hook after a prepare() batch (device: unload the embedder when the big local LLM is resident). */
+    @Volatile var afterPrepare: (() -> Unit)? = null
     /** Optional per-goal boost from a cloud LLM rerank (text → 0..1), cleared every task. */
     @Volatile private var boost: Pair<String, Map<String, Double>>? = null
 
@@ -148,6 +160,33 @@ object Relevance {
      */
     fun relevant(text: String, goal: String, bigramMin: Double): Boolean =
         Similarity.score(text, goal) >= bigramMin || (semantic(text, goal) ?: 0.0) >= 0.5 || boostOf(text, goal) > 0
+
+    /**
+     * Slots that make two goals different tasks even when they mean "the same kind of thing": quoted text, numbers,
+     * Latin words, and the 1–4 Han characters after a recipient/target marker (给/跟/和/向/叫/找/问/打给/发给).
+     * Pure; unit-tested ("给妈妈发微信" vs "给爸爸发微信" → different).
+     */
+    fun slots(goal: String): Set<String> {
+        val out = HashSet<String>()
+        Regex("[「“\"『]([^」”\"』]{1,30})[」”\"』]").findAll(goal).forEach { out += "q:" + it.groupValues[1] }
+        Regex("\\d+(?:[:.：点]\\d+)?").findAll(goal).forEach { out += "n:" + it.value }
+        Regex("[A-Za-z][A-Za-z0-9._-]+").findAll(goal).forEach { out += "w:" + it.value.lowercase() }
+        Regex("(?:打给|发给|给|跟|和|向|叫|找|问)([\\u4e00-\\u9fa5]{1,4}?)(?=发|说|打|聊|转|回|讲|的|一|，|,|$|\\s)").findAll(goal).forEach { out += "p:" + it.groupValues[1] }
+        return out
+    }
+
+    /**
+     * Goal-to-goal match for skills (replayable step suggestions): bigram as before, or — with an index — the same
+     * meaning (semantic ≥ 0.6) AND identical slots, so "给妈妈发微信" never reuses "给爸爸发微信"'s skill.
+     */
+    fun sameTask(a: String, b: String, bigramMin: Double): Boolean {
+        if (Similarity.score(a, b) >= bigramMin) return slots(a) == slots(b) || Similarity.score(a, b) >= 0.95
+        val s = index?.let { idx -> idx.cosineQQ(a, b)?.let { ((it - idx.lo) / (idx.hi - idx.lo)).coerceIn(0.0, 1.0) } } ?: return false
+        return s >= 0.6 && slots(a) == slots(b)
+    }
+
+    /** Near-duplicate test for diversity: same wording (bigram ≥ 0.7) or same meaning (bge doc cosine ≥ 0.92). */
+    fun redundant(a: String, b: String): Boolean = Similarity.score(a, b) >= 0.7 || (index?.docCosine(a, b) ?: 0.0) >= 0.92
 
     /** Short human description for logs / settings. */
     fun mode(): String = index?.let { "语义检索（${it.modelId}，本机）+ 字符相似度" } ?: "字符相似度（未安装语义模型）"
