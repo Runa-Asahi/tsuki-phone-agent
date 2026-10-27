@@ -11,8 +11,8 @@ android {
         applicationId = "com.runasakura.phoneagent"
         minSdk = 26
         targetSdk = 36
-        versionCode = 25
-        versionName = "0.14.1-mvp"
+        versionCode = 26
+        versionName = "0.14.2-mvp"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // On-device LLM (MNN) is arm64 only; 16 KB page aligned for Android 15+/16.
@@ -22,9 +22,37 @@ android {
     ndkVersion = "27.2.12479018"
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.22.1" } }
 
+    // Honor MagicOS / some OEM installers reject APKs that only have v2 signing (no META-INF/*.RSA) with
+    // 「该安装包未包含任何证书」. Force v1+v2+v3 and a repo-local debug keystore so every assembleDebug is signed.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+        create("release") {
+            // Same debug key for prerelease sideloads (no Play upload). Same cert as historical debug builds.
+            storeFile = file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
+    }
     buildTypes {
         release {
+            // Same package as debug sideloads so upgrades replace the bad 0.14.1; not debuggable (OEM "pure mode" friendlier).
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
             isMinifyEnabled = false
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -33,6 +61,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
