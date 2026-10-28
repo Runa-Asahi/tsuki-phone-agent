@@ -36,16 +36,22 @@
 | 👁️ **本机看图与语音** | 视觉模型、语义检索和离线语音识别都用 MNN / sherpa-onnx 在手机上运行，截图和录音不出手机。 |
 | 🛡️ **危险操作必确认** | 发消息、打电话、支付、下单、卸载、设闹钟前一定先问你；屏幕上的文字一律不当指令；长按悬浮月亮球随时急停。 |
 
-## 🎬 实机演示
+## 📸 界面截图
 
 <div align="center">
 
-<!-- 收到真实录屏后，把 GIF 放进 docs/demo/ 并取消下面的注释 -->
-<!-- <img src="docs/demo/send-message.gif" width="260" alt="一句话发消息" /> -->
-<!-- <img src="docs/demo/teach.gif" width="260" alt="教我做" /> -->
-<!-- <img src="docs/demo/deep-think.gif" width="260" alt="卡住自动深思" /> -->
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/home.jpg" width="280" alt="Tsuki 主页" /></td>
+    <td align="center"><img src="docs/screenshots/settings.jpg" width="280" alt="Tsuki 设置" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>主页</b>：一句话下任务，上手清单与常用指令一目了然</sub></td>
+    <td align="center"><sub><b>设置</b>：本机模型一键下载，语义检索可开可关</sub></td>
+  </tr>
+</table>
 
-<sub>📹 实机演示即将更新（荣耀 PPG-AN00 真实录屏）</sub>
+<sub>📱 拍摄于荣耀 PPG-AN00（状态栏已裁去）</sub>
 
 </div>
 
