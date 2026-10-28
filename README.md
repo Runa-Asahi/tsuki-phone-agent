@@ -1,5 +1,7 @@
 <div align="center">
 
+<p><b>简体中文</b> | <a href="README.en.md">English</a></p>
+
 <img src="branding/tsuki_readme.webp" width="200" alt="Tsuki" />
 
 # Tsuki · 月
