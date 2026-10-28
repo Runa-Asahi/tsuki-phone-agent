@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@color/bg" android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent" android:layout_height="?attr/actionBarSize"
+        app:title="@string/settings_title" app:titleTextColor="@color/text_primary"
+        app:navigationIcon="@drawable/ic_tool_back" app:navigationIconTint="@color/text_primary" />
+
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:scrollbars="none">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="24dp">
+        <!-- Appearance (Tsuki) -->
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:accessibilityHeading="true" android:text="@string/appearance_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/appearance_desc" />
+            <com.google.android.material.chip.ChipGroup android:id="@+id/paletteGroup" android:layout_width="match_parent" android:layout_height="wrap_content" app:singleSelection="true" app:selectionRequired="true" />
+            <com.google.android.material.chip.ChipGroup android:id="@+id/modeGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" app:singleSelection="true" app:selectionRequired="true" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/shizuku_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/shizuku_desc" />
+            <TextView android:id="@+id/shizukuStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_field" android:padding="12dp" android:textSize="14sp" android:textColor="@color/text_primary" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/useShizuku" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/shizuku_toggle" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="4dp">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnShizukuGrant" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/shizuku_grant" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnShizukuRefresh" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="@string/shizuku_refresh" />
+            </LinearLayout>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="12sp" android:lineSpacingMultiplier="1.2" android:textColor="@color/text_tertiary" android:text="@string/shizuku_guide" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/alive_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/alive_desc" />
+            <TextView android:id="@+id/aliveStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@drawable/bg_field" android:padding="12dp" android:textSize="13sp" android:lineSpacingMultiplier="1.2" android:textColor="@color/text_primary" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/selfHeal" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/alive_self_heal" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/keepAlive" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/alive_keep" />
+            <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none" android:layout_marginTop="4dp">
+            <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnBattery" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_battery" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLaunchMgr" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_launch" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnA11ySettings" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_a11y" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnGrantSecure" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="8dp" android:text="@string/alive_grant" />
+            </LinearLayout>
+            </HorizontalScrollView>
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="12sp" android:lineSpacingMultiplier="1.2" android:textColor="@color/text_tertiary" android:text="@string/alive_guide" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_1" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_2" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="@string/ui_3" />
+            <Spinner android:id="@+id/cloudProvider" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="4dp" android:background="@drawable/bg_field" android:paddingStart="8dp" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/ui_4">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/cloudUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_cloud_key" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/cloudKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Widget.Material3.TextInputLayout.OutlinedBox.Dense.ExposedDropdownMenu" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:hint="@string/ui_5">
+                <com.google.android.material.textfield.MaterialAutoCompleteTextView android:id="@+id/cloudModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:completionThreshold="0" android:paddingStart="14dp" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnTestCloud" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_6" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnFetchModels" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="@string/ui_7" />
+            </LinearLayout>
+            <TextView android:id="@+id/cloudTestResult" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="@color/text_secondary" android:textIsSelectable="true" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_8" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_9" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textSize="12sp" android:textColor="@color/text_secondary" android:text="@string/label_route" />
+            <Spinner android:id="@+id/routeMode" android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginTop="4dp" android:background="@drawable/bg_field" android:paddingStart="8dp" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_max_steps">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/maxSteps" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/modelCheckpoint" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_10" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="@string/ui_11" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/cloudThinking" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_12" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="@string/ui_13" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_14" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_15" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/cloudShot" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/label_cloud_shot" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="@string/ui_16" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/visionLocal" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_17" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="@string/ui_18" />
+            <TextView android:id="@+id/visionNow" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/ui_19">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionLocalModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <TextView android:id="@+id/visionTip" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:textSize="12sp" android:textColor="@color/text_tertiary" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/ui_20">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/ui_21" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/ui_22">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/visionModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_23" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_24" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/confirmAlarm" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_25" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:layout_marginEnd="56dp" android:text="@string/ui_26" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnAppMemory" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/ui_27" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnTeach" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/teach_entry" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/deepThink" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/deep_think" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:text="@string/deep_think_desc" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/voiceAutoSend" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/voice_auto_send" />
+            <TextView android:id="@+id/voiceEngine" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/text_tertiary" android:text="@string/voice_auto_send_desc" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:textSize="15sp" android:textColor="@color/text_primary" android:accessibilityHeading="true" android:text="@string/asr_title" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:textSize="12sp" android:textColor="@color/text_tertiary" android:text="@string/asr_desc" />
+            <TextView android:id="@+id/asrStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/asrProgress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:visibility="gone" android:max="1000" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnAsrDownload" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/asr_download" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnAsrDelete" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_delete" />
+            </LinearLayout>
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/voicePreferSystem" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/asr_prefer_system" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:textSize="15sp" android:textColor="@color/text_primary" android:accessibilityHeading="true" android:text="@string/sem_title" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:textSize="12sp" android:textColor="@color/text_tertiary" android:text="@string/sem_desc" />
+            <TextView android:id="@+id/semStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/semProgress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:visibility="gone" android:max="1000" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnSemDownload" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/sem_download" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnSemDelete" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_delete" />
+            </LinearLayout>
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/semOn" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/sem_on" />
+            <com.google.android.material.materialswitch.MaterialSwitch android:id="@+id/llmRerank" style="@style/SwitchRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/sem_rerank" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:accessibilityHeading="true" android:text="@string/local_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/local_desc" />
+            <com.google.android.material.chip.ChipGroup android:id="@+id/localEngine" android:layout_width="match_parent" android:layout_height="wrap_content" app:singleSelection="true" app:selectionRequired="true" />
+            <TextView android:id="@+id/localStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.progressindicator.LinearProgressIndicator android:id="@+id/localProgress" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:visibility="gone" android:max="1000" />
+            <com.google.android.material.chip.ChipGroup android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp">
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalDownload" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_download" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalUseFound" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_use_found" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalImport" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_import" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalWarm" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_warm" />
+                <com.google.android.material.button.MaterialButton android:id="@+id/btnLocalDelete" style="@style/Widget.Material3.Button.TextButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/local_delete" />
+            </com.google.android.material.chip.ChipGroup>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:accessibilityHeading="true" android:text="@string/storage_title" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/storage_desc" />
+            <TextView android:id="@+id/storageNow" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:textSize="13sp" android:textColor="@color/text_secondary" android:accessibilityLiveRegion="polite" />
+            <com.google.android.material.button.MaterialButton android:id="@+id/btnClean" style="@style/Widget.Material3.Button.TonalButton" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="@string/storage_clean" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+            <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="@string/ui_28" />
+            <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/ui_29" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="@color/warn_amber" android:text="@string/model_hint" />
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_mnn_url">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/mnnUrl" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_mnn_key" app:endIconMode="password_toggle">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/mnnKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <com.google.android.material.textfield.TextInputLayout style="@style/Field" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="@string/label_mnn_model">
+                <com.google.android.material.textfield.TextInputEditText android:id="@+id/mnnModel" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="text" android:importantForAutofill="no" />
+            </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        <!-- About Tsuki -->
+        <com.google.android.material.card.MaterialCardView style="@style/SectionCard" android:layout_width="match_parent" android:layout_height="wrap_content">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <ImageView android:layout_width="84dp" android:layout_height="132dp" android:src="@drawable/tsuki_brand" android:scaleType="centerCrop" android:contentDescription="@string/tsuki_portrait_desc" />
+                <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="14dp">
+                    <TextView style="@style/SectionTitle" android:layout_width="wrap_content" android:layout_height="wrap_content" android:accessibilityHeading="true" android:text="@string/about_title" />
+                    <TextView style="@style/SectionDesc" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/about_desc" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSave"
+        android:layout_width="match_parent" android:layout_height="52dp"
+        android:layout_marginStart="16dp" android:layout_marginEnd="16dp" android:layout_marginBottom="12dp" android:layout_marginTop="4dp"
+        app:cornerRadius="16dp" android:text="@string/btn_save" />
+</LinearLayout>

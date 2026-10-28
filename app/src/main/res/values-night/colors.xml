@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tsuki · Night Moon (midnight navy / moonlight silver). Accents: crimson + soft gold; sakura optional palette. Old names kept for existing code. -->
+    <color name="primary">#FFDCE1F0</color>
+    <color name="on_primary">#FF0E142C</color>
+    <color name="primary_container">#FF26305A</color>
+    <color name="on_primary_container">#FFEDEFF7</color>
+    <color name="bg">#FF0B1026</color>
+    <color name="card_bg">#E6141B38</color>
+    <color name="surface_variant">#FF1C2447</color>
+    <color name="outline">#FF2C3664</color>
+    <color name="text_primary">#FFEEF0F8</color>
+    <color name="text_secondary">#FFAEB5D0</color>
+    <color name="text_tertiary">#FF7E87AA</color>
+    <color name="user_bubble">#FF2B3666</color>
+    <color name="user_text">#FFF4F5FA</color>
+    <color name="ok_green">#FF6BD49A</color>
+    <color name="warn_amber">#FFE8C46A</color>
+    <color name="err_red">#FFF07C8B</color>
+    <color name="ok_bg">#FF10261E</color>
+    <color name="err_bg">#FF2A121C</color>
+    <color name="confirm_bg">#FF221D14</color>
+    <color name="confirm_stroke">#FF5A4A26</color>
+    <color name="ask_bg">#FF18204A</color>
+    <color name="step_accent">#FFDCE1F0</color>
+    <color name="insight">#FFE6C77A</color>
+    <color name="overlay_bg">#E60B1026</color>
+    <color name="log_bg">#FF141B38</color>
+    <color name="log_text">#FFEEF0F8</color>
+    <color name="stop_red">#FFE0475B</color>
+    <color name="purple_500">#FF8B8CF8</color>
+    <color name="purple_700">#FF3730A3</color>
+    <color name="crimson">#FFE0475B</color>
+    <color name="moon_gold">#FFE6C77A</color>
+    <color name="sakura">#FFF2A7C3</color>
+    <color name="ribbon">#FF05070F</color>
+    <color name="sky_top">#FF070B1E</color>
+    <color name="sky_bottom">#FF2A3358</color>
+    <color name="moon_glow">#55E6C77A</color>
+    <color name="star">#CCF4F1E4</color>
+</resources>

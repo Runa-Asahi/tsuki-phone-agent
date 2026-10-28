@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <!-- Tsuki sky: gradient + stars + slow moonlight motes (static when reduce-motion is on) -->
+    <com.runasakura.phoneagent.ui.MoonSkyView
+        android:id="@+id/sky"
+        android:layout_width="match_parent" android:layout_height="match_parent" />
+
+    <LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:fitsSystemWindows="true">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        app:title="@string/app_name"
+        app:subtitle="@string/persona_subtitle"
+        app:titleTextAppearance="@style/TsukiTitle" app:subtitleTextAppearance="@style/TsukiSubtitle" app:titleCentered="true" app:subtitleCentered="true"
+        app:titleTextColor="@color/text_primary" app:subtitleTextColor="@color/text_secondary" />
+
+    <!-- Health pills: tap to fix -->
+    <HorizontalScrollView
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:scrollbars="none" android:paddingStart="12dp" android:paddingEnd="12dp" android:clipToPadding="false">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingBottom="6dp">
+            <LinearLayout android:id="@+id/cardA11y" style="@style/HealthPill" android:contentDescription="@string/pill_a11y_desc">
+                <TextView style="@style/HealthPillLabel" android:text="@string/pill_a11y" />
+                <TextView android:id="@+id/a11yStatus" style="@style/HealthPillValue" android:text="@string/checking" />
+            </LinearLayout>
+            <LinearLayout android:id="@+id/cardMnn" style="@style/HealthPill" android:layout_marginStart="8dp" android:contentDescription="@string/pill_brain_desc">
+                <TextView style="@style/HealthPillLabel" android:text="@string/pill_brain" />
+                <TextView android:id="@+id/mnnStatus" style="@style/HealthPillValue" android:maxWidth="180dp" android:text="@string/checking" />
+            </LinearLayout>
+            <LinearLayout style="@style/HealthPill" android:layout_marginStart="8dp" android:clickable="false">
+                <TextView style="@style/HealthPillLabel" android:text="@string/pill_ocr" />
+                <TextView android:id="@+id/ocrStatus" style="@style/HealthPillValue" android:text="@string/ocr_offline" />
+            </LinearLayout>
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <!-- Conversation -->
+    <ScrollView
+        android:id="@+id/scrollChat"
+        android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
+        android:fillViewport="true" android:scrollbars="none">
+        <LinearLayout
+            android:id="@+id/chatList"
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="16dp"
+            android:animateLayoutChanges="true" />
+    </ScrollView>
+
+    <!-- Composer -->
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="vertical" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingBottom="10dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="4dp" android:paddingBottom="6dp">
+            <TextView
+                android:id="@+id/statusText"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:background="@drawable/bg_pill" android:paddingStart="10dp" android:paddingEnd="12dp" android:paddingTop="4dp" android:paddingBottom="4dp"
+                android:textSize="12sp" android:textColor="@color/text_secondary" android:drawablePadding="6dp"
+                android:text="@string/status_idle" />
+            <TextView android:id="@+id/sessionHint" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:textSize="12sp" android:textColor="@color/text_tertiary" android:maxLines="1" android:ellipsize="end" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPause" style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="wrap_content" android:layout_height="48dp" android:minHeight="48dp" android:insetTop="6dp" android:insetBottom="6dp"
+                android:textSize="12sp" android:text="@string/pause" />
+        </LinearLayout>
+
+        <HorizontalScrollView android:layout_width="match_parent" android:layout_height="wrap_content" android:scrollbars="none">
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/exampleChips"
+                android:layout_width="wrap_content" android:layout_height="wrap_content"
+                app:chipSpacingHorizontal="6dp" app:singleLine="true" />
+        </HorizontalScrollView>
+
+        <LinearLayout
+            android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_marginTop="6dp" android:background="@drawable/bg_composer"
+            android:orientation="horizontal" android:gravity="bottom" android:paddingStart="8dp" android:paddingEnd="6dp" android:paddingTop="6dp" android:paddingBottom="6dp" android:minHeight="56dp">
+            <com.google.android.material.textfield.TextInputLayout
+                android:id="@+id/goalLayout"
+                style="@style/Widget.Material3.TextInputLayout.FilledBox"
+                android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content"
+                app:boxBackgroundColor="@android:color/transparent" app:boxStrokeWidth="0dp" app:boxStrokeWidthFocused="0dp"
+                app:hintEnabled="false">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/goalInput"
+                    android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:minHeight="44dp" android:paddingStart="12dp" android:paddingTop="10dp" android:paddingBottom="10dp"
+                    android:background="@android:color/transparent"
+                    android:hint="@string/goal_hint" android:textSize="15sp"
+                    android:maxLines="5" android:importantForAutofill="no" android:inputType="textMultiLine" />
+            </com.google.android.material.textfield.TextInputLayout>
+            <ImageButton
+                android:id="@+id/btnMic"
+                android:layout_width="44dp" android:layout_height="44dp" android:layout_marginEnd="6dp" android:layout_marginBottom="2dp"
+                android:background="@drawable/bg_round_primary" android:src="@drawable/ic_mic"
+                android:padding="12dp" android:scaleType="fitCenter" android:contentDescription="@string/voice_input" android:tooltipText="@string/voice_input" />
+            <ImageButton
+                android:id="@+id/btnStart"
+                android:layout_width="48dp" android:layout_height="48dp"
+                android:background="@drawable/bg_round_primary" android:src="@drawable/ic_send"
+                android:padding="13dp" android:scaleType="fitCenter" android:contentDescription="@string/send" android:tooltipText="@string/send" />
+            <ImageButton
+                android:id="@+id/btnStop"
+                android:layout_width="48dp" android:layout_height="48dp"
+                android:background="@drawable/bg_round_stop" android:src="@drawable/ic_stop"
+                android:padding="14dp" android:scaleType="fitCenter" android:visibility="gone" android:contentDescription="@string/stop" android:tooltipText="@string/stop" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
+</FrameLayout>

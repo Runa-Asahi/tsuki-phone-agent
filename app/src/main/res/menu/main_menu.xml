@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/action_new" android:title="新会话" app:showAsAction="ifRoom" />
+    <item android:id="@+id/action_history" android:title="历史" app:showAsAction="ifRoom" />
+    <item android:id="@+id/action_settings" android:title="@string/settings_title" app:showAsAction="never" />
+    <item android:id="@+id/action_selftest" android:title="自检" app:showAsAction="never" />
+    <item android:id="@+id/action_export" android:title="导出诊断日志" app:showAsAction="never" />
+    <item android:id="@+id/action_a11y" android:title="@string/btn_a11y" app:showAsAction="never" />
+    <item android:id="@+id/action_overlay" android:title="@string/btn_overlay" app:showAsAction="never" />
+    <item android:id="@+id/action_teach" android:title="@string/teach_entry" app:showAsAction="never" />
+</menu>

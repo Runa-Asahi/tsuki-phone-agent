@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tsuki · light (moon-white / navy). Accents: crimson + soft gold; sakura optional palette. Old names kept for existing code. -->
+    <color name="primary">#FF27325E</color>
+    <color name="on_primary">#FFFFFFFF</color>
+    <color name="primary_container">#FFE3E6F2</color>
+    <color name="on_primary_container">#FF141A38</color>
+    <color name="bg">#FFF6F6FA</color>
+    <color name="card_bg">#FFFFFFFF</color>
+    <color name="surface_variant">#FFECEEF5</color>
+    <color name="outline">#FFDADDE8</color>
+    <color name="text_primary">#FF141A38</color>
+    <color name="text_secondary">#FF525A78</color>
+    <color name="text_tertiary">#FF7C839C</color>
+    <color name="user_bubble">#FF27325E</color>
+    <color name="user_text">#FFF4F5FA</color>
+    <color name="ok_green">#FF1E8A4C</color>
+    <color name="warn_amber">#FFB26A00</color>
+    <color name="err_red">#FFC0283E</color>
+    <color name="ok_bg">#FFEFF6F1</color>
+    <color name="err_bg">#FFFBEFF1</color>
+    <color name="confirm_bg">#FFFBF6EA</color>
+    <color name="confirm_stroke">#FFE8D9AE</color>
+    <color name="ask_bg">#FFEEF0F8</color>
+    <color name="step_accent">#FF27325E</color>
+    <color name="insight">#FF6A5A2E</color>
+    <color name="overlay_bg">#E60E142C</color>
+    <color name="log_bg">#FFECEEF5</color>
+    <color name="log_text">#FF141A38</color>
+    <color name="stop_red">#FFC0283E</color>
+    <color name="purple_500">#FF4F46E5</color>
+    <color name="purple_700">#FF3730A3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="crimson">#FFC0283E</color>
+    <color name="moon_gold">#FFB8913F</color>
+    <color name="sakura">#FFC2557E</color>
+    <color name="ribbon">#FF101321</color>
+    <color name="sky_top">#FFDCE1F0</color>
+    <color name="sky_bottom">#FFF8F8FC</color>
+    <color name="moon_glow">#66C9A45C</color>
+    <color name="star">#99A9B3D1</color>
+</resources>
